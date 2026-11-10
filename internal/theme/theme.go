@@ -9,6 +9,8 @@ import (
 	"sort"
 
 	"github.com/charmbracelet/lipgloss"
+
+	rendr "github.com/smy-101/readscope/internal/render"
 )
 
 // Default is the fallback theme name.
@@ -56,12 +58,25 @@ type Theme struct {
 	ReaderTOC    lipgloss.Style
 	ReaderActive lipgloss.Style
 
+	// Syntax / inline-semantic colors (chroma categories, links, inline code).
+	Code    lipgloss.Style
+	Kw      lipgloss.Style
+	Str     lipgloss.Style
+	Num     lipgloss.Style
+	Com     lipgloss.Style
+	Link    lipgloss.Style
+	Marker  lipgloss.Style
+	Underln lipgloss.Style
+
 	// Semantics.
 	Accent  lipgloss.Style
 	Dim     lipgloss.Style
 	Error   lipgloss.Style
 	Success lipgloss.Style
 	Warning lipgloss.Style
+
+	// Body is plain reading text.
+	Body lipgloss.Style
 }
 
 type palette struct {
@@ -72,6 +87,8 @@ type palette struct {
 	selBg                   string // selection backgrounds
 	error, success, warning string
 	helpBg                  string
+	code, kw, str, num, com string // syntax
+	link                    string
 }
 
 var builtins = map[string]palette{
@@ -84,6 +101,8 @@ var builtins = map[string]palette{
 		selBg: "#094771",
 		error: "#f14c4c", success: "#89d185", warning: "#cca700",
 		helpBg: "#252526",
+		code:   "#d4d4d4", kw: "#569cd6", str: "#ce9178", num: "#b5cea8", com: "#6a9955",
+		link: "#4ec9b0",
 	},
 	// editor-light: VS Code Light+ oriented.
 	"light": {
@@ -94,6 +113,8 @@ var builtins = map[string]palette{
 		selBg: "#cce3f5",
 		error: "#e51400", success: "#388a34", warning: "#bf8803",
 		helpBg: "#ffffff",
+		code:   "#1f1f1f", kw: "#0000ff", str: "#a31515", num: "#098658", com: "#008000",
+		link: "#0451a5",
 	},
 }
 
@@ -156,10 +177,63 @@ func build(name string, p palette) *Theme {
 		ReaderTOC:    lipgloss.NewStyle().Foreground(lipgloss.Color(p.dim)),
 		ReaderActive: lipgloss.NewStyle().Foreground(lipgloss.Color(p.accent)).Bold(true),
 
+		Code:    lipgloss.NewStyle().Foreground(lipgloss.Color(p.code)),
+		Kw:      lipgloss.NewStyle().Foreground(lipgloss.Color(p.kw)),
+		Str:     lipgloss.NewStyle().Foreground(lipgloss.Color(p.str)),
+		Num:     lipgloss.NewStyle().Foreground(lipgloss.Color(p.num)),
+		Com:     lipgloss.NewStyle().Foreground(lipgloss.Color(p.com)),
+		Link:    lipgloss.NewStyle().Foreground(lipgloss.Color(p.link)).Underline(true),
+		Marker:  lipgloss.NewStyle().Foreground(lipgloss.Color(p.accent)),
+		Underln: lipgloss.NewStyle().Underline(true),
+
 		Accent:  lipgloss.NewStyle().Foreground(lipgloss.Color(p.accent)).Bold(true),
 		Dim:     lipgloss.NewStyle().Foreground(lipgloss.Color(p.dim)),
 		Error:   lipgloss.NewStyle().Foreground(lipgloss.Color(p.error)),
 		Success: lipgloss.NewStyle().Foreground(lipgloss.Color(p.success)),
 		Warning: lipgloss.NewStyle().Foreground(lipgloss.Color(p.warning)),
+
+		Body: lipgloss.NewStyle().Foreground(lipgloss.Color(p.fg)),
 	}
+}
+
+// StyleFor maps render span-style bits to a terminal style — the bridge
+// used by render.ToANSI (and later the TUI viewer). Syntax categories win
+// over plain code; emphasis bits apply on top.
+//
+// Note: lipgloss v1 renders Underline per-rune (termenv behavior), so
+// links cost ~2× escape bytes. Correct visually; revisit only if TUI
+// scrolling performance ever cares.
+func (t *Theme) StyleFor(bits rendr.SpanStyle) lipgloss.Style {
+	var s lipgloss.Style
+	has := func(b rendr.SpanStyle) bool { return bits&b != 0 }
+	switch {
+	case has(rendr.SpanKw):
+		s = t.Kw
+	case has(rendr.SpanStr):
+		s = t.Str
+	case has(rendr.SpanNum):
+		s = t.Num
+	case has(rendr.SpanCom):
+		s = t.Com
+	case has(rendr.SpanCode):
+		s = t.Code
+	case has(rendr.SpanLink):
+		s = t.Link
+	case has(rendr.SpanMarker):
+		s = t.Marker
+	case has(rendr.SpanQuote), has(rendr.SpanDim):
+		s = t.Dim
+	default:
+		s = t.Body
+	}
+	if has(rendr.SpanBold) {
+		s = s.Bold(true)
+	}
+	if has(rendr.SpanItalic) {
+		s = s.Italic(true)
+	}
+	if has(rendr.SpanUnderline) {
+		s = s.Underline(true)
+	}
+	return s
 }

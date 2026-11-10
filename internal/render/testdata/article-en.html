@@ -1,0 +1,48 @@
+<article>
+  <h1>Understanding Go's Scheduler</h1>
+  <p>Go's runtime includes a <b>work-stealing scheduler</b>. It multiplexes
+  goroutines onto OS threads, described in the
+  <a href="https://go.dev/doc/effective_go">Effective Go</a> guide and the
+  <a href="https://go.dev/doc/effective_go">same link twice</a> to prove dedup.</p>
+
+  <h2>GOMAXPROCS</h2>
+  <p>The <code>GOMAXPROCS</code> variable sets the number of threads.
+  See also <a href="https://go.dev/blog/scheduling-intro">the scheduling blog post</a>.</p>
+
+  <blockquote>
+    <p>Goroutines are lightweight, costing little more than the allocation
+    of stack space.</p>
+  </blockquote>
+
+  <h3>Quick example</h3>
+  <pre><code class="language-go">package main
+
+import "fmt"
+
+func main() {
+	ch := make(chan int, 1)
+	go func() { ch &lt;- 42 }()
+	fmt.Println(&lt;-ch)
+}</code></pre>
+
+  <ul>
+    <li>work stealing</li>
+    <li>preemption at function calls</li>
+    <li>nested example:
+      <ol>
+        <li>first</li>
+        <li>second</li>
+      </ol>
+    </li>
+  </ul>
+
+  <hr>
+
+  <p>A table degrades to rows:</p>
+  <table>
+    <tr><th>Version</th><th>Released</th></tr>
+    <tr><td>1.27</td><td>2026</td></tr>
+  </table>
+
+  <p>Inline image: <img src="https://example.com/diagram.png" alt="diagram"> plus trailing text.</p>
+</article>

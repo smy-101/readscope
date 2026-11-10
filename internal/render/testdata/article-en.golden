@@ -1,0 +1,49 @@
+Understanding Go's Scheduler
+
+Go's runtime includes a work-stealing scheduler. It
+multiplexes goroutines onto OS threads, described in the
+Effective Go guide and the same link twice to prove dedup.
+
+GOMAXPROCS
+
+The GOMAXPROCS variable sets the number of threads. See also
+the scheduling blog post.
+
+│ Goroutines are lightweight, costing little more than the
+│ allocation of stack space.
+
+Quick example
+
+package main
+
+import "fmt"
+
+func main() {
+    ch := make(chan int, 1)
+    go func() { ch <- 42 }()
+    fmt.Println(<-ch)
+}
+
+• work stealing
+
+• preemption at function calls
+
+• nested example:
+
+  1. first
+
+  2. second
+
+────────────────────────────────────────
+
+A table degrades to rows:
+
+Version | Released
+
+1.27 | 2026
+
+Inline image: [图片:diagram] plus trailing text.
+
+[1] https://go.dev/doc/effective_go
+[2] https://go.dev/blog/scheduling-intro
+[3] https://example.com/diagram.png

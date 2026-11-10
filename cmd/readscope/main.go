@@ -25,6 +25,7 @@ const usage = `readscope — terminal reading scope (RSS · Hacker News · EPUB)
 Usage:
   readscope            Start the TUI (default)
   readscope doctor     Environment self-check
+  readscope render     Render a local HTML file or URL to terminal text
   readscope version    Print version
 
 Environment:
@@ -55,6 +56,8 @@ func main() {
 		}
 	case "version", "--version", "-v":
 		fmt.Println("readscope", Version)
+	case "render":
+		os.Exit(runRender(args[1:]))
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:

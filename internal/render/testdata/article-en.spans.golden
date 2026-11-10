@@ -1,0 +1,49 @@
+  1| BU0("Understanding Go's Scheduler")
+  2|
+  3| -0("Go's runtime includes a ") B0("work-stealing scheduler") -0(". It")
+  4| -0("multiplexes goroutines onto OS threads, described in the")
+  5| L1("Effective Go") -0(" guide and the ") L1("same link twice") -0(" to prove dedup.")
+  6|
+  7| BU0("GOMAXPROCS")
+  8|
+  9| -0("The ") c0("GOMAXPROCS") -0(" variable sets the number of threads. See also")
+ 10| L2("the scheduling blog post") -0(".")
+ 11|
+ 12| Q0("│ ") Q0("Goroutines are lightweight, costing little more than the")
+ 13| Q0("│ ") Q0("allocation of stack space.")
+ 14|
+ 15| B0("Quick example")
+ 16|
+ 17| cK0("package") c0(" main")
+ 18|
+ 19| cK0("import") c0(" ") cS0("\"fmt\"")
+ 20|
+ 21| cK0("func") c0(" main() {")
+ 22| c0("    ch := make(") cK0("chan") c0(" ") cK0("int") c0(", ") cS0("1") c0(")")
+ 23| c0("    ") cK0("go") c0(" ") cK0("func") c0("() { ch <- ") cS0("42") c0(" }()")
+ 24| c0("    fmt.Println(<-ch)")
+ 25| c0("}")
+ 26|
+ 27| -0("• ") -0("work stealing")
+ 28|
+ 29| -0("• ") -0("preemption at function calls")
+ 30|
+ 31| -0("• ") -0("nested example:")
+ 32|
+ 33| -0("  1. ") -0("first")
+ 34|
+ 35| -0("  2. ") -0("second")
+ 36|
+ 37| d0("────────────────────────────────────────")
+ 38|
+ 39| -0("A table degrades to rows:")
+ 40|
+ 41| -0("Version | Released")
+ 42|
+ 43| -0("1.27 | 2026")
+ 44|
+ 45| -0("Inline image: ") Lm3("[图片:diagram]") -0(" plus trailing text.")
+ 46|
+ 47| md0("[1] ") Ld1("https://go.dev/doc/effective_go")
+ 48| md0("[2] ") Ld2("https://go.dev/blog/scheduling-intro")
+ 49| md0("[3] ") Ld3("https://example.com/diagram.png")
