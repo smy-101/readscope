@@ -25,6 +25,7 @@ const usage = `readscope — terminal reading scope (RSS · Hacker News · EPUB)
 Usage:
   readscope            Start the TUI (default)
   readscope doctor     Environment self-check
+  readscope rss refresh  Fetch RSS/Atom feeds from sources.toml into the offline cache
   readscope render     Render a local HTML file or URL to terminal text
   readscope version    Print version
 
@@ -58,6 +59,8 @@ func main() {
 		fmt.Println("readscope", Version)
 	case "render":
 		os.Exit(runRender(args[1:]))
+	case "rss":
+		os.Exit(runRss(args[1:]))
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:

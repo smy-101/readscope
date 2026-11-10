@@ -75,3 +75,9 @@ render_read = "无法读取 %s：%v"
 render_fetch = "无法抓取 %s：%v"
 render_parse = "无法解析 HTML：%v"
 unknown_lang = "未知语言 %q，回退到英文"
+
+[rss]
+no_feeds = "还没有订阅——请在 %s 中添加"
+feed_line = "%s：新增 %d / 共 %d"
+feed_error = "%s：失败：%v"
+summary = "%d 个订阅：%d 成功，%d 失败"

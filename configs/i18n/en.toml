@@ -75,3 +75,9 @@ render_read = "cannot read %s: %v"
 render_fetch = "cannot fetch %s: %v"
 render_parse = "cannot parse HTML: %v"
 unknown_lang = "unknown language %q, falling back to English"
+
+[rss]
+no_feeds = "no feeds yet — add some to %s"
+feed_line = "%s: %d new / %d total"
+feed_error = "%s: error: %v"
+summary = "%d feeds: %d ok, %d failed"
