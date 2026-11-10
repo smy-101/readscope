@@ -1,0 +1,74 @@
+[meta]
+name = "简体中文"
+
+[app]
+title = "readscope"
+
+[common]
+ok = "正常"
+fail = "失败"
+cancel = "取消"
+confirm = "确认"
+yes = "是"
+no = "否"
+none = "无"
+
+[source]
+books = "书架"
+rss = "RSS"
+hn = "Hacker News"
+
+[sidebar]
+feeds = "订阅"
+no_feeds = "暂无订阅"
+
+[list]
+empty = "暂无内容"
+unread = "%d 条未读"
+
+[status]
+ready = "就绪"
+items = "%d 条"
+new = "%d 条新"
+refreshing = "刷新中…"
+todo = "后续里程碑提供"
+theme = "主题：%s"
+
+[help]
+title = "键位帮助"
+hint = "F1 帮助 · Esc 返回 · Ctrl+Q 退出"
+close = "按 Esc 关闭"
+
+[help.keys]
+switch_source = "切换源"
+region_nav = "区域移动"
+open = "打开 / 进入"
+back = "退回一层"
+help = "本帮助"
+sources = "管理源"
+favorites = "收藏"
+unread_only = "只看未读"
+refresh = "刷新"
+theme = "切换主题"
+quit = "退出"
+
+[doctor]
+title = "readscope 自检"
+version = "版本"
+config_dir = "配置目录"
+state_dir = "状态目录"
+db_open = "打开数据库"
+db_migrate = "数据库结构"
+i18n_load = "语言包"
+theme_load = "主题"
+terminal = "终端尺寸"
+summary = "%d 项检查：%d 项正常，%d 项失败"
+hint_env = "READSCOPE_CONFIG 与 READSCOPE_STATE 可覆盖默认目录"
+
+[errors]
+db_open = "无法打开数据库：%v"
+db_migrate = "数据库迁移失败：%v"
+i18n_load = "无法加载语言包：%v"
+theme_save = "无法保存主题：%v"
+no_tty = "无法连接终端——readscope 是终端界面，请在终端中运行"
+unknown_lang = "未知语言 %q，回退到英文"

@@ -1,0 +1,74 @@
+[meta]
+name = "English"
+
+[app]
+title = "readscope"
+
+[common]
+ok = "ok"
+fail = "fail"
+cancel = "Cancel"
+confirm = "Confirm"
+yes = "Yes"
+no = "No"
+none = "none"
+
+[source]
+books = "Bookshelf"
+rss = "RSS"
+hn = "Hacker News"
+
+[sidebar]
+feeds = "Feeds"
+no_feeds = "no feeds yet"
+
+[list]
+empty = "No items yet"
+unread = "%d unread"
+
+[status]
+ready = "ready"
+items = "%d items"
+new = "%d new"
+refreshing = "refreshing…"
+todo = "coming in a later milestone"
+theme = "theme: %s"
+
+[help]
+title = "Keybindings"
+hint = "F1 help · Esc back · Ctrl+Q quit"
+close = "Esc to close"
+
+[help.keys]
+switch_source = "Switch source"
+region_nav = "Region move"
+open = "Open / enter"
+back = "Back one layer"
+help = "This help"
+sources = "Manage sources"
+favorites = "Favorites"
+unread_only = "Unread-only view"
+refresh = "Refresh"
+theme = "Switch theme"
+quit = "Quit"
+
+[doctor]
+title = "readscope doctor"
+version = "version"
+config_dir = "config directory"
+state_dir = "state directory"
+db_open = "open database"
+db_migrate = "database schema"
+i18n_load = "language packs"
+theme_load = "themes"
+terminal = "terminal size"
+summary = "%d checks: %d ok, %d failed"
+hint_env = "READSCOPE_CONFIG and READSCOPE_STATE override the default directories"
+
+[errors]
+db_open = "cannot open database: %v"
+db_migrate = "cannot migrate database: %v"
+i18n_load = "cannot load language pack: %v"
+theme_save = "cannot save theme: %v"
+no_tty = "cannot attach to a terminal — readscope is a TUI, run it in your terminal"
+unknown_lang = "unknown language %q, falling back to English"
