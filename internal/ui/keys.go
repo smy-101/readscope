@@ -19,6 +19,8 @@ var helpBindings = []binding{
 	{"F3", "favorites"},
 	{"F4", "unread_only"},
 	{"F5", "refresh"},
+	{"Ctrl+O", "browser"},
+	{"Ctrl+Y", "copy_link"},
 	{"Ctrl+T", "theme"},
 	{"Ctrl+Q", "quit"},
 }

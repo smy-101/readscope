@@ -26,6 +26,10 @@ no_feeds = "暂无订阅"
 empty = "暂无内容"
 unread = "%d 条未读"
 
+[detail]
+no_body = "（无正文）"
+no_url = "本条没有链接"
+
 [status]
 ready = "就绪"
 items = "%d 条"
@@ -34,6 +38,9 @@ refreshing = "刷新中…"
 refresh_done = "刷新完成:%d 条新"
 todo = "后续里程碑提供"
 theme = "主题：%s"
+scroll = "%d%%"
+copy_done = "链接已复制"
+open_done = "已在浏览器打开"
 
 [time]
 now = "刚刚"
@@ -44,6 +51,7 @@ days = "%d 天前"
 [help]
 title = "键位帮助"
 hint = "F1 帮助 · Esc 返回 · Ctrl+Q 退出"
+detail_hint = "↑↓ 滚动 · Ctrl+O 浏览器打开 · Ctrl+Y 复制链接 · Esc 返回"
 close = "按 Esc 关闭"
 
 [help.keys]
@@ -56,6 +64,8 @@ sources = "管理源"
 favorites = "收藏"
 unread_only = "只看未读"
 refresh = "刷新"
+browser = "浏览器打开"
+copy_link = "复制链接"
 theme = "切换主题"
 quit = "退出"
 
@@ -78,6 +88,8 @@ db_query = "读取缓存失败:%v"
 db_migrate = "数据库迁移失败：%v"
 i18n_load = "无法加载语言包：%v"
 theme_save = "无法保存主题：%v"
+open_browser = "无法打开浏览器:%v"
+copy = "复制失败:%v"
 no_tty = "无法连接终端——readscope 是终端界面，请在终端中运行"
 render_read = "无法读取 %s：%v"
 render_fetch = "无法抓取 %s：%v"

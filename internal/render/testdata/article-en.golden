@@ -2,12 +2,13 @@ Understanding Go's Scheduler
 
 Go's runtime includes a work-stealing scheduler. It
 multiplexes goroutines onto OS threads, described in the
-Effective Go guide and the same link twice to prove dedup.
+Effective Go [1] guide and the same link twice [1] to prove
+dedup.
 
 GOMAXPROCS
 
 The GOMAXPROCS variable sets the number of threads. See also
-the scheduling blog post.
+the scheduling blog post [2].
 
 │ Goroutines are lightweight, costing little more than the
 │ allocation of stack space.

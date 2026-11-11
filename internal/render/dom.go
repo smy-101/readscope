@@ -5,6 +5,7 @@
 package render
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -231,7 +232,16 @@ func inlineFor(n *html.Node, st SpanStyle, link int, reg *linkRegistry) []Span {
 			nl = reg.add(href)
 			st |= SpanLink
 		}
-		return inlineChildren(n, st, nl, reg, false)
+		inner := inlineChildren(n, st, nl, reg, false)
+		if href != "" && !strings.HasPrefix(href, "#") {
+			// Numbered in the body: "Go [1]" — the appendix at the end
+			// maps the number to the URL. Anchor-only hrefs stay bare.
+			inner = append(inner, Span{
+				Text:  fmt.Sprintf(" [%d]", nl),
+				Style: SpanMarker | SpanDim, Link: nl,
+			})
+		}
+		return inner
 	case "img":
 		alt := attr(n, "alt")
 		src := attr(n, "src")

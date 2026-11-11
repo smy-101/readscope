@@ -50,16 +50,25 @@ func TestLinksNumberedAndDeduped(t *testing.T) {
 	doc := parseOne(t, `<p>See <a href="https://go.dev">Go</a> and <a href="https://go.dev">again</a>,
 		plus <a href="#anchor">anchor</a>.</p>`)
 	p := doc.Blocks[0].(Para)
-	var linkSpans []Span
+	var text, markers []Span
 	for _, s := range p.Spans {
-		if s.Link > 0 {
-			linkSpans = append(linkSpans, s)
+		if s.Link > 0 && s.Style&SpanMarker != 0 {
+			markers = append(markers, s)
+		} else if s.Link > 0 {
+			text = append(text, s)
 		}
 	}
-	if len(linkSpans) != 2 || linkSpans[0].Link != 1 || linkSpans[1].Link != 1 {
-		t.Fatalf("link numbering wrong: %+v", linkSpans)
+	if len(text) != 2 || text[0].Link != 1 || text[1].Link != 1 {
+		t.Fatalf("link numbering wrong: %+v", text)
 	}
-	// The #anchor link gets no number.
+	// Every numbered link shows its number in the body: "Go [1]".
+	if len(markers) != 2 || markers[0].Text != " [1]" || markers[1].Text != " [1]" {
+		t.Fatalf("inline markers wrong: %+v", markers)
+	}
+	if markers[0].Link != 1 || markers[0].Style&SpanMarker == 0 {
+		t.Fatalf("marker must carry its number and marker style: %+v", markers[0])
+	}
+	// The #anchor link gets no number and no marker.
 	for _, s := range p.Spans {
 		if s.Text == "anchor" && s.Link != 0 {
 			t.Fatalf("anchor got a number: %+v", s)

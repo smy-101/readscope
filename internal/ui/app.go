@@ -61,6 +61,8 @@ type Model struct {
 	refreshing bool   // F5 fetch in flight
 	help       bool   // F1 overlay open
 	status     string // transient hint in the status bar
+
+	reader *detail // open item's overlay reader; nil = list mode
 }
 
 // New builds the root model from loaded configuration, the item store
@@ -148,6 +150,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.reader != nil { // re-wrap at the new width, keep the position
+			m.reader.layout(m.detailWidth())
+			m.clampDetail()
+		}
 		return m, nil
 
 	case feedsMsg:
@@ -182,7 +188,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = m.refreshStatus(msg)
 		return m, m.loadFeedsCmd() // counts + list pick up what just landed
 
+	case browserDoneMsg:
+		if msg.err != nil {
+			m.status = m.cat.Get("errors.open_browser", msg.err)
+		} else {
+			m.status = m.cat.Get("status.open_done")
+		}
+		return m, nil
+
+	case copiedMsg:
+		if msg.err != nil {
+			m.status = m.cat.Get("errors.copy", msg.err)
+		} else {
+			m.status = m.cat.Get("status.copy_done")
+		}
+		return m, nil
+
 	case tea.KeyMsg:
+		// The reader owns navigation keys while open (except under the
+		// help overlay); shell-wide keys fall through to the shared switch.
+		if m.reader != nil && !m.help {
+			if handled, cmd := m.detailKeys(msg); handled {
+				return m, cmd
+			}
+		}
 		switch msg.String() {
 		case "ctrl+q":
 			return m, tea.Quit
@@ -251,7 +280,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.focus == regionSourceBar || m.focus == regionSidebar {
 				m.focus = regionList
+				return m, nil
 			}
+			m.openDetail()
 			return m, nil
 		case "esc":
 			if m.help {
@@ -300,9 +331,13 @@ func (m Model) View() string {
 	if m.help {
 		return m.helpView()
 	}
+	pane := m.listView()
+	if m.reader != nil {
+		pane = m.detailView() // the reader covers the list pane
+	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.sidebarView(),
-		m.listView(),
+		pane,
 	)
 	body = lipgloss.NewStyle().Height(m.bodyHeight()).Render(body)
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -324,6 +359,7 @@ func (m Model) activeSourceID() string { return sourceIDs[m.active] }
 func (m *Model) cycleSource(delta int) {
 	m.active = (m.active + delta + len(sourceIDs)) % len(sourceIDs)
 	m.focus, m.sidebarSel = regionSidebar, 0
+	m.reader = nil // the overlay belongs to the previous source's list
 	m.resetSource()
 }
 
@@ -435,7 +471,17 @@ func (m Model) sidebarRow(label string, unread int, selected bool) string {
 
 func (m Model) statusBarView() string {
 	left := m.th.StatusNormal.Render(m.sourceLabel(m.active))
-	if f := m.selectedFeed(); f != nil {
+	if m.reader != nil {
+		// Reading: the article's title (truncated) + position percent.
+		title := m.reader.item.Item.Title
+		maxTitle := m.width / 2
+		if maxTitle < 4 {
+			maxTitle = 4
+		}
+		title = runewidth.Truncate(title, maxTitle, "…")
+		left = m.th.StatusNormal.Render(title) + "  " +
+			m.th.StatusHint.Render(m.cat.Get("status.scroll", m.detailPercent()))
+	} else if f := m.selectedFeed(); f != nil {
 		if c := m.counts[f.Key]; c.Total > 0 {
 			parts := []string{m.cat.Get("status.items", c.Total)}
 			if c.Unread > 0 {
@@ -453,6 +499,9 @@ func (m Model) statusBarView() string {
 		left += "  " + m.th.StatusAccent.Render(m.status)
 	}
 	right := m.th.StatusHint.Render(m.cat.Get("help.hint"))
+	if m.reader != nil {
+		right = m.th.StatusHint.Render(m.cat.Get("help.detail_hint"))
+	}
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
