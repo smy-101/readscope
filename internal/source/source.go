@@ -25,6 +25,19 @@ type Source interface {
 	Fetch(ctx context.Context, f core.Feed) ([]core.Item, error)
 }
 
+// ConditionalSource is the optional conditional-fetch extension (the
+// DetailSource pattern): a source that can replay the validators a
+// server sent last time as If-None-Match / If-Modified-Since. A 304
+// comes back as changed=false with no items and no body transfer —
+// the caller keeps the stored snapshot untouched and re-saves the
+// returned state (validators kept, last_fetched bumped). Sources that
+// don't implement it always fetch in full.
+type ConditionalSource interface {
+	Source
+	FetchConditional(ctx context.Context, f core.Feed, prev core.FetchState) (
+		items []core.Item, next core.FetchState, changed bool, err error)
+}
+
 // Constructor builds one source from the user's subscription config;
 // each implementation picks the tables it needs from Sources.
 type Constructor func(srcs *core.Sources) (Source, error)

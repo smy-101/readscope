@@ -70,19 +70,62 @@ func (s *Source) Feeds() []core.Feed {
 	return out
 }
 
-// Fetch implements source.Source: fetch the feed URL, parse, and map to
-// items with deterministic ids so repeated refreshes update in place
-// instead of duplicating rows.
+// Fetch implements source.Source: unconditional fetch. Only the
+// non-conditional refresh fallback (sources without the extension,
+// HN in M3) and tests call it today; everyone persistent goes through
+// FetchConditional.
 func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
-	body, err := s.fetch(ctx, f.URL)
+	items, _, _, err := s.FetchConditional(ctx, f, core.FetchState{})
+	return items, err
+}
+
+// FetchConditional implements source.ConditionalSource: fetch the feed,
+// replaying prev's validators as If-None-Match / If-Modified-Since. A
+// 304 answer returns changed=false and no items — nothing to parse or
+// persist beyond the state itself, whose validators carry over (a 304
+// body is empty; if the server sends fresh ones we take them). A 200
+// maps items as usual and returns the response's validators — empty
+// when the server sent none, which makes the next request
+// unconditional: a plain refresh, by design.
+func (s *Source) FetchConditional(ctx context.Context, f core.Feed, prev core.FetchState) ([]core.Item, core.FetchState, bool, error) {
+	resp, err := s.request(ctx, f.URL, prev)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", f.Key, err)
+		return nil, prev, false, fmt.Errorf("fetch %s: %w", f.Key, err)
 	}
-	parsed, err := gofeed.NewParser().ParseString(body)
+	defer resp.Body.Close()
+
+	next := core.FetchState{
+		ETag:         resp.Header.Get("ETag"),
+		LastModified: resp.Header.Get("Last-Modified"),
+		LastFetched:  time.Now().UTC(),
+	}
+	switch {
+	case resp.StatusCode == http.StatusNotModified && (prev.ETag != "" || prev.LastModified != ""):
+		// A 304 is only meaningful for a request we made conditional. An
+		// unconditional request answered 304 is a broken server (RFC 9110
+		// §15.4.5): falling through to the error keeps it from silently
+		// reading as "snapshot current" for a feed we never fetched.
+		if next.ETag == "" {
+			next.ETag = prev.ETag
+		}
+		if next.LastModified == "" {
+			next.LastModified = prev.LastModified
+		}
+		return nil, next, false, nil
+	case resp.StatusCode == http.StatusOK:
+	default:
+		return nil, prev, false, fmt.Errorf("fetch %s: HTTP %s", f.Key, resp.Status)
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedBytes))
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: not a valid RSS/Atom feed: %w", f.Key, err)
+		return nil, prev, false, fmt.Errorf("fetch %s: %w", f.Key, err)
 	}
-	now := time.Now().UTC()
+	parsed, err := gofeed.NewParser().ParseString(string(raw))
+	if err != nil {
+		return nil, prev, false, fmt.Errorf("parse %s: not a valid RSS/Atom feed: %w", f.Key, err)
+	}
+	now := next.LastFetched
 	items := make([]core.Item, 0, len(parsed.Items))
 	for _, it := range parsed.Items {
 		items = append(items, core.Item{
@@ -97,7 +140,7 @@ func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 			Body:        bodyOf(it),
 		})
 	}
-	return items, nil
+	return items, next, true, nil
 }
 
 // ItemID builds the deterministic row id "rss:<feedkey>:<guid>". Feeds
@@ -138,26 +181,27 @@ func publishedOf(it *gofeed.Item) *time.Time {
 	return it.UpdatedParsed // Atom feeds often carry only <updated>
 }
 
-// fetch does the HTTP leg ourselves (not gofeed's ParseURL) so the
-// User-Agent, timeout, size cap and error wrapping are ours — and
-// conditional requests (ETag, ticket 05) extend this one function.
-func (s *Source) fetch(ctx context.Context, url string) (string, error) {
+// request does the HTTP leg ourselves (not gofeed's ParseURL) so the
+// User-Agent, timeout, conditional headers and error wrapping are
+// ours. prev's validators become If-None-Match / If-Modified-Since;
+// empty ones are simply omitted (unconditional request).
+func (s *Source) request(ctx context.Context, url string, prev core.FetchState) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
+	if prev.ETag != "" {
+		req.Header.Set("If-None-Match", prev.ETag)
+	}
+	if prev.LastModified != "" {
+		req.Header.Set("If-Modified-Since", prev.LastModified)
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %s", resp.Status)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedBytes))
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+	// Body is drained+closed by FetchConditional; status handling is
+	// its switch, so every code path there sees the same response.
+	return resp, nil
 }

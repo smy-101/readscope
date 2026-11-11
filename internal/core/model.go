@@ -27,3 +27,16 @@ type Item struct {
 	FetchedAt   time.Time  // snapshot time, set by the fetcher
 	Body        string     // full-text snapshot, offline-readable
 }
+
+// FetchState is one feed's conditional-request memory: the validators
+// (ETag / Last-Modified) the server sent last time, so the next fetch
+// can ask "anything new?" and a 304 answer costs no body transfer.
+// LastFetched tracks when we last asked, independent of changed or
+// not. The zero value means "never fetched": the request goes out
+// unconditional. A server that sends no validators stores back the
+// zero validators — which degrades to a plain refresh, by design.
+type FetchState struct {
+	ETag         string // response ETag verbatim, "" when the server sent none
+	LastModified string // response Last-Modified verbatim
+	LastFetched  time.Time
+}
