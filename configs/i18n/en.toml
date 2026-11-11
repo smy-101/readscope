@@ -25,6 +25,8 @@ no_feeds = "no feeds yet"
 [list]
 empty = "No items yet"
 unread = "%d unread"
+favorites = "Favorites"
+favorites_empty = "no favorites yet"
 
 [detail]
 no_body = "(no body text)"
@@ -41,6 +43,12 @@ theme = "theme: %s"
 scroll = "%d%%"
 copy_done = "link copied"
 open_done = "opened in browser"
+marked_read = "marked read"
+marked_unread = "marked unread"
+starred = "starred"
+unstarred = "unstarred"
+all_read = "all marked read"
+unread_only = "unread only"
 
 [time]
 now = "now"
@@ -51,8 +59,12 @@ days = "%dd"
 [help]
 title = "Keybindings"
 hint = "F1 help · Esc back · Ctrl+Q quit"
-detail_hint = "↑↓ scroll · Ctrl+O browser · Ctrl+Y copy link · Esc back"
+detail_hint = "↑↓ scroll · Ctrl+R read · Ctrl+F star · Ctrl+O browser · Ctrl+Y copy · Esc back"
 close = "Esc to close"
+
+[confirm]
+mark_all = "Mark every item in %s as read?"
+hint = "Enter confirm · Esc cancel"
 
 [help.keys]
 switch_source = "Switch source"
@@ -63,6 +75,9 @@ help = "This help"
 sources = "Manage sources"
 favorites = "Favorites"
 unread_only = "Unread-only view"
+toggle_read = "Toggle read/unread"
+toggle_star = "Star/unstar"
+mark_all_read = "Mark all read"
 refresh = "Refresh"
 browser = "Open in browser"
 copy_link = "Copy link"
@@ -88,6 +103,7 @@ db_query = "cache read failed: %v"
 db_migrate = "cannot migrate database: %v"
 i18n_load = "cannot load language pack: %v"
 theme_save = "cannot save theme: %v"
+config_save = "cannot save config: %v"
 open_browser = "cannot open browser: %v"
 copy = "copy failed: %v"
 no_tty = "cannot attach to a terminal — readscope is a TUI, run it in your terminal"

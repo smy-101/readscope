@@ -84,8 +84,12 @@ func (m *Model) clampListCursor() {
 func (m Model) listView() string {
 	w, h := m.listWidth(), m.bodyHeight()
 	if len(m.items) == 0 {
+		empty := m.cat.Get("list.empty")
+		if m.favorites {
+			empty = m.cat.Get("list.favorites_empty")
+		}
 		return m.th.List.Width(w).Height(h).
-			Render(m.th.Dim.Render(m.cat.Get("list.empty")))
+			Render(m.th.Dim.Render(empty))
 	}
 	usable := w - 1 // List has PaddingLeft(1)
 	metaW := 10     // room for "45 分钟前"
@@ -103,9 +107,16 @@ func (m Model) listView() string {
 	lines := make([]string, 0, end-top)
 	for i := top; i < end; i++ {
 		row := m.items[i]
+		// Marker column: ★ starred (star wins the slot), ● unread,
+		// blank read. The title dims on read state only — a star never
+		// dims.
 		dot, titleStyle := " ", m.th.TitleRead
-		if !row.Read {
+		if row.Starred {
+			dot = m.th.UnreadDot.Render("★")
+		} else if !row.Read {
 			dot = m.th.UnreadDot.Render("●")
+		}
+		if !row.Read {
 			titleStyle = m.th.Title
 		}
 		title := runewidth.FillRight(runewidth.Truncate(row.Item.Title, titleW, "…"), titleW)

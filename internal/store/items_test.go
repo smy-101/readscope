@@ -194,7 +194,7 @@ func TestFeedItemsNewestFirstWithReadFlag(t *testing.T) {
 		t.Fatalf("seed read_state: %v", err)
 	}
 
-	rows, err := s.FeedItems(t.Context(), "rss", "ex")
+	rows, err := s.FeedItems(t.Context(), "rss", "ex", false)
 	if err != nil {
 		t.Fatalf("FeedItems: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestFeedItemsNewestFirstWithReadFlag(t *testing.T) {
 
 func TestFeedItemsEmptyFeedIsEmpty(t *testing.T) {
 	s := migrated(t)
-	rows, err := s.FeedItems(t.Context(), "rss", "nothing")
+	rows, err := s.FeedItems(t.Context(), "rss", "nothing", false)
 	if err != nil {
 		t.Fatalf("FeedItems on empty feed: %v", err)
 	}

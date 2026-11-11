@@ -201,6 +201,13 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case "left", "right":
 		// Region navigation is suspended under the overlay.
 		return true, nil
+	case "ctrl+r": // toggle the open item's read state; list follows
+		// via the reload chain when Esc drops back
+		m.reader.item.Read = !m.reader.item.Read
+		return true, m.setReadCmd(m.reader.item.Item.ID, m.reader.item.Read)
+	case "ctrl+f": // star/unstar what is on screen (snapshot at star time)
+		m.reader.item.Starred = !m.reader.item.Starred
+		return true, m.setStarredCmd(m.reader.item.Item, m.reader.item.Starred)
 	case "ctrl+o":
 		url := m.reader.item.Item.URL
 		if url == "" {

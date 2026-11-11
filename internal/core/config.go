@@ -14,10 +14,11 @@ import (
 // Config is the user-facing configuration file (~/.config/readscope/config.toml).
 // Subscriptions live separately in sources.toml (M2).
 type Config struct {
-	Language  string `toml:"language"`   // "en" (default) | "zh-CN"
-	Theme     string `toml:"theme"`      // "dark" (default) | "light"
-	BookDir   string `toml:"book_dir"`   // EPUB library directory (M4)
-	TextWidth int    `toml:"text_width"` // 0 = follow terminal width
+	Language   string `toml:"language"`    // "en" (default) | "zh-CN"
+	Theme      string `toml:"theme"`       // "dark" (default) | "light"
+	BookDir    string `toml:"book_dir"`    // EPUB library directory (M4)
+	TextWidth  int    `toml:"text_width"`  // 0 = follow terminal width
+	UnreadOnly bool   `toml:"unread_only"` // F4 filter's last state, restored at startup
 }
 
 // Dir returns the configuration directory: $READSCOPE_CONFIG, else the
@@ -67,10 +68,11 @@ func Load() (*Config, error) {
 // locale (zh* → zh-CN), matching the first-run pre-selection FeedScope uses.
 func Defaults() *Config {
 	return &Config{
-		Language:  detectLanguage(),
-		Theme:     "dark",
-		BookDir:   "~/Books",
-		TextWidth: 0,
+		Language:   detectLanguage(),
+		Theme:      "dark",
+		BookDir:    "~/Books",
+		TextWidth:  0,
+		UnreadOnly: false,
 	}
 }
 

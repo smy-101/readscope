@@ -112,22 +112,28 @@ func (s *Store) SearchFTS(ctx context.Context, query string) ([]string, error) {
 	return ids, rows.Err()
 }
 
-// ItemRow pairs a cached item with its read state for list rendering:
-// the unread dot and dim styling key off Read.
+// ItemRow pairs a cached item with its read/star state for list
+// rendering: the unread dot, star marker and dim styling key off these.
 type ItemRow struct {
-	Item core.Item
-	Read bool
+	Item    core.Item
+	Read    bool
+	Starred bool
 }
 
 // FeedItems returns one feed's cached items newest first — items without
-// a publish date slot by fetch time — each carrying its read state. The
-// TUI list renders straight from this: cache first, no network anywhere.
-func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string) ([]ItemRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.source, i.feed, i.title, i.url, i.author,
-		i.published_at, i.fetched_at, i.body, r.read_at IS NOT NULL
+// a publish date slot by fetch time — each carrying its read/star state,
+// optionally only the unread ones. The TUI list renders straight from
+// this: cache first, no network anywhere.
+func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string, unreadOnly bool) ([]ItemRow, error) {
+	q := `SELECT i.id, i.source, i.feed, i.title, i.url, i.author,
+		i.published_at, i.fetched_at, i.body, r.read_at IS NOT NULL, r.starred_at IS NOT NULL
 		FROM items i LEFT JOIN read_state r ON r.item_id = i.id
-		WHERE i.source = ? AND i.feed = ?
-		ORDER BY COALESCE(i.published_at, i.fetched_at) DESC, i.id`, sourceID, feedKey)
+		WHERE i.source = ? AND i.feed = ?`
+	if unreadOnly {
+		q += ` AND r.read_at IS NULL`
+	}
+	q += ` ORDER BY COALESCE(i.published_at, i.fetched_at) DESC, i.id`
+	rows, err := s.db.QueryContext(ctx, q, sourceID, feedKey)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +143,7 @@ func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string) ([]Item
 		var r ItemRow
 		var published sql.NullTime
 		if err := rows.Scan(&r.Item.ID, &r.Item.Source, &r.Item.Feed, &r.Item.Title,
-			&r.Item.URL, &r.Item.Author, &published, &r.Item.FetchedAt, &r.Item.Body, &r.Read); err != nil {
+			&r.Item.URL, &r.Item.Author, &published, &r.Item.FetchedAt, &r.Item.Body, &r.Read, &r.Starred); err != nil {
 			return nil, err
 		}
 		if published.Valid {

@@ -25,6 +25,8 @@ no_feeds = "暂无订阅"
 [list]
 empty = "暂无内容"
 unread = "%d 条未读"
+favorites = "收藏"
+favorites_empty = "暂无收藏"
 
 [detail]
 no_body = "（无正文）"
@@ -41,6 +43,12 @@ theme = "主题：%s"
 scroll = "%d%%"
 copy_done = "链接已复制"
 open_done = "已在浏览器打开"
+marked_read = "已标已读"
+marked_unread = "已标未读"
+starred = "已收藏"
+unstarred = "已取消收藏"
+all_read = "已全部标为已读"
+unread_only = "只看未读"
 
 [time]
 now = "刚刚"
@@ -51,8 +59,12 @@ days = "%d 天前"
 [help]
 title = "键位帮助"
 hint = "F1 帮助 · Esc 返回 · Ctrl+Q 退出"
-detail_hint = "↑↓ 滚动 · Ctrl+O 浏览器打开 · Ctrl+Y 复制链接 · Esc 返回"
+detail_hint = "↑↓ 滚动 · Ctrl+R 已读 · Ctrl+F 收藏 · Ctrl+O 打开 · Ctrl+Y 复制 · Esc 返回"
 close = "按 Esc 关闭"
+
+[confirm]
+mark_all = "将「%s」的全部条目标为已读？"
+hint = "Enter 确认 · Esc 取消"
 
 [help.keys]
 switch_source = "切换源"
@@ -63,6 +75,9 @@ help = "本帮助"
 sources = "管理源"
 favorites = "收藏"
 unread_only = "只看未读"
+toggle_read = "切换已读/未读"
+toggle_star = "收藏/取消"
+mark_all_read = "全部已读"
 refresh = "刷新"
 browser = "浏览器打开"
 copy_link = "复制链接"
@@ -88,6 +103,7 @@ db_query = "读取缓存失败:%v"
 db_migrate = "数据库迁移失败：%v"
 i18n_load = "无法加载语言包：%v"
 theme_save = "无法保存主题：%v"
+config_save = "无法保存配置：%v"
 open_browser = "无法打开浏览器:%v"
 copy = "复制失败:%v"
 no_tty = "无法连接终端——readscope 是终端界面，请在终端中运行"

@@ -62,6 +62,10 @@ type Model struct {
 	help       bool   // F1 overlay open
 	status     string // transient hint in the status bar
 
+	unreadOnly bool // F4 filter: list shows unread items only
+	favorites  bool // F3 mode: list shows starred items across feeds
+	confirming bool // Ctrl+A asked for confirmation (Enter yes / Esc no)
+
 	reader *detail // open item's overlay reader; nil = list mode
 }
 
@@ -72,6 +76,7 @@ func New(cfg *core.Config, cat *i18n.Catalog, th *theme.Theme, st *store.Store, 
 	return Model{
 		cfg: cfg, cat: cat, th: th, st: st, srcs: srcs,
 		focus: regionList, counts: map[string]store.FeedCount{},
+		unreadOnly: cfg.UnreadOnly, // F4's last state comes back at startup
 	}
 }
 
@@ -99,6 +104,18 @@ type refreshDoneMsg struct {
 	err     error
 }
 
+// stateSavedMsg lands when a read/star/mark-all write finished; the
+// reload chain then re-renders list and counts from the store.
+type stateSavedMsg struct {
+	status string // localized feedback; "" = silent
+	err    error
+}
+
+// favoritesFeedKey is the pseudo feed key the items list is bound to
+// while the F3 favorites view is open — itemsMsg routes on it exactly
+// like a real feed key, so cursor and staleness logic stay shared.
+const favoritesFeedKey = "\x00favorites"
+
 func (m Model) loadFeedsCmd() tea.Cmd {
 	if m.st == nil {
 		return nil
@@ -122,14 +139,77 @@ func (m Model) loadItemsCmd() tea.Cmd {
 	if m.st == nil {
 		return nil
 	}
+	if m.favorites { // F3: starred items across every feed/source
+		st := m.st
+		return func() tea.Msg {
+			rows, err := st.StarredItems(context.Background())
+			return itemsMsg{feed: favoritesFeedKey, rows: rows, err: err}
+		}
+	}
 	key := m.selectedFeedKey()
 	if key == "" {
 		return nil
 	}
 	id, st := m.activeSourceID(), m.st
 	return func() tea.Msg {
-		rows, err := st.FeedItems(context.Background(), id, key)
+		rows, err := st.FeedItems(context.Background(), id, key, m.unreadOnly)
 		return itemsMsg{feed: key, rows: rows, err: err}
+	}
+}
+
+// setReadCmd writes one item's read flag; the reload chain (started by
+// stateSavedMsg) refreshes the list row, dimming and sidebar counts.
+func (m Model) setReadCmd(id string, read bool) tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	status := m.cat.Get("status.marked_read")
+	if !read {
+		status = m.cat.Get("status.marked_unread")
+	}
+	st := m.st
+	return func() tea.Msg {
+		if err := st.SetRead(context.Background(), id, read); err != nil {
+			return stateSavedMsg{err: err}
+		}
+		return stateSavedMsg{status: status}
+	}
+}
+
+// setStarredCmd stars (snapshotting the item) or unstars; star and
+// read stay orthogonal in the store.
+func (m Model) setStarredCmd(it core.Item, star bool) tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	status := m.cat.Get("status.starred")
+	if !star {
+		status = m.cat.Get("status.unstarred")
+	}
+	st := m.st
+	return func() tea.Msg {
+		if err := st.SetStarred(context.Background(), it, star); err != nil {
+			return stateSavedMsg{err: err}
+		}
+		return stateSavedMsg{status: status}
+	}
+}
+
+// markAllReadCmd marks the selected feed's every cached item read —
+// fired only after the Ctrl+A confirmation accepted.
+func (m Model) markAllReadCmd() tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	id, key, st := m.activeSourceID(), m.selectedFeedKey(), m.st
+	if key == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := st.MarkFeedRead(context.Background(), id, key); err != nil {
+			return stateSavedMsg{err: err}
+		}
+		return stateSavedMsg{status: m.cat.Get("status.all_read")}
 	}
 }
 
@@ -145,6 +225,15 @@ func (m Model) refreshCmd() tea.Cmd {
 }
 
 // --- update --------------------------------------------------------------
+
+// currentFeedKey is the feed key the items list is bound to right
+// now: the favorites pseudo-key in F3 mode, else the sidebar selection.
+func (m Model) currentFeedKey() string {
+	if m.favorites {
+		return favoritesFeedKey
+	}
+	return m.selectedFeedKey()
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -167,8 +256,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadItemsCmd()
 
 	case itemsMsg:
-		if msg.feed != m.selectedFeedKey() {
-			return m, nil // stale in-flight load for another feed
+		if msg.feed != m.currentFeedKey() {
+			return m, nil // stale in-flight load for another list
 		}
 		sameFeed := msg.feed == m.loadedFeed
 		m.items = msg.rows
@@ -188,6 +277,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = m.refreshStatus(msg)
 		return m, m.loadFeedsCmd() // counts + list pick up what just landed
 
+	case stateSavedMsg:
+		if msg.err != nil {
+			m.status = m.cat.Get("errors.db_query", msg.err)
+			return m, nil
+		}
+		if msg.status != "" {
+			m.status = msg.status
+		}
+		return m, m.loadFeedsCmd() // list rows, dots and counts re-render
+
 	case browserDoneMsg:
 		if msg.err != nil {
 			m.status = m.cat.Get("errors.open_browser", msg.err)
@@ -205,6 +304,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Ctrl+A's confirmation is modal: only Enter commits, Esc (or
+		// quit) leaves; every other key waits. No printable key can
+		// confirm a bulk action by accident.
+		if m.confirming {
+			switch msg.String() {
+			case "enter":
+				m.confirming = false
+				return m, m.markAllReadCmd()
+			case "esc":
+				m.confirming = false
+				return m, nil
+			case "ctrl+q", "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		// The reader owns navigation keys while open (except under the
 		// help overlay); shell-wide keys fall through to the shared switch.
 		if m.reader != nil && !m.help {
@@ -263,6 +378,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "left":
 			if m.help {
 				m.help = false
+			} else if m.favorites { // modal list: region nav suspended
+				return m, nil
 			} else if m.focus == regionList {
 				m.focus = regionSidebar
 			} else if m.focus == regionSidebar {
@@ -270,6 +387,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "right":
+			if m.favorites { // modal list: region nav suspended
+				return m, nil
+			}
 			if m.focus == regionSourceBar {
 				m.focus = regionSidebar
 			} else if m.focus == regionSidebar {
@@ -289,6 +409,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.help = false
 				return m, nil
 			}
+			if m.favorites { // F3 view closes back onto the feed list
+				m.favorites = false
+				m.listSel, m.listTop = 0, 0
+				return m, m.loadItemsCmd()
+			}
 			m.focus = regionList
 			return m, nil
 
@@ -298,6 +423,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+t":
 			m.cycleTheme()
+			return m, nil
+
+		case "ctrl+r":
+			// Applies to the selected row whenever the list is what the
+			// user sees; the reader handles its own Ctrl+R on the open item.
+			if m.reader == nil && m.listSel < len(m.items) {
+				row := m.items[m.listSel]
+				return m, m.setReadCmd(row.Item.ID, !row.Read)
+			}
+			return m, nil
+
+		case "ctrl+f":
+			if m.reader == nil && m.listSel < len(m.items) {
+				row := m.items[m.listSel]
+				return m, m.setStarredCmd(row.Item, !row.Starred)
+			}
+			return m, nil
+
+		case "ctrl+a":
+			if !m.favorites && m.selectedFeedKey() != "" {
+				m.confirming = true
+			}
+			return m, nil
+
+		case "f3":
+			m.favorites = !m.favorites
+			m.focus = regionList
+			m.listSel, m.listTop = 0, 0
+			return m, m.loadItemsCmd()
+
+		case "f4":
+			m.unreadOnly = !m.unreadOnly
+			m.cfg.UnreadOnly = m.unreadOnly
+			if err := m.cfg.Save(); err != nil {
+				m.status = m.cat.Get("errors.config_save", err)
+			} else if m.unreadOnly {
+				m.status = m.cat.Get("status.unread_only")
+			} else {
+				m.status = ""
+			}
+			if !m.favorites { // the favorites list is not filtered
+				m.listSel, m.listTop = 0, 0
+				return m, m.loadItemsCmd()
+			}
 			return m, nil
 
 		case "f5":
@@ -311,7 +480,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshing = true
 			return m, m.refreshCmd()
 
-		case "f2", "f3", "f4":
+		case "f2":
 			m.status = m.cat.Get("status.todo")
 			return m, nil
 		}
@@ -330,6 +499,9 @@ func (m Model) View() string {
 	}
 	if m.help {
 		return m.helpView()
+	}
+	if m.confirming {
+		return m.confirmView()
 	}
 	pane := m.listView()
 	if m.reader != nil {
@@ -360,6 +532,8 @@ func (m *Model) cycleSource(delta int) {
 	m.active = (m.active + delta + len(sourceIDs)) % len(sourceIDs)
 	m.focus, m.sidebarSel = regionSidebar, 0
 	m.reader = nil // the overlay belongs to the previous source's list
+	m.favorites = false
+	m.confirming = false
 	m.resetSource()
 }
 
@@ -481,6 +655,11 @@ func (m Model) statusBarView() string {
 		title = runewidth.Truncate(title, maxTitle, "…")
 		left = m.th.StatusNormal.Render(title) + "  " +
 			m.th.StatusHint.Render(m.cat.Get("status.scroll", m.detailPercent()))
+	} else if m.favorites {
+		left = m.th.StatusNormal.Render(m.cat.Get("list.favorites"))
+		if n := len(m.items); n > 0 {
+			left += "  " + m.th.StatusNormal.Render(m.cat.Get("status.items", n))
+		}
 	} else if f := m.selectedFeed(); f != nil {
 		if c := m.counts[f.Key]; c.Total > 0 {
 			parts := []string{m.cat.Get("status.items", c.Total)}
@@ -494,6 +673,9 @@ func (m Model) statusBarView() string {
 	}
 	if m.refreshing {
 		left = m.th.StatusAccent.Render(m.cat.Get("status.refreshing")) + "  " + left
+	}
+	if m.unreadOnly && !m.favorites {
+		left = m.th.StatusAccent.Render(m.cat.Get("status.unread_only")) + "  " + left
 	}
 	if m.status != "" {
 		left += "  " + m.th.StatusAccent.Render(m.status)
@@ -533,6 +715,19 @@ func (m Model) refreshStatus(msg refreshDoneMsg) string {
 		return m.cat.Get("rss.summary", len(msg.results), len(msg.results)-failed, failed)
 	}
 	return m.cat.Get("status.refresh_done", newSum)
+}
+
+// confirmView is the Ctrl+A confirmation: a centered dialog naming the
+// feed about to be bulk-marked; only Enter/Esc act while it is up.
+func (m Model) confirmView() string {
+	label := ""
+	if f := m.selectedFeed(); f != nil {
+		label = f.Label
+	}
+	box := m.th.HelpOverlay.Render(
+		m.th.HelpTitle.Render(m.cat.Get("confirm.mark_all", label)) + "\n\n" +
+			m.th.Dim.Render(m.cat.Get("confirm.hint")))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m Model) helpView() string {
