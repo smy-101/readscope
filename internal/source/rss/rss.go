@@ -24,9 +24,10 @@ import (
 // ID is the source id in sources.toml.
 const ID = "rss"
 
-// userAgent identifies readscope to feed hosts. The version suffix is
+// UserAgent identifies readscope to feed hosts. The version suffix is
 // not wired in yet (cmd owns Version); worth revisiting if hosts care.
-const userAgent = "readscope (+https://github.com/smy-101/readscope)"
+// Doctor's feed probe sends the same string so hosts see one client.
+const UserAgent = "readscope (+https://github.com/smy-101/readscope)"
 
 // maxFeedBytes caps a feed body at 10 MiB, same budget `render` allows.
 const maxFeedBytes = 10 << 20
@@ -190,7 +191,7 @@ func (s *Source) request(ctx context.Context, url string, prev core.FetchState) 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", UserAgent)
 	if prev.ETag != "" {
 		req.Header.Set("If-None-Match", prev.ETag)
 	}

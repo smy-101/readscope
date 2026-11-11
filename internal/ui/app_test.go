@@ -72,6 +72,31 @@ func TestHelpOverlay(t *testing.T) {
 	}
 }
 
+// TestHelpOverlayListsM2Keys pins ticket 07's acceptance: the F1
+// overlay renders every M2 binding with its description, so a binding
+// dropped from helpBindings (or a broken i18n key) fails here.
+func TestHelpOverlayListsM2Keys(t *testing.T) {
+	m := size(newTestModel(t), 100, 30)
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyF1})
+	view := m.View()
+	for _, want := range []string{
+		"Enter", "Open / enter",
+		"Esc", "Back one layer",
+		"F3", "Favorites",
+		"F4", "Unread-only view",
+		"F5", "Refresh",
+		"Ctrl+R", "Toggle read/unread",
+		"Ctrl+A", "Mark all read",
+		"Ctrl+F", "Star/unstar",
+		"Ctrl+O", "Open in browser",
+		"Ctrl+Y", "Copy link",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help overlay missing %q", want)
+		}
+	}
+}
+
 func TestCtrlTCyclesThemeAndPersists(t *testing.T) {
 	m := size(newTestModel(t), 100, 30)
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlT})

@@ -19,7 +19,7 @@ v0 不做：登录态抓取源（知乎/X/Reddit）、终端内图像渲染、�
 
 ## 安装
 
-尚未发布——M0 进行中。源码构建（Go 1.24+）：
+尚未发布——里程碑推进中。源码构建（Go 1.24+）：
 
 ```bash
 git clone https://github.com/smy-101/readscope.git
@@ -27,12 +27,58 @@ cd readscope
 go build ./cmd/readscope
 ```
 
+RSS 日用已经可用（M2）；Hacker News（M3）与 EPUB 书库（M4）随后。
+
 ## 使用
 
 ```bash
-readscope            # 启动 TUI（默认）
-readscope doctor     # 环境自检
+readscope                 # 启动 TUI（默认）
+readscope doctor          # 环境自检，含逐订阅可达性检查
+readscope rss refresh     # 拉取全部订阅进离线缓存
+readscope rss import F    # 将 OPML 订阅合并进 sources.toml
+readscope rss export F    # 导出订阅为标准 OPML 2.0
+readscope render <文件|URL>  # 将 HTML 排版为终端文本（管线调试）
+readscope version         # 打印版本
 ```
+
+### RSS
+
+订阅写在 `sources.toml`，与 `config.toml` 同目录（`readscope doctor` 会打印两个路径）：
+
+```toml
+enabled = ["rss"]
+
+[rss.feeds]
+ruanyifeng = { label = "阮一峰周刊", url = "https://www.ruanyifeng.com/blog/atom.xml" }
+hn = { label = "Hacker News", url = "https://hnrss.org/frontpage" }
+```
+
+map 的键是稳定 slug（用于条目 id 与边栏）；`label` 可省，回退为键名。刷新走条件请求
+（ETag / If-Modified-Since），未变的订阅只花一个 304、跳过解析；条目快照进 SQLite——
+列表从缓存秒出，断网也能读全文。TUI 里按 `F5` 后台刷新。
+
+与其他阅读器互迁走 OPML：`readscope rss import subs.opml` 合并（已有订阅不动），
+`readscope rss export subs.opml` 导出标准 OPML 2.0。
+
+`readscope doctor` 会用同一个 User-Agent 逐个试连订阅，报告 ✓ 可达（带耗时）、
+! 慢（超过 3 秒，警告）或 ✗ 失败（退出码 1）——一眼分清是源挂了还是环境坏了。
+
+### 键位
+
+全部非打印键，中文输入法激活时照常工作：
+
+| 键 | 作用 | 键 | 作用 |
+|----|------|----|------|
+| Tab / Shift+Tab | 切换源 | F5 | 刷新 |
+| ← → ↑ ↓ | 移动 / 滚动 | Ctrl+R | 切换已读/未读 |
+| Enter | 打开 / 进入 | Ctrl+A | 全部已读（需确认） |
+| Esc | 退回一层 | Ctrl+F | 收藏/取消 |
+| F1 | 键位帮助 | Ctrl+O | 浏览器打开 |
+| F3 | 收藏列表 | Ctrl+Y | 复制链接 |
+| F4 | 只看未读 | Ctrl+T | 切换主题 |
+| | | Ctrl+Q | 退出 |
+
+（F2，TUI 内订阅管理，后续里程碑提供。）
 
 ## 开发
 

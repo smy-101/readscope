@@ -4,10 +4,10 @@
 
 **Blocked by:** 03(详情层 — 全文阅读), 04(已读/收藏状态机), 05(ETag 条件请求), 06(OPML 导入/导出)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] doctor:逐 feed 可达性检查,输出 明确的 成功/慢/失败
-- [ ] F1 帮助屏覆盖 M2 全部键位(Enter/Esc/F4/F5/F3/Ctrl+R/Ctrl+A/Ctrl+F/Ctrl+O/Ctrl+Y)
-- [ ] README / README.zh-CN 补 RSS 用法(订阅、刷新、OPML、键位表)
-- [ ] CI 绿,`go test ./...` 全过
-- [ ] 真机验收清单执行并记录:真实订阅连续刷读、断网重启验证、已读/收藏跨重启
+- [x] doctor:逐 feed 可达性检查,输出 明确的 成功/慢/失败(`CheckFeeds` 注入探针缝;失败 exit 1,慢>3s 警告)
+- [x] F1 帮助屏覆盖 M2 全部键位(Enter/Esc/F4/F5/F3/Ctrl+R/Ctrl+A/Ctrl+F/Ctrl+O/Ctrl+Y)——键位数据本已齐,`TestHelpOverlayListsM2Keys` 钉住验收线
+- [x] README / README.zh-CN 补 RSS 用法(订阅、刷新、OPML、键位表)
+- [x] CI 绿,`go test ./...` 全过(本地 vet/test -race/build 全绿;远端 CI 待 push)
+- [ ] 真机验收清单执行并记录:真实订阅连续刷读、断网重启验证、已读/收藏跨重启 —— 清单与自动化证据见 [../acceptance.md](../acceptance.md),待用户执行

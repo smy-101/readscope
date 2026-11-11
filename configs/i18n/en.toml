@@ -96,6 +96,11 @@ theme_load = "themes"
 terminal = "terminal size"
 summary = "%d checks: %d ok, %d failed"
 hint_env = "READSCOPE_CONFIG and READSCOPE_STATE override the default directories"
+feeds = "feed reachability"
+feed_ok = "%s (%s)"
+feed_slow = "%s (%s) · slow"
+feed_fail = "%s: %v"
+feeds_summary = "%d feeds: %d ok, %d slow, %d failed"
 
 [errors]
 db_open = "cannot open database: %v"

@@ -96,6 +96,11 @@ theme_load = "主题"
 terminal = "终端尺寸"
 summary = "%d 项检查：%d 项正常，%d 项失败"
 hint_env = "READSCOPE_CONFIG 与 READSCOPE_STATE 可覆盖默认目录"
+feeds = "订阅可达性"
+feed_ok = "%s (%s)"
+feed_slow = "%s (%s) · 慢"
+feed_fail = "%s：%v"
+feeds_summary = "%d 个订阅：%d 可达，%d 慢，%d 失败"
 
 [errors]
 db_open = "无法打开数据库:%v"

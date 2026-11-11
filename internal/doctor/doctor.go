@@ -5,14 +5,20 @@
 package doctor
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"sort"
+	"time"
 
 	"golang.org/x/term"
 
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/i18n"
+	"github.com/smy-101/readscope/internal/refresh"
+	"github.com/smy-101/readscope/internal/source/rss"
 	"github.com/smy-101/readscope/internal/store"
 	"github.com/smy-101/readscope/internal/theme"
 )
@@ -22,9 +28,24 @@ type check struct {
 	err   error
 }
 
+// Probe measures one feed's reachability: it fetches url and reports
+// how long that took. Doctor classifies from those two facts alone,
+// so tests inject probes and never touch the network.
+type Probe func(ctx context.Context, url string) (time.Duration, error)
+
+// slowFeedAfter is the elapsed time past which a reachable feed is
+// reported slow (warning, not failure).
+const slowFeedAfter = 3 * time.Second
+
 // Run executes all checks, prints a report to w, and reports whether
-// everything passed (the CLI turns false into exit code 1).
+// everything passed (the CLI turns false into exit code 1). A failed
+// feed probe — or a sources.toml that won't parse — fails the whole
+// run; slow feeds warn but pass.
 func Run(w io.Writer, cfg *core.Config, version string) bool {
+	return run(w, cfg, version, httpProbe)
+}
+
+func run(w io.Writer, cfg *core.Config, version string, probe Probe) bool {
 	cat := loadCatalog(cfg)
 	th, _ := theme.Load(cfg.Theme)
 
@@ -33,14 +54,13 @@ func Run(w io.Writer, cfg *core.Config, version string) bool {
 	fmt.Fprintln(w)
 
 	checks := []check{
-		run(cat, "doctor.config_dir", func() error { _, err := core.Path(); return err }),
-		run(cat, "doctor.state_dir", func() error { _, err := store.DefaultPath(); return err }),
-		run(cat, "doctor.db_open", func() error { return checkDB("db_open") }),
-		run(cat, "doctor.db_migrate", func() error { return checkDB("db_migrate") }),
-		run(cat, "doctor.i18n_load", checkI18n),
-		run(cat, "doctor.theme_load", checkThemes),
+		named(cat, "doctor.config_dir", func() error { _, err := core.Path(); return err }),
+		named(cat, "doctor.state_dir", func() error { _, err := store.DefaultPath(); return err }),
+		named(cat, "doctor.db_open", func() error { return checkDB("db_open") }),
+		named(cat, "doctor.db_migrate", func() error { return checkDB("db_migrate") }),
+		named(cat, "doctor.i18n_load", checkI18n),
+		named(cat, "doctor.theme_load", checkThemes),
 	}
-
 	okCount := 0
 	for _, c := range checks {
 		if c.err != nil {
@@ -63,7 +83,98 @@ func Run(w io.Writer, cfg *core.Config, version string) bool {
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, th.StatusAccent.Render(cat.Get("doctor.summary", len(checks), okCount, len(checks)-okCount)))
-	return okCount == len(checks)
+
+	staticOK := okCount == len(checks)
+	fmt.Fprintln(w)
+	srcs, err := core.LoadSources()
+	if err != nil {
+		fmt.Fprintln(w, th.Accent.Render(cat.Get("doctor.feeds")))
+		fmt.Fprintf(w, "%s %v\n", th.Error.Render("✗"), err)
+		return false
+	}
+	return staticOK && CheckFeeds(w, cfg, srcs, probe)
+}
+
+// httpProbe is the production probe behind doctor: one plain GET
+// (same User-Agent the refresher sends) with the caller's deadline.
+// Any HTTP answer that isn't an error status means reachable; the
+// elapsed time lets doctor flag slow feeds.
+func httpProbe(ctx context.Context, url string) (time.Duration, error) {
+	start := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("User-Agent", rss.UserAgent)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return time.Since(start), fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return time.Since(start), nil
+}
+
+// CheckFeeds probes every configured RSS subscription in feed-key
+// order and reports reachability: ✓ ok (with elapsed time), ! slow
+// (warning — reachable but past slowFeedAfter), ✗ failed (probe error
+// or HTTP ≥ 400). Slow never fails; a failed feed does. With no feeds
+// configured it prints the no-feeds hint and passes.
+func CheckFeeds(w io.Writer, cfg *core.Config, srcs *core.Sources, probe Probe) bool {
+	cat := loadCatalog(cfg)
+	th, _ := theme.Load(cfg.Theme)
+
+	feeds := srcs.RSS.Feeds
+	if len(feeds) == 0 {
+		fmt.Fprintln(w, th.Dim.Render(refresh.NoFeedsHint(cat)))
+		return true
+	}
+
+	keys := make([]string, 0, len(feeds))
+	for k := range feeds {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, th.Accent.Render(cat.Get("doctor.feeds")))
+
+	ok, slow, failed := 0, 0, 0
+	for _, k := range keys {
+		f := feeds[k]
+		label := f.Label
+		if label == "" {
+			label = k
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		elapsed, err := probe(ctx, f.URL)
+		cancel()
+		switch {
+		case err != nil:
+			failed++
+			fmt.Fprintf(w, "%s %s\n", th.Error.Render("✗"), cat.Get("doctor.feed_fail", label, err))
+		case elapsed > slowFeedAfter:
+			slow++
+			fmt.Fprintf(w, "%s %s\n", th.Warning.Render("!"), cat.Get("doctor.feed_slow", label, fmtDur(elapsed)))
+		default:
+			ok++
+			fmt.Fprintf(w, "%s %s\n", th.Success.Render("✓"), cat.Get("doctor.feed_ok", label, fmtDur(elapsed)))
+		}
+	}
+	fmt.Fprintln(w, th.StatusAccent.Render(cat.Get("doctor.feeds_summary", len(feeds), ok, slow, failed)))
+	return failed == 0
+}
+
+// fmtDur rounds an elapsed time for display: whole milliseconds under
+// a second, centiseconds above ("120ms", "3.5s").
+func fmtDur(d time.Duration) string {
+	if d >= time.Second {
+		return d.Round(10 * time.Millisecond).String()
+	}
+	return d.Round(time.Millisecond).String()
 }
 
 func loadCatalog(cfg *core.Config) *i18n.Catalog {
@@ -76,7 +187,7 @@ func loadCatalog(cfg *core.Config) *i18n.Catalog {
 	return cat
 }
 
-func run(cat *i18n.Catalog, key string, fn func() error) check {
+func named(cat *i18n.Catalog, key string, fn func() error) check {
 	return check{label: cat.Get(key), err: fn()}
 }
 
