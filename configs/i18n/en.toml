@@ -100,6 +100,7 @@ hint_env = "READSCOPE_CONFIG and READSCOPE_STATE override the default directorie
 [errors]
 db_open = "cannot open database: %v"
 db_query = "cache read failed: %v"
+db_write = "state write failed: %v"
 db_migrate = "cannot migrate database: %v"
 i18n_load = "cannot load language pack: %v"
 theme_save = "cannot save theme: %v"

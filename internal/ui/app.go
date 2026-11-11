@@ -279,7 +279,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case stateSavedMsg:
 		if msg.err != nil {
-			m.status = m.cat.Get("errors.db_query", msg.err)
+			m.status = m.cat.Get("errors.db_write", msg.err)
 			return m, nil
 		}
 		if msg.status != "" {

@@ -100,6 +100,7 @@ hint_env = "READSCOPE_CONFIG 与 READSCOPE_STATE 可覆盖默认目录"
 [errors]
 db_open = "无法打开数据库:%v"
 db_query = "读取缓存失败:%v"
+db_write = "写入状态失败:%v"
 db_migrate = "数据库迁移失败：%v"
 i18n_load = "无法加载语言包：%v"
 theme_save = "无法保存主题：%v"

@@ -80,7 +80,7 @@ func (s *Store) MarkFeedRead(ctx context.Context, sourceID, feedKey string) erro
 // when it is gone the item is rebuilt from the star-time JSON snapshot,
 // which is the whole point of keeping one.
 func (s *Store) StarredItems(ctx context.Context) ([]ItemRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.source, i.feed, i.title, i.url, i.author,
+	rows, err := s.db.QueryContext(ctx, `SELECT r.item_id, i.id, i.source, i.feed, i.title, i.url, i.author,
 		i.published_at, i.fetched_at, i.body, r.read_at IS NOT NULL, r.star_snapshot
 		FROM read_state r LEFT JOIN items i ON i.id = r.item_id
 		WHERE r.starred_at IS NOT NULL
@@ -93,10 +93,12 @@ func (s *Store) StarredItems(ctx context.Context) ([]ItemRow, error) {
 	for rows.Next() {
 		// Every items column is nullable: a LEFT JOIN miss (source item
 		// gone) leaves them NULL until the snapshot fills the item in.
-		var id, source, feed, title, url, author, body, snapshot sql.NullString
+		// r.item_id is the read_state key — the one id that always exists,
+		// so it names the row even when the snapshot below is corrupt.
+		var itemID, id, source, feed, title, url, author, body, snapshot sql.NullString
 		var published, fetched sql.NullTime
 		var r ItemRow
-		if err := rows.Scan(&id, &source, &feed, &title, &url, &author,
+		if err := rows.Scan(&itemID, &id, &source, &feed, &title, &url, &author,
 			&published, &fetched, &body, &r.Read, &snapshot); err != nil {
 			return nil, err
 		}
@@ -115,7 +117,7 @@ func (s *Store) StarredItems(ctx context.Context) ([]ItemRow, error) {
 		} else {
 			// Source item gone: fall back to the star-time snapshot.
 			if err := json.Unmarshal([]byte(snapshot.String), &r.Item); err != nil {
-				return nil, fmt.Errorf("star snapshot for %s: %w", r.Item.ID, err)
+				return nil, fmt.Errorf("star snapshot for %s: %w", itemID.String, err)
 			}
 		}
 		r.Starred = true
