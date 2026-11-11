@@ -31,6 +31,13 @@ func hnPageJSON(ids ...string) string {
 	return `{"hits":[` + strings.Join(hits, ",") + `],"page":0,"nbPages":1,"hitsPerPage":1}`
 }
 
+// rssItemXML builds a one-item RSS document for an httptest server.
+func rssItemXML(title, guid string) string {
+	return fmt.Sprintf(`<?xml version="1.0"?><rss version="2.0"><channel><title>%s</title>
+	<item><title>%s</title><guid>%s</guid><description>body</description></item>
+	</channel></rss>`, title, title, guid)
+}
+
 // fakePagedAlgolia serves per-page fixtures for the front feed
 // (page "" = 0) and counts requests per page under mu, so tests can
 // assert exactly which page each key asked for.
@@ -163,25 +170,20 @@ func TestCtrlNOnUnpagedRSSListSaysNoMore(t *testing.T) {
 
 // F5 is feed-level: with feed b selected, only b's URL is dialed.
 func TestF5RefreshesOnlySelectedFeed(t *testing.T) {
-	rssXML := func(title, guid string) string {
-		return fmt.Sprintf(`<?xml version="1.0"?><rss version="2.0"><channel><title>%s</title>
-		<item><title>%s</title><guid>%s</guid><description>body</description></item>
-		</channel></rss>`, title, title, guid)
-	}
 	var mu sync.Mutex
 	aHits, bHits := 0, 0
 	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		aHits++
 		mu.Unlock()
-		w.Write([]byte(rssXML("Alpha story", "a1")))
+		w.Write([]byte(rssItemXML("Alpha story", "a1")))
 	}))
 	t.Cleanup(alpha.Close)
 	beta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		bHits++
 		mu.Unlock()
-		w.Write([]byte(rssXML("Beta story", "b1")))
+		w.Write([]byte(rssItemXML("Beta story", "b1")))
 	}))
 	t.Cleanup(beta.Close)
 
@@ -214,11 +216,6 @@ func TestF5RefreshesOnlySelectedFeed(t *testing.T) {
 // The favorites view has no current feed: F5 there keeps the M2
 // whole-source behavior instead of breaking.
 func TestF5InFavoritesRefreshesWholeSource(t *testing.T) {
-	rssXML := func(title, guid string) string {
-		return fmt.Sprintf(`<?xml version="1.0"?><rss version="2.0"><channel><title>%s</title>
-		<item><title>%s</title><guid>%s</guid><description>body</description></item>
-		</channel></rss>`, title, title, guid)
-	}
 	var mu sync.Mutex
 	aHits, bHits := 0, 0
 	serve := func(title, guid string, counter *int) *httptest.Server {
@@ -226,7 +223,7 @@ func TestF5InFavoritesRefreshesWholeSource(t *testing.T) {
 			mu.Lock()
 			*counter++
 			mu.Unlock()
-			w.Write([]byte(rssXML(title, guid)))
+			w.Write([]byte(rssItemXML(title, guid)))
 		}))
 	}
 	alpha := serve("Alpha story", "a1", &aHits)

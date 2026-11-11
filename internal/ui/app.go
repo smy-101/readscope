@@ -590,12 +590,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.loadingMore {
 				return m, nil
 			}
+			// An unregistered source (books) has no feeds, so the
+			// empty-key branch below already catches it — no existence
+			// probe here; refresh.More reports anything left as an error.
 			if m.favorites || m.selectedFeedKey() == "" {
 				m.status = m.cat.Get("status.more_end")
-				return m, nil
-			}
-			if _, err := source.New(m.activeSourceID(), m.srcs); err != nil {
-				m.status = m.cat.Get("status.todo")
 				return m, nil
 			}
 			m.loadingMore = true

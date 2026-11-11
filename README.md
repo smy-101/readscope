@@ -100,7 +100,6 @@ Every binding is a non-printing key, so a Chinese IME never swallows it:
 | F3 | Favorites | Ctrl+Y | Copy link |
 | F4 | Unread-only view | Ctrl+T | Switch theme |
 | Ctrl+N | Load more / page | Ctrl+Q | Quit |
-| | | Ctrl+Q | Quit |
 
 (F2, subscription management inside the TUI, comes in a later milestone.)
 

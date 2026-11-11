@@ -52,6 +52,20 @@ func Source(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID s
 	return results, nil
 }
 
+// findFeed resolves one feed key against a source's feed list —
+// the shared lookup of the feed-level pull (Feed) and the page
+// append (More), both of which need the core.Feed itself, not just
+// its key.
+func findFeed(src source.Source, feedKey string) (*core.Feed, bool) {
+	feeds := src.Feeds()
+	for i := range feeds {
+		if feeds[i].Key == feedKey {
+			return &feeds[i], true
+		}
+	}
+	return nil, false
+}
+
 // Feed refreshes one feed of the named source — F5's feed-level pull
 // (M3 ticket 05: re-fetch the current feed's first page instead of
 // the whole source, so the other feeds are never dialed) — through
@@ -62,12 +76,11 @@ func Feed(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID, fe
 	if err != nil {
 		return nil, err
 	}
-	for _, f := range src.Feeds() {
-		if f.Key == feedKey {
-			return []Result{refreshOneFeed(ctx, st, src, f)}, nil
-		}
+	f, ok := findFeed(src, feedKey)
+	if !ok {
+		return nil, fmt.Errorf("refresh %s: no feed %q", sourceID, feedKey)
 	}
-	return nil, fmt.Errorf("refresh %s: no feed %q", sourceID, feedKey)
+	return []Result{refreshOneFeed(ctx, st, src, *f)}, nil
 }
 
 // refreshOneFeed runs one feed's refresh cycle — fetch (conditional
@@ -142,15 +155,8 @@ func More(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID, fe
 	if !ok {
 		return Result{}, false, fmt.Errorf("more %s: %w", sourceID, ErrNotPaged)
 	}
-	feeds := src.Feeds()
-	var feed *core.Feed
-	for i := range feeds {
-		if feeds[i].Key == feedKey {
-			feed = &feeds[i]
-			break
-		}
-	}
-	if feed == nil {
+	feed, ok := findFeed(src, feedKey)
+	if !ok {
 		return Result{}, false, fmt.Errorf("more %s: no feed %q", sourceID, feedKey)
 	}
 	pageNo, err := st.LoadPagesFetched(ctx, sourceID, feedKey)

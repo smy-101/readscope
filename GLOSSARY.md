@@ -35,6 +35,14 @@ _Avoid_: 外链帖、转帖
 items 行上的 points 与评论数,取 fetched 时刻的值;列表的 "N pts · N comments · author" 热度雷达与 front/ask/show 的 points 序都读这里,刷新时随快照一起更新。RSS 行恒为空。
 _Avoid_: 热度值、统计数据、实时热度
 
+**分页源**:
+实现了 PagedSource 扩展的源——列表能按页向前翻(hn 走 Algolia page 参数);未实现的源(rss 全量快照)Ctrl+N 统一提示"没有更多了"。与 ConditionalSource/DetailSource 同款 probe-don't-register 模式。
+_Avoid_: 无限滚动、下拉加载
+
+**页深**:
+feed_fetch_state.pages_fetched——某 feed 已从第 0 页起连续拉取的页数。Ctrl+N 拉当前页深的那一页,仅在有命中时前进;空页=到底且页深不动(索引增长后同页重试);F5 只保底 1 不抬高。重启后从存储页深续翻,不重拉已知页。
+_Avoid_: 翻页进度、offset
+
 **楼层**:
 帖子下的一条顶层评论;楼层头显示 author · score · N replies。
 _Avoid_: 一楼/盖楼(口语)、顶层评论(冗长时)

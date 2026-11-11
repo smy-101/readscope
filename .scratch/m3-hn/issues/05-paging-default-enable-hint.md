@@ -22,3 +22,9 @@
 - F5 feed 级回退规则:选中真 feed → `refresh.Feed`(rss 仍走条件请求路径,ETag 照常);favorites 视图/无选中 feed → 回退全源 `refresh.Source`(无当前 feed 可言,保持 M2 行为)。CLI `rss refresh` 保持全源不动
 - UI 反馈:非分页源/favorites/无选中 feed 的 Ctrl+N 统一 status.more_end("没有更多了"),拒绝谜之空操作;moreDoneMsg 带源/feed 键做陈旧路由(用户已切走则只入缓存不出声);加载中状态栏前缀 loading_more。新 i18n 键:loading_more / more_done / more_none / more_end,双语键树测试守住
 - 已读保持零新代码:SaveFeedItems 的 upsert 从不碰 read_state(M2 既定),paging 只是复用;测试在 UI 缝钉住(re-served 行不重不丢已读)
+
+**2025-12 05 号票评审**(两轴并行,均 OK with notes):
+
+- 修复:README.md 键位表 Ctrl+Q 重复行(英文表新增未删占位行,zh-CN 对了);Feed/More 的 feed-key 查找合一为 findFeed;ctrl+n 分支去掉不可达的 source.New 探针(未注册源无 feed,空键分支已拦);paging_test 的 rssXML 双定义合一
+- 采纳:GLOSSARY 补"分页源/页深"两词条
+- 拒绝(仅记录):fetchstate.go 双因变化(validators+页深)——行共存是票内已定权衡,第三种因出现时再拆
