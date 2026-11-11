@@ -112,6 +112,76 @@ func (s *Store) SearchFTS(ctx context.Context, query string) ([]string, error) {
 	return ids, rows.Err()
 }
 
+// ItemRow pairs a cached item with its read state for list rendering:
+// the unread dot and dim styling key off Read.
+type ItemRow struct {
+	Item core.Item
+	Read bool
+}
+
+// FeedItems returns one feed's cached items newest first — items without
+// a publish date slot by fetch time — each carrying its read state. The
+// TUI list renders straight from this: cache first, no network anywhere.
+func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string) ([]ItemRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.source, i.feed, i.title, i.url, i.author,
+		i.published_at, i.fetched_at, i.body, r.read_at IS NOT NULL
+		FROM items i LEFT JOIN read_state r ON r.item_id = i.id
+		WHERE i.source = ? AND i.feed = ?
+		ORDER BY COALESCE(i.published_at, i.fetched_at) DESC, i.id`, sourceID, feedKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ItemRow
+	for rows.Next() {
+		var r ItemRow
+		var published sql.NullTime
+		if err := rows.Scan(&r.Item.ID, &r.Item.Source, &r.Item.Feed, &r.Item.Title,
+			&r.Item.URL, &r.Item.Author, &published, &r.Item.FetchedAt, &r.Item.Body, &r.Read); err != nil {
+			return nil, err
+		}
+		if published.Valid {
+			r.Item.PublishedAt = &published.Time
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// FeedCount is one feed's list-layer stats: how many cached items it
+// holds and how many are still unread.
+type FeedCount struct {
+	Total  int
+	Unread int
+}
+
+// FeedCounts reports Total/Unread per feed key for one source, in a
+// single grouped query — the sidebar's unread badges and the status
+// bar's "N 条 · M 新" both read from here. Feeds with no cached items
+// are absent; the sidebar counts them as zero.
+func (s *Store) FeedCounts(ctx context.Context, sourceID string) (map[string]FeedCount, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT i.feed, COUNT(*), SUM(r.read_at IS NULL)
+		FROM items i LEFT JOIN read_state r ON r.item_id = i.id
+		WHERE i.source = ?
+		GROUP BY i.feed`, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]FeedCount{}
+	for rows.Next() {
+		var feed string
+		var c FeedCount
+		var unread sql.NullInt64
+		if err := rows.Scan(&feed, &c.Total, &unread); err != nil {
+			return nil, err
+		}
+		c.Unread = int(unread.Int64)
+		out[feed] = c
+	}
+	return out, rows.Err()
+}
+
 // CountFeed reports how many items one feed holds (refresh's total when
 // the fetch itself failed).
 func (s *Store) CountFeed(ctx context.Context, sourceID, feedKey string) (int, error) {

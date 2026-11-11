@@ -31,8 +31,15 @@ ready = "ready"
 items = "%d items"
 new = "%d new"
 refreshing = "refreshing…"
+refresh_done = "refreshed: %d new"
 todo = "coming in a later milestone"
 theme = "theme: %s"
+
+[time]
+now = "now"
+minutes = "%dm"
+hours = "%dh"
+days = "%dd"
 
 [help]
 title = "Keybindings"
@@ -67,6 +74,7 @@ hint_env = "READSCOPE_CONFIG and READSCOPE_STATE override the default directorie
 
 [errors]
 db_open = "cannot open database: %v"
+db_query = "cache read failed: %v"
 db_migrate = "cannot migrate database: %v"
 i18n_load = "cannot load language pack: %v"
 theme_save = "cannot save theme: %v"

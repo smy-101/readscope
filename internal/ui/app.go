@@ -1,17 +1,25 @@
 // Package ui is the Bubble Tea front end: the FeedScope-style shell
 // (source bar / sidebar / list / status bar) with the EPUB reader joining
 // in M4. M0 renders the empty shell with region navigation, help overlay
-// and live theme switching.
+// and live theme switching; M2 wires real RSS feeds into the sidebar and
+// cached items into the list, cache first — the store is read on startup
+// and after every refresh, and the network is only ever touched by F5.
 package ui
 
 import (
+	"context"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/i18n"
+	"github.com/smy-101/readscope/internal/refresh"
+	"github.com/smy-101/readscope/internal/source"
+	"github.com/smy-101/readscope/internal/store"
 	"github.com/smy-101/readscope/internal/theme"
 )
 
@@ -30,32 +38,149 @@ const sidebarWidth = 24
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	cfg *core.Config
-	cat *i18n.Catalog
-	th  *theme.Theme
+	cfg  *core.Config
+	cat  *i18n.Catalog
+	th   *theme.Theme
+	st   *store.Store
+	srcs *core.Sources
 
 	width, height int
 
 	active     int // index into sourceIDs
 	focus      region
 	sidebarSel int
+	listSel    int // cursor in m.items
+	listTop    int // first visible list row (scroll window)
 
-	help   bool
-	status string // transient hint in the status bar
+	// Cache-first list state, loaded via cmds from the store only.
+	feeds      []core.Feed                // active source's sidebar entries
+	counts     map[string]store.FeedCount // per feed key
+	items      []store.ItemRow            // selected feed's items
+	loadedFeed string                     // feed key of m.items ("" = none)
+
+	refreshing bool   // F5 fetch in flight
+	help       bool   // F1 overlay open
+	status     string // transient hint in the status bar
 }
 
-// New builds the root model from loaded configuration.
-func New(cfg *core.Config, cat *i18n.Catalog, th *theme.Theme) Model {
-	return Model{cfg: cfg, cat: cat, th: th, focus: regionList}
+// New builds the root model from loaded configuration, the item store
+// and the subscription file. st must be open and migrated (main does
+// that before the alt screen takes over).
+func New(cfg *core.Config, cat *i18n.Catalog, th *theme.Theme, st *store.Store, srcs *core.Sources) Model {
+	return Model{
+		cfg: cfg, cat: cat, th: th, st: st, srcs: srcs,
+		focus: regionList, counts: map[string]store.FeedCount{},
+	}
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+// Init loads the sidebar and list from the SQLite cache — local reads
+// only, so the list is on screen before (and without) any network.
+func (m Model) Init() tea.Cmd { return m.loadFeedsCmd() }
+
+// --- async messages ------------------------------------------------------
+
+type feedsMsg struct {
+	source string // source id the feeds belong to
+	feeds  []core.Feed
+	counts map[string]store.FeedCount
+}
+
+type itemsMsg struct {
+	feed string
+	rows []store.ItemRow
+	err  error
+}
+
+type refreshDoneMsg struct {
+	source  string // the source that was refreshed
+	results []refresh.Result
+	err     error
+}
+
+func (m Model) loadFeedsCmd() tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	id := m.activeSourceID()
+	srcs, st := m.srcs, m.st
+	return func() tea.Msg {
+		feeds := []core.Feed{}
+		if src, err := source.New(id, srcs); err == nil {
+			feeds = src.Feeds()
+		}
+		counts, err := st.FeedCounts(context.Background(), id)
+		if err != nil {
+			counts = map[string]store.FeedCount{}
+		}
+		return feedsMsg{source: id, feeds: feeds, counts: counts}
+	}
+}
+
+func (m Model) loadItemsCmd() tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	key := m.selectedFeedKey()
+	if key == "" {
+		return nil
+	}
+	id, st := m.activeSourceID(), m.st
+	return func() tea.Msg {
+		rows, err := st.FeedItems(context.Background(), id, key)
+		return itemsMsg{feed: key, rows: rows, err: err}
+	}
+}
+
+func (m Model) refreshCmd() tea.Cmd {
+	if m.st == nil || m.srcs == nil {
+		return nil
+	}
+	id, srcs, st := m.activeSourceID(), m.srcs, m.st
+	return func() tea.Msg {
+		results, err := refresh.Source(context.Background(), st, srcs, id)
+		return refreshDoneMsg{source: id, results: results, err: err}
+	}
+}
+
+// --- update --------------------------------------------------------------
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
+
+	case feedsMsg:
+		if msg.source != m.activeSourceID() {
+			return m, nil // stale: the user moved on before the load landed
+		}
+		m.feeds, m.counts = msg.feeds, msg.counts
+		m.sidebarClamp()
+		// The cursor survives a same-feed reload (F5 landing); itemsMsg
+		// decides reset vs clamp once it knows whether the feed changed.
+		return m, m.loadItemsCmd()
+
+	case itemsMsg:
+		if msg.feed != m.selectedFeedKey() {
+			return m, nil // stale in-flight load for another feed
+		}
+		sameFeed := msg.feed == m.loadedFeed
+		m.items = msg.rows
+		m.loadedFeed = msg.feed
+		if sameFeed {
+			m.clampListCursor()
+		} else {
+			m.listSel, m.listTop = 0, 0
+		}
+		if msg.err != nil {
+			m.status = m.cat.Get("errors.db_query", msg.err)
+		}
+		return m, nil
+
+	case refreshDoneMsg:
+		m.refreshing = false
+		m.status = m.refreshStatus(msg)
+		return m, m.loadFeedsCmd() // counts + list pick up what just landed
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -65,33 +190,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab":
-			m.active = (m.active + 1) % len(sourceIDs)
-			m.focus, m.sidebarSel = regionSidebar, 0
-			return m, nil
+			m.cycleSource(1)
+			return m, m.loadFeedsCmd()
 		case "shift+tab":
-			m.active = (m.active - 1 + len(sourceIDs)) % len(sourceIDs)
-			m.focus, m.sidebarSel = regionSidebar, 0
-			return m, nil
+			m.cycleSource(-1)
+			return m, m.loadFeedsCmd()
 
 		case "up":
 			if m.focus == regionSourceBar { // switch site in place
-				m.active = (m.active - 1 + len(sourceIDs)) % len(sourceIDs)
+				m.cycleSource(-1)
+				return m, m.loadFeedsCmd()
+			}
+			if m.focus == regionSidebar {
+				if m.sidebarSel > 0 {
+					m.sidebarSel--
+					return m, m.loadItemsCmd()
+				}
 				return m, nil
 			}
-			if m.focus == regionSidebar && m.sidebarSel > 0 {
-				m.sidebarSel--
-			}
+			m.moveListSel(-1)
 			return m, nil
 		case "down":
 			if m.focus == regionSourceBar {
-				m.active = (m.active + 1) % len(sourceIDs)
+				m.cycleSource(1)
+				return m, m.loadFeedsCmd()
+			}
+			if m.focus == regionSidebar {
+				if m.sidebarSel < m.sidebarLen()-1 {
+					m.sidebarSel++
+					return m, m.loadItemsCmd()
+				}
 				return m, nil
 			}
-			if m.focus == regionSidebar { // bounded by feed count
-				if m.sidebarSel < len(m.sidebarRows())-1 {
-					m.sidebarSel++
-				}
-			}
+			m.moveListSel(1)
+			return m, nil
+		case "pgup":
+			m.moveListSel(-m.bodyHeight())
+			return m, nil
+		case "pgdown":
+			m.moveListSel(m.bodyHeight())
 			return m, nil
 
 		case "left":
@@ -112,9 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			if m.focus == regionSourceBar {
-				m.focus = regionList
-			} else if m.focus == regionSidebar {
+			if m.focus == regionSourceBar || m.focus == regionSidebar {
 				m.focus = regionList
 			}
 			return m, nil
@@ -134,7 +269,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cycleTheme()
 			return m, nil
 
-		case "f2", "f3", "f4", "f5":
+		case "f5":
+			if m.refreshing {
+				return m, nil
+			}
+			if _, err := source.New(m.activeSourceID(), m.srcs); err != nil {
+				m.status = m.cat.Get("status.todo") // books/hn: no fetchable source yet
+				return m, nil
+			}
+			m.refreshing = true
+			return m, m.refreshCmd()
+
+		case "f2", "f3", "f4":
 			m.status = m.cat.Get("status.todo")
 			return m, nil
 		}
@@ -170,6 +316,56 @@ func (m Model) View() string {
 
 func (m Model) sourceLabel(i int) string { return m.cat.Get("source." + sourceIDs[i]) }
 
+func (m Model) activeSourceID() string { return sourceIDs[m.active] }
+
+// cycleSource rotates the source bar by delta (wrapping), refocusing
+// the sidebar and clearing the previous source's list state; feeds and
+// counts refill when the loadFeeds cmd lands.
+func (m *Model) cycleSource(delta int) {
+	m.active = (m.active + delta + len(sourceIDs)) % len(sourceIDs)
+	m.focus, m.sidebarSel = regionSidebar, 0
+	m.resetSource()
+}
+
+// sidebarLen is the sidebar's row count (feeds, or the single
+// placeholder row for sources without feeds yet).
+func (m Model) sidebarLen() int {
+	if len(m.feeds) == 0 {
+		return 1
+	}
+	return len(m.feeds)
+}
+
+func (m Model) sidebarClamp() {
+	if m.sidebarSel > m.sidebarLen()-1 {
+		m.sidebarSel = 0
+	}
+}
+
+// resetSource clears the previous source's list state; feeds and counts
+// refill when the loadFeeds cmd lands.
+func (m *Model) resetSource() {
+	m.feeds = nil
+	m.counts = map[string]store.FeedCount{}
+	m.items = nil
+	m.loadedFeed = ""
+	m.listSel, m.listTop = 0, 0
+}
+
+func (m Model) selectedFeed() *core.Feed {
+	if m.sidebarSel < len(m.feeds) {
+		return &m.feeds[m.sidebarSel]
+	}
+	return nil
+}
+
+func (m Model) selectedFeedKey() string {
+	if f := m.selectedFeed(); f != nil {
+		return f.Key
+	}
+	return ""
+}
+
 func (m Model) sourceBarView() string {
 	tabs := make([]string, len(sourceIDs))
 	for i := range sourceIDs {
@@ -186,24 +382,19 @@ func (m Model) sourceBarView() string {
 	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).Render(line)
 }
 
-// sidebarRows returns the sidebar entries for the active source. M0: one
-// placeholder row per source; real feeds arrive with their milestones.
-func (m Model) sidebarRows() []string {
-	return []string{m.cat.Get("sidebar.no_feeds")}
-}
-
 func (m Model) sidebarView() string {
 	var b strings.Builder
 	b.WriteString(m.th.SidebarHeader.Render(m.cat.Get("sidebar.feeds")))
 	b.WriteString("\n")
-	for i, row := range m.sidebarRows() {
-		if i == m.sidebarSel && m.focus == regionSidebar {
-			b.WriteString(m.th.SidebarSelected.Render(" " + row))
-		} else {
-			b.WriteString(m.th.SidebarItem.Render(" " + row))
-		}
-		if i < len(m.sidebarRows())-1 {
-			b.WriteString("\n")
+	if len(m.feeds) == 0 {
+		b.WriteString(m.sidebarRow(m.cat.Get("sidebar.no_feeds"), 0, false))
+	} else {
+		for i, f := range m.feeds {
+			b.WriteString(m.sidebarRow(f.Label, m.counts[f.Key].Unread,
+				i == m.sidebarSel && m.focus == regionSidebar))
+			if i < len(m.feeds)-1 {
+				b.WriteString("\n")
+			}
 		}
 	}
 	return m.th.Sidebar.
@@ -212,16 +403,52 @@ func (m Model) sidebarView() string {
 		Render(b.String())
 }
 
-func (m Model) listView() string {
-	empty := m.th.Dim.Render(m.cat.Get("list.empty"))
-	return m.th.List.
-		Width(m.width - sidebarWidth - 2).
-		Height(m.bodyHeight()).
-		Render(empty)
+// sidebarRow renders one sidebar line: " label…  N" with the unread
+// badge, truncated to the inner width so a narrow terminal never wraps.
+func (m Model) sidebarRow(label string, unread int, selected bool) string {
+	inner := sidebarWidth - 2 // left border + padding
+	badge := ""
+	if unread > 0 {
+		badge = strconv.Itoa(unread)
+	}
+	labelW := inner - 1 - len(badge)
+	if badge != "" {
+		labelW-- // gap between label and badge
+	}
+	if labelW < 1 {
+		labelW = 1
+	}
+	name := runewidth.FillRight(runewidth.Truncate(label, labelW, "…"), labelW)
+	row := " " + name
+	if badge != "" {
+		styled := m.th.SidebarBadge.Render(badge)
+		if selected {
+			styled = m.th.SidebarSelected.Render(badge)
+		}
+		row += " " + styled
+	}
+	if selected {
+		return m.th.SidebarSelected.Render(row)
+	}
+	return m.th.SidebarItem.Render(row)
 }
 
 func (m Model) statusBarView() string {
 	left := m.th.StatusNormal.Render(m.sourceLabel(m.active))
+	if f := m.selectedFeed(); f != nil {
+		if c := m.counts[f.Key]; c.Total > 0 {
+			parts := []string{m.cat.Get("status.items", c.Total)}
+			if c.Unread > 0 {
+				parts = append(parts, m.cat.Get("status.new", c.Unread))
+			}
+			left = m.th.StatusNormal.Render(f.Label + " · " + strings.Join(parts, " · "))
+		} else {
+			left = m.th.StatusNormal.Render(f.Label)
+		}
+	}
+	if m.refreshing {
+		left = m.th.StatusAccent.Render(m.cat.Get("status.refreshing")) + "  " + left
+	}
 	if m.status != "" {
 		left += "  " + m.th.StatusAccent.Render(m.status)
 	}
@@ -234,9 +461,34 @@ func (m Model) statusBarView() string {
 		Render(left + strings.Repeat(" ", gap) + right)
 }
 
+// refreshStatus localizes a finished refresh: per-feed failures surface
+// the summary line, otherwise the new-item count. The source is taken
+// from the message, not the model — the user may have Tabbed away while
+// the fetch ran.
+func (m Model) refreshStatus(msg refreshDoneMsg) string {
+	switch {
+	case msg.err != nil:
+		return m.cat.Get("rss.feed_error", msg.source, msg.err)
+	case len(msg.results) == 0:
+		return refresh.NoFeedsHint(m.cat)
+	}
+	newSum, failed := 0, 0
+	for _, r := range msg.results {
+		if r.Err != nil {
+			failed++
+			continue
+		}
+		newSum += r.New
+	}
+	if failed > 0 {
+		return m.cat.Get("rss.summary", len(msg.results), len(msg.results)-failed, failed)
+	}
+	return m.cat.Get("status.refresh_done", newSum)
+}
+
 func (m Model) helpView() string {
-	rows := make([]string, 0, len(m0Bindings))
-	for _, b := range m0Bindings {
+	rows := make([]string, 0, len(helpBindings))
+	for _, b := range helpBindings {
 		rows = append(rows, "  "+m.th.HelpKey.Render(pad(b.key, 18))+
 			m.th.HelpDesc.Render(m.cat.Get("help.keys."+b.desc)))
 	}

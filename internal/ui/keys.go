@@ -7,9 +7,9 @@ type binding struct {
 	desc string // i18n key under help.keys.*
 }
 
-// m0Bindings are the bindings wired in the M0 skeleton. Later milestones
-// append without touching the help renderer.
-var m0Bindings = []binding{
+// helpBindings are the bindings wired today; milestones append
+// without touching the help renderer.
+var helpBindings = []binding{
 	{"Tab / Shift+Tab", "switch_source"},
 	{"← → ↑ ↓", "region_nav"},
 	{"Enter", "open"},

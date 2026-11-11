@@ -173,6 +173,118 @@ func TestFtsTextStripsMarkup(t *testing.T) {
 	}
 }
 
+func TestFeedItemsNewestFirstWithReadFlag(t *testing.T) {
+	s := migrated(t)
+	mk := func(id string, age time.Duration) core.Item {
+		it := item(id, id, "body of "+id)
+		it.PublishedAt = ptrTime(nowUTC().Add(-age))
+		return it
+	}
+	noDate := item("rss:ex:nodate", "nodate", "no date body")
+	noDate.PublishedAt = nil
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex", []core.Item{
+		mk("rss:ex:old", 48*time.Hour),
+		mk("rss:ex:new", time.Hour),
+		noDate,
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	// Read state is ticket 04's DAO; seed it raw for now.
+	if _, err := s.db.Exec(`INSERT INTO read_state (item_id, read_at) VALUES ('rss:ex:old', ?)`, nowUTC()); err != nil {
+		t.Fatalf("seed read_state: %v", err)
+	}
+
+	rows, err := s.FeedItems(t.Context(), "rss", "ex")
+	if err != nil {
+		t.Fatalf("FeedItems: %v", err)
+	}
+	// Newest first; items without a publish date slot by fetch time
+	// (just now, so first). Read flag comes from the read_state join.
+	want := []struct {
+		id   string
+		read bool
+	}{
+		{"rss:ex:nodate", false},
+		{"rss:ex:new", false},
+		{"rss:ex:old", true},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].Item.ID != w.id || rows[i].Read != w.read {
+			t.Fatalf("row %d = %s read=%v, want %s read=%v", i, rows[i].Item.ID, rows[i].Read, w.id, w.read)
+		}
+	}
+	// The snapshot columns travel with the row (offline reading).
+	if rows[1].Item.Title != "rss:ex:new" || rows[1].Item.Body != "body of rss:ex:new" || rows[1].Item.Source != "rss" || rows[1].Item.Feed != "ex" {
+		t.Fatalf("snapshot columns lost: %+v", rows[1].Item)
+	}
+	if rows[2].Item.PublishedAt == nil || rows[0].Item.PublishedAt != nil {
+		t.Fatalf("published_at roundtrip broken: %+v / %+v", rows[2].Item.PublishedAt, rows[0].Item.PublishedAt)
+	}
+}
+
+func TestFeedItemsEmptyFeedIsEmpty(t *testing.T) {
+	s := migrated(t)
+	rows, err := s.FeedItems(t.Context(), "rss", "nothing")
+	if err != nil {
+		t.Fatalf("FeedItems on empty feed: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none", rows)
+	}
+}
+
+func TestFeedCountsTotalsAndUnread(t *testing.T) {
+	s := migrated(t)
+	mk := func(feed, id string) core.Item {
+		it := item(id, id, "body")
+		it.Feed = feed
+		return it
+	}
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "a", []core.Item{
+		mk("a", "rss:a:1"), mk("a", "rss:a:2"), mk("a", "rss:a:3"),
+	}); err != nil {
+		t.Fatalf("save a: %v", err)
+	}
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "b", []core.Item{
+		mk("b", "rss:b:1"),
+	}); err != nil {
+		t.Fatalf("save b: %v", err)
+	}
+	for _, id := range []string{"rss:a:1", "rss:b:1"} {
+		if _, err := s.db.Exec(`INSERT INTO read_state (item_id, read_at) VALUES (?, ?)`, id, nowUTC()); err != nil {
+			t.Fatalf("seed read %s: %v", id, err)
+		}
+	}
+
+	counts, err := s.FeedCounts(t.Context(), "rss")
+	if err != nil {
+		t.Fatalf("FeedCounts: %v", err)
+	}
+	want := map[string]FeedCount{"a": {Total: 3, Unread: 2}, "b": {Total: 1, Unread: 0}}
+	if len(counts) != len(want) {
+		t.Fatalf("counts = %+v, want %v", counts, want)
+	}
+	for feed, w := range want {
+		if counts[feed] != w {
+			t.Fatalf("counts[%s] = %+v, want %+v", feed, counts[feed], w)
+		}
+	}
+}
+
+func TestFeedCountsEmptySource(t *testing.T) {
+	s := migrated(t)
+	counts, err := s.FeedCounts(t.Context(), "rss")
+	if err != nil {
+		t.Fatalf("FeedCounts: %v", err)
+	}
+	if len(counts) != 0 {
+		t.Fatalf("counts = %+v, want empty", counts)
+	}
+}
+
 func TestCountFeed(t *testing.T) {
 	s := migrated(t)
 	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex",

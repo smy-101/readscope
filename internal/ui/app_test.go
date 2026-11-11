@@ -5,26 +5,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/smy-101/readscope/internal/core"
-	"github.com/smy-101/readscope/internal/i18n"
-	"github.com/smy-101/readscope/internal/theme"
 )
 
 func newTestModel(t *testing.T) Model {
-	t.Helper()
-	t.Setenv("READSCOPE_CONFIG", t.TempDir())
-	t.Setenv("LC_ALL", "en_US.UTF-8")
-	cfg := core.Defaults()
-	cat, err := i18n.Load("en")
-	if err != nil {
-		t.Fatalf("i18n: %v", err)
-	}
-	th, err := theme.Load("dark")
-	if err != nil {
-		t.Fatalf("theme: %v", err)
-	}
-	return New(cfg, cat, th)
+	return seededModel(t, nil, nil)
 }
 
 func size(m Model, w, h int) Model {
@@ -66,6 +50,13 @@ func TestTabRotatesSources(t *testing.T) {
 func updateKey(m Model, msg tea.KeyMsg) Model {
 	m2, _ := m.Update(msg)
 	return m2.(Model)
+}
+
+// keyCmd presses a key keeping the returned command, for flows whose
+// loading chain the test then pumps.
+func keyCmd(m Model, msg tea.KeyMsg) (Model, tea.Cmd) {
+	m2, cmd := m.Update(msg)
+	return m2.(Model), cmd
 }
 
 func TestHelpOverlay(t *testing.T) {

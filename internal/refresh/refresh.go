@@ -61,14 +61,21 @@ func Source(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID s
 	return results, nil
 }
 
+// NoFeedsHint returns the localized "no feeds yet — add some to %s"
+// line naming sources.toml, shared by Report and the TUI status bar.
+func NoFeedsHint(cat *i18n.Catalog) string {
+	if path, err := core.SourcesPath(); err == nil {
+		return cat.Get("rss.no_feeds", path)
+	}
+	return cat.Get("rss.no_feeds", "sources.toml")
+}
+
 // Report writes the per-feed lines and a summary to out, localized via
 // cat: "阮一峰周刊: 3 new / 40 total", "label: error: …", then one
 // summary line. It returns true when every feed succeeded.
 func Report(out io.Writer, results []Result, cat *i18n.Catalog) bool {
 	if len(results) == 0 {
-		if path, err := core.SourcesPath(); err == nil {
-			fmt.Fprintln(out, cat.Get("rss.no_feeds", path))
-		}
+		fmt.Fprintln(out, NoFeedsHint(cat))
 		return true
 	}
 	ok := 0

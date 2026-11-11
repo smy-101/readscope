@@ -96,8 +96,12 @@ func runTUI() error {
 	if err := st.Migrate(); err != nil {
 		return fmt.Errorf("%s", cat.Get("errors.db_migrate", err))
 	}
+	srcs, err := core.LoadSources()
+	if err != nil {
+		return err
+	}
 
-	_, err = tea.NewProgram(ui.New(cfg, cat, th), tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(ui.New(cfg, cat, th, st, srcs), tea.WithAltScreen()).Run()
 	if err != nil {
 		if strings.Contains(err.Error(), "TTY") {
 			// Headless / piped stdin: surface a human explanation, not the
