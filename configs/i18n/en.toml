@@ -27,7 +27,6 @@ pts = "%d pts"
 comments = "%d comments"
 
 [sidebar]
-feeds = "Feeds"
 no_feeds = "no feeds yet"
 
 [list]

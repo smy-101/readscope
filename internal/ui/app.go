@@ -732,8 +732,6 @@ func (m Model) sourceBarView() string {
 
 func (m Model) sidebarView() string {
 	var b strings.Builder
-	b.WriteString(m.th.SidebarHeader.Render(m.cat.Get("sidebar.feeds")))
-	b.WriteString("\n")
 	if len(m.feeds) == 0 {
 		b.WriteString(m.sidebarRow(m.cat.Get("sidebar.no_feeds"), 0, false))
 	} else {

@@ -21,7 +21,7 @@ func TestViewRendersShell(t *testing.T) {
 	view := m.View()
 	for _, want := range []string{
 		"Bookshelf", "RSS", "Hacker News", // source bar
-		"Feeds", "no feeds yet", // sidebar
+		"no feeds yet", // sidebar
 		"No items yet", // list
 	} {
 		if !strings.Contains(view, want) {

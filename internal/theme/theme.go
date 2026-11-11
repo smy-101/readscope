@@ -25,9 +25,8 @@ type Theme struct {
 	SourceActive   lipgloss.Style
 	SourceInactive lipgloss.Style
 
-	// Left sidebar: header row + feed rows.
+	// Left sidebar: feed rows.
 	Sidebar          lipgloss.Style
-	SidebarHeader    lipgloss.Style
 	SidebarItem      lipgloss.Style
 	SidebarSelected  lipgloss.Style
 	SidebarBadge     lipgloss.Style
@@ -150,7 +149,6 @@ func build(name string, p palette) *Theme {
 		SourceInactive: lipgloss.NewStyle().Background(lipgloss.Color(p.barBg)).Foreground(lipgloss.Color(p.inactive)).Padding(0, 1),
 
 		Sidebar:          lipgloss.NewStyle().Border(lipgloss.Border{Left: "│"}, false, false, false, true).BorderForeground(lipgloss.Color(p.dim)).PaddingLeft(1),
-		SidebarHeader:    lipgloss.NewStyle().Foreground(lipgloss.Color(p.accent)).Bold(true),
 		SidebarItem:      lipgloss.NewStyle().Foreground(lipgloss.Color(p.fg)),
 		SidebarSelected:  lipgloss.NewStyle().Background(lipgloss.Color(p.selBg)).Foreground(lipgloss.Color(p.active)).Bold(true),
 		SidebarBadge:     lipgloss.NewStyle().Foreground(lipgloss.Color(p.accent)),

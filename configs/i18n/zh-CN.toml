@@ -27,7 +27,6 @@ pts = "%d 分"
 comments = "%d 条评论"
 
 [sidebar]
-feeds = "订阅"
 no_feeds = "暂无订阅"
 
 [list]
