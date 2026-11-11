@@ -25,12 +25,13 @@
 | 1 拉取 | Tab Tab F5 | Front 页 20 条真实热帖入库(items 20 行,points/num_comments 快照齐);截屏含 "867 pts · 311 comments · skittl…" 热度雷达、● 未读点、边栏四 feed 计数 "Front 20" |
 | 2 重启 | (无 F5,仅切换) | 列表即现:同一 DB 重启,未按任何刷新键,20 行缓存秒出,零 "refreshing" 态 |
 | 3 开帖 | Enter(→楼层)… Esc×3 | 链接帖正文一行原文链接("https://…");Detail 真网拉全树:**310 条评论入 comments 表**、detail_fetch 打标;楼层计数 "64 floors" 上屏 |
+| 4 四 feed | Down F5 ×3(New/Ask/Show) | 四 feed 全部真网拉通:items 按 feed 各 20 行(front/new/ask/show),feed_fetch_state 四行 pages_fetched=1;截屏 New/Ask HN/Show HN 各自出列表 |
 
 退出码均 0。
 
 ## 真机清单(用户复核,可选)
 
-手感与长时使用面(自动化够不着):
+手感与长时使用面(自动化够不着;四 feed 真网刷取已在冒烟轮 4 覆盖,此处余手感面):
 
 - [ ] 四 feed 各刷一轮,楼层层 ←→ 移动、回复层 Ctrl+N 翻页的手感
 - [ ] 窄终端(如 70 列)下热度雷达缩略、标题不折行

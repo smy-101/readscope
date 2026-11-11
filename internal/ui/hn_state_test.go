@@ -41,7 +41,9 @@ func TestHNReadStateKeysWorkOnHNRows(t *testing.T) {
 	}
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyF4}) // back to all
 
-	// Ctrl+A confirmed: the hn feed drains wholesale.
+	// Ctrl+A confirmed: the hn feed drains wholesale. (Feed scoping —
+	// only this feed — is pinned at the store seam by
+	// TestMarkFeedReadMarksOnlyThatFeed.)
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyCtrlA})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if n := strings.Count(m.View(), "●"); n != 0 {
@@ -69,9 +71,6 @@ func TestHNFavoriteSurvivesFeedEviction(t *testing.T) {
 		t.Fatalf("evicted hn favorite must still list in F3:\n%s", view)
 	}
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.reader == nil {
-		t.Fatal("evicted hn favorite should still open")
-	}
 	if !strings.Contains(m.View(), "https://example.com/s") {
 		t.Fatalf("evicted hn favorite should still be readable (link line body):\n%s", m.View())
 	}

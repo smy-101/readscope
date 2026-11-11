@@ -12,4 +12,6 @@
 - [x] README 双语 HN 章节与 PLAN ADR #13、GLOSSARY 术语对齐;`go vet` + `go test ./...`(含 -race)全绿
 - [x] 真二进制冒烟:真机 Algolia 拉取一轮(网络受限时记录替代验证方式)
 
-自动化证据、真网三轮冒烟记录与(可选的)用户复核清单见 [../acceptance.md](../acceptance.md)。本票新增钉子:`TestHNReadStateKeysWorkOnHNRows`、`TestHNFavoriteSurvivesFeedEviction`,F1 帮助测试补 `← →` 楼层导航断言;README 双语补三层阅读结构(对齐 ADR #13 的楼层制+两层扁平化+@parent)并更新里程碑状态行。
+自动化证据、真网四轮冒烟记录与(可选的)用户复核清单见 [../acceptance.md](../acceptance.md)。本票新增钉子:`TestHNReadStateKeysWorkOnHNRows`、`TestHNFavoriteSurvivesFeedEviction`,F1 帮助测试补 `← →` 楼层导航断言;README 双语补三层阅读结构(对齐 ADR #13 的楼层制+两层扁平化+@parent)并更新里程碑状态行。
+
+与 M2 07 先例的有意偏差:五项验收全部拿到了自动化/真网证据(含真机 Algolia 冒烟),被翻为 `[x]`;交互手感复核降级为 acceptance.md 里的可选清单,而非像 M2 那样单独占一个未勾选真机项。
