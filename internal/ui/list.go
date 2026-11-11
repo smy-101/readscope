@@ -126,26 +126,42 @@ func (m Model) listView() string {
 	lines := make([]string, 0, end-top)
 	for i := top; i < end; i++ {
 		row := m.items[i]
+		selected := i == m.listSel
 		// Marker column: ★ starred (star wins the slot), ● unread,
 		// blank read. The title dims on read state only — a star never
 		// dims.
-		dot, titleStyle := " ", m.th.TitleRead
+		marker, titleStyle := " ", m.th.TitleRead
 		if row.Starred {
-			dot = m.th.UnreadDot.Render("★")
+			marker = "★"
 		} else if !row.Read {
-			dot = m.th.UnreadDot.Render("●")
+			marker = "●"
 		}
 		if !row.Read {
 			titleStyle = m.th.Title
 		}
+		// The selected row re-renders every segment through
+		// ListSelected (the sidebar's badge trick): wrapping an
+		// already-styled line in ListSelected dies at the first
+		// embedded reset, which lit up only the marker column — the
+		// cursor looked like a lone dot instead of a full-row bar.
+		markerStyle, metaStyle := m.th.UnreadDot, m.th.Meta
+		if selected {
+			markerStyle, titleStyle, metaStyle = m.th.ListSelected, m.th.ListSelected, m.th.ListSelected
+		}
 		title := runewidth.FillRight(runewidth.Truncate(row.Item.Title, titleW, "…"), titleW)
-		line := dot + " " + titleStyle.Render(title)
+		// Inter-segment gaps ride inside the neighbouring render, so
+		// the selection bar has no unstyled holes.
+		line := markerStyle.Render(marker+" ") + titleStyle.Render(title)
 		if metaW > 0 {
 			meta := runewidth.FillLeft(runewidth.Truncate(metas[i], metaW, "…"), metaW)
-			line += " " + m.th.Meta.Render(meta)
+			line += metaStyle.Render(" " + meta)
 		}
-		if i == m.listSel {
-			line = m.th.ListSelected.Render(lipgloss.NewStyle().Width(usable).Render(line))
+		if selected {
+			// Pad the bar to the full usable width in the selection
+			// style — the row reads as one highlighted line.
+			if pad := usable - lipgloss.Width(line); pad > 0 {
+				line += m.th.ListSelected.Render(strings.Repeat(" ", pad))
+			}
 		}
 		lines = append(lines, line)
 	}

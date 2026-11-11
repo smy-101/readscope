@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/i18n"
@@ -306,6 +308,74 @@ func TestNarrowTerminalStaysIntact(t *testing.T) {
 		t.Fatalf("truncated title should end with an ellipsis:\n%s", view)
 	}
 }
+
+// TestSelectedRowHighlightsFullWidth: the selected list row must read
+// as one full-width bar. Wrapping an already-styled line in
+// ListSelected dies at the first embedded reset, so the highlight
+// collapsed onto the marker column and the cursor looked like a lone
+// dot. The fix re-renders every segment through ListSelected — assert
+// marker, title and meta each open with the selection escape
+// (#ffffff on #094771, the dark theme), and that the bar reaches the
+// row's right edge (the meta segment closes the line).
+func TestSelectedRowHighlightsFullWidth(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+
+	m := seededModel(t,
+		map[string]core.RSSFeed{"f": {Label: "Feed", URL: "http://127.0.0.1:1/x"}},
+		map[string][]core.Item{"f": {
+			{ID: "rss:f:0", Source: "rss", Feed: "f", Title: "First story here", FetchedAt: time.Now().UTC(), PublishedAt: ptrTime(time.Now().UTC())},
+			{ID: "rss:f:1", Source: "rss", Feed: "f", Title: "Second story here", FetchedAt: time.Now().UTC(), PublishedAt: ptrTime(time.Now().UTC())},
+		}},
+	)
+	m = size(m, 100, 24)
+	var cmd tea.Cmd
+	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = pump(t, m, cmd)
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyRight}) // sidebar → list focus
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyDown})  // sel = 1
+	if m.listSel != 1 {
+		t.Fatalf("setup: sel=%d, want 1", m.listSel)
+	}
+	// The sorted list decides which title sits on the cursor — read it
+	// back instead of assuming an order.
+	wantSel, wantOther := m.items[1].Item.Title, m.items[0].Item.Title
+
+	const sel = "\x1b[38;2;255;255;255;48;2;9;71;113m"
+	var selLine, otherLine string
+	for _, ln := range strings.Split(m.View(), "\n") {
+		switch {
+		case strings.Contains(ln, wantSel):
+			selLine = ln
+		case strings.Contains(ln, wantOther):
+			otherLine = ln
+		}
+	}
+	if selLine == "" || otherLine == "" {
+		t.Fatalf("setup: rows not found in view:\n%s", m.View())
+	}
+	if !strings.Contains(selLine, sel+"●") {
+		t.Errorf("marker column not highlighted:\n%q", selLine)
+	}
+	if !strings.Contains(selLine, sel+wantSel) {
+		t.Errorf("title not highlighted (highlight collapses at the first embedded reset):\n%q", selLine)
+	}
+	// The meta segment is the row's last content, so the bar reaches
+	// the right edge: <sel>·spaces·“now”·reset at end of line.
+	metaEnd := regexp.MustCompile(regexp.QuoteMeta(sel) + ` +now` + `\x1b\[0m[ \t]*$`)
+	if !metaEnd.MatchString(selLine) {
+		t.Errorf("meta column not highlighted — bar stops before the row's right edge:\n%q", selLine)
+	}
+	if strings.Count(selLine, sel) < 3 {
+		t.Errorf("want marker+title+meta segments highlighted, got %d:\n%q", strings.Count(selLine, sel), selLine)
+	}
+	if strings.Contains(otherLine, "48;2;9;71;113") {
+		t.Errorf("unselected row must not carry the selection background:\n%q", otherLine)
+	}
+}
+
+// ptrTime is a tiny helper for optional timestamps in seed items.
+func ptrTime(t time.Time) *time.Time { return &t }
 
 // TestRefreshKeepsCursorPosition: during an F5 fetch the user keeps
 // browsing (spec: “期间可继续操作”); when the fetch lands and the same
