@@ -13,8 +13,10 @@ func TestLoadSourcesMissingFileGivesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
-	if len(srcs.Enabled) != 1 || srcs.Enabled[0] != "rss" {
-		t.Fatalf("Enabled = %v, want [rss]", srcs.Enabled)
+	// Fresh installs ship both feeds sources: rss needs subscriptions,
+	// hn works with none (four fixed feeds) — zero-config readable.
+	if len(srcs.Enabled) != 2 || srcs.Enabled[0] != "rss" || srcs.Enabled[1] != "hn" {
+		t.Fatalf("Enabled = %v, want [rss hn]", srcs.Enabled)
 	}
 	if len(srcs.RSS.Feeds) != 0 {
 		t.Fatalf("Feeds = %v, want empty", srcs.RSS.Feeds)
@@ -32,8 +34,8 @@ func TestLoadSourcesFileWithoutEnabledDefaultsRSS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
-	if len(srcs.Enabled) != 1 || srcs.Enabled[0] != "rss" {
-		t.Fatalf("Enabled = %v, want [rss] default", srcs.Enabled)
+	if len(srcs.Enabled) != 2 || srcs.Enabled[0] != "rss" || srcs.Enabled[1] != "hn" {
+		t.Fatalf("Enabled = %v, want [rss hn] default", srcs.Enabled)
 	}
 	if f := srcs.RSS.Feeds["blog"]; f.Label != "Blog" || f.URL != "https://x.example/feed" {
 		t.Fatalf("feed blog = %+v", f)
@@ -84,8 +86,8 @@ func TestSourcesSaveLoadRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
-	if len(got.Enabled) != 1 || got.Enabled[0] != "rss" {
-		t.Fatalf("Enabled = %v, want [rss]", got.Enabled)
+	if len(got.Enabled) != 2 || got.Enabled[0] != "rss" || got.Enabled[1] != "hn" {
+		t.Fatalf("Enabled = %v, want [rss hn]", got.Enabled)
 	}
 	if len(got.RSS.Feeds) != 2 {
 		t.Fatalf("Feeds = %v, want 2", got.RSS.Feeds)

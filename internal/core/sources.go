@@ -40,17 +40,20 @@ func SourcesPath() (string, error) {
 }
 
 // DefaultSources is the subscription state when no file exists yet:
-// the RSS source enabled, with no feeds. A fresh install therefore
-// renders the TUI happily and `rss refresh` says "no feeds" instead of
-// erroring.
+// both feeds sources enabled, in rail order — rss starts with no
+// feeds (add some), hn needs none (its four feeds are fixed). A fresh
+// install therefore renders the TUI happily, reads HN after one F5,
+// and `rss refresh` says "no feeds" instead of erroring.
 func DefaultSources() *Sources {
-	return &Sources{Enabled: []string{"rss"}}
+	return &Sources{Enabled: []string{"rss", "hn"}}
 }
 
 // LoadSources reads sources.toml; a missing file yields the default.
 // Like Config, a malformed file is an error naming the path, never
 // silently ignored. An explicit empty `enabled = []` is honored; a file
-// that omits the key entirely falls back to ["rss"].
+// that omits the key entirely falls back to the default pair. An
+// existing sources.toml is never rewritten — upgrading installs add
+// "hn" to enabled by hand (README documents the line).
 func LoadSources() (*Sources, error) {
 	path, err := SourcesPath()
 	if err != nil {

@@ -24,10 +24,10 @@ import (
 // ID is the source id in sources.toml.
 const ID = "rss"
 
-// UserAgent identifies readscope to feed hosts. The version suffix is
-// not wired in yet (cmd owns Version); worth revisiting if hosts care.
-// Doctor's feed probe sends the same string so hosts see one client.
-const UserAgent = "readscope (+https://github.com/smy-101/readscope)"
+// UserAgent moved to the seam (source.UserAgent) so every source
+// package shares one client identity; the alias keeps doctor and
+// tests stable.
+const UserAgent = source.UserAgent
 
 // maxFeedBytes caps a feed body at 10 MiB, same budget `render` allows.
 const maxFeedBytes = 10 << 20

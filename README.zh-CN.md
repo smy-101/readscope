@@ -46,7 +46,7 @@ readscope version         # 打印版本
 订阅写在 `sources.toml`，与 `config.toml` 同目录（`readscope doctor` 会打印两个路径）：
 
 ```toml
-enabled = ["rss"]
+enabled = ["rss", "hn"]
 
 [rss.feeds]
 ruanyifeng = { label = "阮一峰周刊", url = "https://www.ruanyifeng.com/blog/atom.xml" }
@@ -59,6 +59,19 @@ map 的键是稳定 slug（用于条目 id 与边栏）；`label` 可省，回�
 
 与其他阅读器互迁走 OPML：`readscope rss import subs.opml` 合并（已有订阅不动），
 `readscope rss export subs.opml` 导出标准 OPML 2.0。
+
+> 从旧版升级？`sources.toml` 不会被自动改写——手动在 `enabled` 里加一行 `"hn"`
+> 即可开启下面的 Hacker News 源。
+
+### Hacker News
+
+Tab 切到 Hacker News，边栏固定四类 feed——热门 / 最新 / Ask HN / Show HN——数据来自
+[Algolia HN Search](https://hn.algolia.com) 公共索引（免账号、免 key）。`F5` 把当前
+feed 拉进与 RSS 同一套离线缓存：帖子快照进 SQLite，● 未读点 / 已读 / 收藏机制完全
+一致，断网照样可读。HN 刷新恒为无条件重拉（索引无条件请求语义）。链接帖的正文
+就是一行原文链接（`Ctrl+O` 直接打开）；文本帖（Ask/Show）的正文走与 RSS 同一条
+渲染管线。注意：Algolia 索引滞后站点几分钟，排序按 points/时间而非 HN 官方排名
+——readscope 不承诺官方排序。
 
 `readscope doctor` 会用同一个 User-Agent 逐个试连订阅，报告 ✓ 可达（带耗时）、
 ! 慢（超过 3 秒，警告）或 ✗ 失败（退出码 1）——一眼分清是源挂了还是环境坏了。

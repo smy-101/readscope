@@ -48,7 +48,7 @@ readscope version         # print version
 Subscriptions live in `sources.toml`, next to `config.toml` (`readscope doctor` prints both paths):
 
 ```toml
-enabled = ["rss"]
+enabled = ["rss", "hn"]
 
 [rss.feeds]
 ruanyifeng = { label = "阮一峰周刊", url = "https://www.ruanyifeng.com/blog/atom.xml" }
@@ -60,6 +60,22 @@ falls back to the key. Refreshes send conditional requests (ETag / If-Modified-S
 unchanged feeds cost a 304 and skip parsing; items are snapshotted into SQLite — lists
 paint from cache and full text stays readable offline. In the TUI, `F5` refreshes in the
 background.
+
+> Upgrading from an older install? `sources.toml` is never rewritten automatically —
+> add `"hn"` to your `enabled` list by hand to turn on the Hacker News source below.
+
+### Hacker News
+
+Tab over to Hacker News for four fixed feeds — Front / New / Ask HN / Show HN — served by
+the public [Algolia HN Search API](https://hn.algolia.com) (no account, no key). `F5`
+refreshes the current feed into the same offline cache as RSS: stories snapshot to
+SQLite, the unread dot / read / star mechanics all work identically, and everything
+stays readable offline. HN refreshes are always plain refetches — the index has no
+conditional-request semantics. Link posts store the article link as their body (open it
+with `Ctrl+O`); text posts (Ask/Show) carry their own HTML through the same render
+pipeline as RSS bodies. Note the Algolia index lags the site by a few minutes and ranks
+by points/date, not by HN's official ordering — readscope does not promise official
+ranking.
 
 Moving in or out of another reader is OPML all the way: `readscope rss import subs.opml`
 merges (existing subscriptions untouched), `readscope rss export subs.opml` writes a

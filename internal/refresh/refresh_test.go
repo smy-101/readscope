@@ -2,6 +2,7 @@ package refresh
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/smy-101/readscope/internal/i18n"
 	"github.com/smy-101/readscope/internal/store"
 
+	_ "github.com/smy-101/readscope/internal/source/hn"  // registry: hn
 	_ "github.com/smy-101/readscope/internal/source/rss" // registry: rss
 )
 
@@ -323,5 +325,88 @@ func TestRefreshFailureKeepsStoredState(t *testing.T) {
 	}
 	if r := results2[0]; r.Err != nil || !r.Unchanged {
 		t.Fatalf("recovered refresh should 304: %+v", r)
+	}
+}
+
+// The M3 ticket 01 tracer bullet for HN: one refresh cycle over a fake
+// Algolia index — four feeds fetched, snapshotted, counted — then a
+// second cycle proving refreshes are idempotent and read state never
+// moves. READSCOPE_HN_BASE points the hn source at the fake server;
+// no external network anywhere.
+func TestRefreshHNTracerBullet(t *testing.T) {
+	hit := func(id, title string) string {
+		return fmt.Sprintf(`{"hits":[{"objectID":%q,"title":%q,"url":"https://example.com/s",`+
+			`"author":"u","created_at_i":1700000000}],"nbHits":1,"page":0,"nbPages":1,"hitsPerPage":20}`,
+			id, title)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fixtures := map[string]string{
+			"front_page": hit("1001", "Front story"),
+			"story":      hit("2001", "New story"),
+			"ask_hn":     hit("3001", "Ask story"),
+			"show_hn":    hit("4001", "Show story"),
+		}
+		body, ok := fixtures[r.URL.Query().Get("tags")]
+		if !ok {
+			http.Error(w, "no fixture", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_HN_BASE", srv.URL+"/api/v1")
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "hn.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	srcs := core.DefaultSources()
+	results, err := Source(context.Background(), st, srcs, "hn")
+	if err != nil {
+		t.Fatalf("Source: %v", err)
+	}
+	if len(results) != 4 {
+		t.Fatalf("got %d results, want 4 (one per fixed feed)", len(results))
+	}
+	byFeed := map[string]Result{}
+	for _, r := range results {
+		if r.Err != nil || r.New != 1 || r.Total != 1 {
+			t.Fatalf("%s = %+v", r.Feed, r)
+		}
+		byFeed[r.Feed] = r
+	}
+	if _, ok := byFeed["front"]; !ok {
+		t.Fatal("front feed missing from results")
+	}
+
+	// Reading a story, then refreshing again: no new rows, and the
+	// read dot survives the snapshot refresh.
+	if err := st.SetRead(context.Background(), "hn:algolia:1001", true); err != nil {
+		t.Fatalf("SetRead: %v", err)
+	}
+	results2, err := Source(context.Background(), st, srcs, "hn")
+	if err != nil {
+		t.Fatalf("second Source: %v", err)
+	}
+	for _, r := range results2 {
+		if r.Err != nil || r.New != 0 || r.Total != 1 {
+			t.Fatalf("second refresh should add nothing: %+v", r)
+		}
+	}
+	rows, err := st.FeedItems(context.Background(), "hn", "front", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems(front) = %d rows, %v", len(rows), err)
+	}
+	if !rows[0].Read {
+		t.Fatal("read state must survive a refresh")
+	}
+	if rows[0].Item.ID != "hn:algolia:1001" {
+		t.Fatalf("item id = %q, want hn:algolia:1001", rows[0].Item.ID)
 	}
 }

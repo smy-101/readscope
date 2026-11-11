@@ -18,6 +18,12 @@ books = "书架"
 rss = "RSS"
 hn = "Hacker News"
 
+[hn]
+front = "热门"
+new = "最新"
+ask = "Ask HN"
+show = "Show HN"
+
 [sidebar]
 feeds = "订阅"
 no_feeds = "暂无订阅"

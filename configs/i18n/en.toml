@@ -18,6 +18,12 @@ books = "Bookshelf"
 rss = "RSS"
 hn = "Hacker News"
 
+[hn]
+front = "Front"
+new = "New"
+ask = "Ask HN"
+show = "Show HN"
+
 [sidebar]
 feeds = "Feeds"
 no_feeds = "no feeds yet"

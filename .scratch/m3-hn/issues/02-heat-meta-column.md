@@ -8,6 +8,7 @@
 
 - [ ] migration 可重放,旧库升级后 RSS 行为完全不变
 - [ ] HN 刷新写入 points / 评论数;再次刷新更新快照值
+- [ ] front/ask/show 列表按 points 序(= Algolia 返回序)渲染,new 保持时间序(01 转入:返回序渲染依赖本票快照列)
 - [ ] HN 列表行元信息列 "N pts · N comments · author";字段缺失优雅降级,不出现空段
 - [ ] RSS 列表与 F3 收藏列表行不受影响(回归)
 - [ ] 窄终端下元信息列截断规则与现有列表一致,不碎行

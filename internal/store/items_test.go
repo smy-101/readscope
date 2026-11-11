@@ -298,3 +298,49 @@ func TestCountFeed(t *testing.T) {
 		t.Fatalf("empty feed count = %d, %v", n, err)
 	}
 }
+
+// HN story ids are global per source ("hn:algolia:<storyID>"), so the
+// same story can arrive from two feeds — Front and New both list a
+// story that just hit the front page. The row re-homes to the feed
+// that last saw it: one row, not a PK violation, and read state (keyed
+// by item id) survives the move untouched.
+func TestSaveFeedItemsRehomesCrossFeedID(t *testing.T) {
+	s := migrated(t)
+	hnStory := func(feed, title string) core.Item {
+		return core.Item{
+			ID: "hn:algolia:1001", Source: "hn", Feed: feed,
+			Title: title, FetchedAt: nowUTC(),
+		}
+	}
+	newCount, total, err := s.SaveFeedItems(t.Context(), "hn", "front",
+		[]core.Item{hnStory("front", "Hot story")})
+	if err != nil || newCount != 1 || total != 1 {
+		t.Fatalf("first save = %d/%d, %v", newCount, total, err)
+	}
+	if err := s.SetRead(t.Context(), "hn:algolia:1001", true); err != nil {
+		t.Fatalf("SetRead: %v", err)
+	}
+
+	// Same story id served by the new feed: re-homed, not a new row.
+	newCount, total, err = s.SaveFeedItems(t.Context(), "hn", "new",
+		[]core.Item{hnStory("new", "Hot story")})
+	if err != nil {
+		t.Fatalf("cross-feed save: %v", err)
+	}
+	if newCount != 0 {
+		t.Fatalf("re-homing is not new: new = %d, want 0", newCount)
+	}
+	if total != 1 {
+		t.Fatalf("new feed total = %d, want 1", total)
+	}
+	if n, err := s.CountFeed(t.Context(), "hn", "front"); err != nil || n != 0 {
+		t.Fatalf("front should be empty after re-home, got %d, %v", n, err)
+	}
+	rows, err := s.FeedItems(t.Context(), "hn", "new", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems(new) = %d rows, %v", len(rows), err)
+	}
+	if !rows[0].Read {
+		t.Fatal("read state must survive the re-home")
+	}
+}

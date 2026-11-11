@@ -8,6 +8,7 @@ package ui
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -534,6 +535,11 @@ func (m *Model) cycleSource(delta int) {
 	m.reader = nil // the overlay belongs to the previous source's list
 	m.favorites = false
 	m.confirming = false
+	// A source with no registered package (books until M4) is a
+	// mystery blank without a word — the status bar says what's up.
+	if !slices.Contains(source.IDs(), m.activeSourceID()) {
+		m.status = m.cat.Get("status.todo")
+	}
 	m.resetSource()
 }
 
@@ -569,6 +575,19 @@ func (m Model) selectedFeed() *core.Feed {
 	return nil
 }
 
+// feedLabel resolves a feed's display label: sources with fixed
+// feeds (hn) ship i18n keys, so the catalog localizes them;
+// user-configured labels (rss) render as-is.
+func (m Model) feedLabel(f *core.Feed) string {
+	if f == nil {
+		return ""
+	}
+	if f.LabelKey != "" {
+		return m.cat.Get(f.LabelKey)
+	}
+	return f.Label
+}
+
 func (m Model) selectedFeedKey() string {
 	if f := m.selectedFeed(); f != nil {
 		return f.Key
@@ -600,7 +619,7 @@ func (m Model) sidebarView() string {
 		b.WriteString(m.sidebarRow(m.cat.Get("sidebar.no_feeds"), 0, false))
 	} else {
 		for i, f := range m.feeds {
-			b.WriteString(m.sidebarRow(f.Label, m.counts[f.Key].Unread,
+			b.WriteString(m.sidebarRow(m.feedLabel(&f), m.counts[f.Key].Unread,
 				i == m.sidebarSel && m.focus == regionSidebar))
 			if i < len(m.feeds)-1 {
 				b.WriteString("\n")
@@ -661,14 +680,15 @@ func (m Model) statusBarView() string {
 			left += "  " + m.th.StatusNormal.Render(m.cat.Get("status.items", n))
 		}
 	} else if f := m.selectedFeed(); f != nil {
+		label := m.feedLabel(f)
 		if c := m.counts[f.Key]; c.Total > 0 {
 			parts := []string{m.cat.Get("status.items", c.Total)}
 			if c.Unread > 0 {
 				parts = append(parts, m.cat.Get("status.new", c.Unread))
 			}
-			left = m.th.StatusNormal.Render(f.Label + " · " + strings.Join(parts, " · "))
+			left = m.th.StatusNormal.Render(label + " · " + strings.Join(parts, " · "))
 		} else {
-			left = m.th.StatusNormal.Render(f.Label)
+			left = m.th.StatusNormal.Render(label)
 		}
 	}
 	if m.refreshing {
@@ -722,7 +742,7 @@ func (m Model) refreshStatus(msg refreshDoneMsg) string {
 func (m Model) confirmView() string {
 	label := ""
 	if f := m.selectedFeed(); f != nil {
-		label = f.Label
+		label = m.feedLabel(f)
 	}
 	box := m.th.HelpOverlay.Render(
 		m.th.HelpTitle.Render(m.cat.Get("confirm.mark_all", label)) + "\n\n" +

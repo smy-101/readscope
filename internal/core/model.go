@@ -7,9 +7,10 @@ import "time"
 // display label and the origin the items are fetched from. For RSS the
 // URL is the feed's own address; other sources may use it differently.
 type Feed struct {
-	Key   string // stable slug, e.g. "ruanyq" (sources.toml key)
-	Label string // display name, defaults to Key
-	URL   string // fetch origin
+	Key      string // stable slug, e.g. "ruanyq" (sources.toml key)
+	Label    string // display name, defaults to Key
+	URL      string // fetch origin
+	LabelKey string // i18n key; when set the UI resolves the label through the language pack (hn's fixed feeds)
 }
 
 // Item is one list entry from any source, persisted as an offline

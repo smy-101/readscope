@@ -13,9 +13,13 @@ import (
 // unseen items insert, known items update their content in place
 // (ids are deterministic), and the FTS index rows for those items are
 // rebuilt. read_state rows are never touched here — read/star survive
-// every refresh by construction. It returns how many items were new
-// and the feed's total item count after the save. A feed serving the
-// same id twice in one response keeps the first occurrence.
+// every refresh by construction. Ids are unique per source, so a
+// known-item check scans the whole source, and an id arriving under a
+// different feed re-homes its single row to that feed (HN story ids
+// roam between Front and New; rss ids embed the feed key, making
+// this exactly equivalent for them). It returns how many items were
+// new and the feed's total item count after the save. A feed serving
+// the same id twice in one response keeps the first occurrence.
 func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, items []core.Item) (newCount, total int, err error) {
 	for _, it := range items {
 		if it.Source != sourceID || it.Feed != feedKey {
@@ -29,7 +33,7 @@ func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, ite
 	defer tx.Rollback() // no-op after Commit
 
 	existing := map[string]bool{}
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM items WHERE source = ? AND feed = ?`, sourceID, feedKey)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM items WHERE source = ?`, sourceID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -55,9 +59,9 @@ func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, ite
 
 		if existing[it.ID] {
 			_, err = tx.ExecContext(ctx, `UPDATE items
-				SET title = ?, url = ?, author = ?, published_at = ?, fetched_at = ?, body = ?
+				SET feed = ?, title = ?, url = ?, author = ?, published_at = ?, fetched_at = ?, body = ?
 				WHERE id = ?`,
-				it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body, it.ID)
+				feedKey, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body, it.ID)
 		} else {
 			_, err = tx.ExecContext(ctx, `INSERT INTO items
 				(id, source, feed, title, url, author, published_at, fetched_at, body)

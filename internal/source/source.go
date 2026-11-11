@@ -38,6 +38,12 @@ type ConditionalSource interface {
 		items []core.Item, next core.FetchState, changed bool, err error)
 }
 
+// UserAgent identifies readscope to every content host (feeds now,
+// Hacker News in M3) — one client identity, so hosts and the doctor's
+// probe all see the same reader. The version suffix is not wired in
+// yet (cmd owns Version); worth revisiting if hosts care.
+const UserAgent = "readscope (+https://github.com/smy-101/readscope)"
+
 // Constructor builds one source from the user's subscription config;
 // each implementation picks the tables it needs from Sources.
 type Constructor func(srcs *core.Sources) (Source, error)
