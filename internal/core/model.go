@@ -51,6 +51,28 @@ type Item struct {
 	NumComments *int
 }
 
+// Comment is one node of an item's comment tree (columns map 1:1
+// onto the comments table). ParentID is "" for a top-level floor;
+// Text is the HTML (or plain) snapshot as fetched; Score stays nil
+// for sources whose API gives no per-comment points (Algolia's tree
+// endpoint never does).
+type Comment struct {
+	ID        string
+	ParentID  string
+	Author    string
+	Text      string
+	Score     *int
+	CreatedAt *time.Time
+}
+
+// Content is the detail layer behind one list item: what a
+// DetailSource returns when the reader opens a post. For hn it is the
+// whole comment tree in tree order — floors in payload order, each
+// followed by its subtree, parents strictly before children.
+type Content struct {
+	Comments []Comment
+}
+
 // FetchState is one feed's conditional-request memory: the validators
 // (ETag / Last-Modified) the server sent last time, so the next fetch
 // can ask "anything new?" and a 304 answer costs no body transfer.

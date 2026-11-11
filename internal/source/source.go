@@ -38,6 +38,18 @@ type ConditionalSource interface {
 		items []core.Item, next core.FetchState, changed bool, err error)
 }
 
+// DetailSource is the optional detail extension, the same
+// probe-don't-register pattern as ConditionalSource: a source whose
+// items have a second layer behind the list row. For hn that is the
+// story's whole comment tree, fetched in one request; the caller
+// snapshots it through the store's comments DAO. Sources that don't
+// implement it (rss: the body already rides the list snapshot) are
+// unaffected — callers probe with a type assertion.
+type DetailSource interface {
+	Source
+	Detail(ctx context.Context, it core.Item) (core.Content, error)
+}
+
 // UserAgent identifies readscope to every content host (feeds now,
 // Hacker News in M3) — one client identity, so hosts and the doctor's
 // probe all see the same reader. The version suffix is not wired in
