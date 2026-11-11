@@ -48,6 +48,18 @@ func loadCatalog() (*i18n.Catalog, error) {
 	return i18n.Load(cfg.Language)
 }
 
+// loadSources reads sources.toml, printing and returning nil on
+// failure — the three rss subcommands share the same die-and-exit-1
+// path for it.
+func loadSources() *core.Sources {
+	srcs, err := core.LoadSources()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "readscope: %v\n", err)
+		return nil
+	}
+	return srcs
+}
+
 // loadCatalogLenient opens the user's language pack, falling back to
 // the default whenever anything is broken. The import/export
 // maintenance commands use it: a typo in config.toml must not block
@@ -77,9 +89,8 @@ func runRssRefresh(args []string) int {
 		return 1
 	}
 
-	srcs, err := core.LoadSources()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "readscope: %v\n", err)
+	srcs := loadSources()
+	if srcs == nil {
 		return 1
 	}
 
@@ -132,9 +143,8 @@ func runRssImport(args []string) int {
 		fmt.Fprintln(os.Stderr, "readscope:", cat.Get("errors.opml_parse", args[0], err))
 		return 1
 	}
-	srcs, err := core.LoadSources()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "readscope: %v\n", err)
+	srcs := loadSources()
+	if srcs == nil {
 		return 1
 	}
 	oc := opml.Import(srcs, doc)
@@ -156,9 +166,8 @@ func runRssExport(args []string) int {
 	}
 	cat := loadCatalogLenient()
 
-	srcs, err := core.LoadSources()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "readscope: %v\n", err)
+	srcs := loadSources()
+	if srcs == nil {
 		return 1
 	}
 	if err := os.WriteFile(args[0], opml.Encode(srcs.RSS.Feeds), 0o644); err != nil {

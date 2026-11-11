@@ -19,3 +19,8 @@
 - 导入隐含启用 rss 源(enabled 缺 rss 时追加);已有订阅永不改动,URL 去重(配置内 + 文档内)。
 - 导出为标准 OPML 2.0,按键序稳定输出(无 dateCreated,字节级稳定);无 label 时 text 回退为键。
 - refresh 保持严格配置错误退出;import/export 用宽松目录加载(config.toml 坏不阻塞维护命令)。
+
+**评审记录(2025-11-11, 双轴 review):** 无阻塞项;两条 P2 记为决策:
+- 语法级脏 XML(非枚举的容错场景)整篇拒绝并退出 1 —— "能导入多少导多少"限定于票面枚举的内容级脏(缺 title、非标嵌套);容忍语法损坏的正则扫描属投机机制,不做。
+- 导出为扁平 outline:PLAN §5 的 sources.toml 无 folder 概念,层级无处安放;主流阅读器真机导入冒烟并入 07 号验收票执行。
+- 评审顺手项:rss.go 三处 LoadSources 错误块提取为 loadSources() 助手。
