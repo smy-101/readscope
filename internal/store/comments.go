@@ -3,9 +3,8 @@
 // transaction) every time a Detail fetch comes back — repeat opens
 // and background refreshes replace, never append, so no duplicate
 // rows and no stale floors can survive. Tree order (parents strictly
-// before children, DFS pre-order from the fetch) is preserved as
-// insertion order; reads return it via rowid, which a whole-tree
-// replace renumbers coherently.
+// before children, DFS pre-order from the fetch) is carried by the
+// seq column, which every whole-tree replace rewrites from zero.
 
 package store
 
@@ -32,7 +31,7 @@ func (s *Store) SaveComments(ctx context.Context, itemID string, comments []core
 	if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE item_id = ?`, itemID); err != nil {
 		return fmt.Errorf("clear comments %s: %w", itemID, err)
 	}
-	for _, cm := range comments {
+	for i, cm := range comments {
 		var parent any // NULL for a top-level floor
 		if cm.ParentID != "" {
 			parent = cm.ParentID
@@ -42,9 +41,9 @@ func (s *Store) SaveComments(ctx context.Context, itemID string, comments []core
 			score = *cm.Score
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO comments
-			(item_id, id, parent_id, author, text, score, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			itemID, cm.ID, parent, cm.Author, cm.Text, score, cm.CreatedAt); err != nil {
+			(item_id, id, parent_id, author, text, score, created_at, seq)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			itemID, cm.ID, parent, cm.Author, cm.Text, score, cm.CreatedAt, i); err != nil {
 			return fmt.Errorf("store comment %s/%s: %w", itemID, cm.ID, err)
 		}
 	}
@@ -59,9 +58,9 @@ func (s *Store) SaveComments(ctx context.Context, itemID string, comments []core
 // forward pass.
 func (s *Store) CommentsForItem(ctx context.Context, itemID string) ([]core.Comment, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, parent_id, author, text, score, created_at
-		FROM comments WHERE item_id = ? ORDER BY rowid`, itemID)
+		FROM comments WHERE item_id = ? ORDER BY seq, rowid`, itemID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load comments %s: %w", itemID, err)
 	}
 	defer rows.Close()
 	var out []core.Comment

@@ -11,19 +11,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/smy-101/readscope/internal/core"
-	"github.com/smy-101/readscope/internal/source"
 )
-
-// itemIDPrefix is the deterministic list-layer id prefix Detail
-// reverses to recover the story id.
-const itemIDPrefix = ID + ":algolia:"
 
 // Detail implements source.DetailSource: the story's whole comment
 // tree in one request. The story node itself is not returned — its
@@ -35,23 +28,9 @@ func (s *Source) Detail(ctx context.Context, it core.Item) (core.Content, error)
 	if !ok {
 		return core.Content{}, fmt.Errorf("detail: %q is not an hn story id", it.ID)
 	}
-	url := s.base + "/items/" + storyID
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	raw, err := s.get(ctx, s.base+"/items/"+storyID, "detail "+storyID)
 	if err != nil {
-		return core.Content{}, fmt.Errorf("detail %s: %w", storyID, err)
-	}
-	req.Header.Set("User-Agent", source.UserAgent)
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return core.Content{}, fmt.Errorf("detail %s: %w", storyID, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return core.Content{}, fmt.Errorf("detail %s: HTTP %s", storyID, resp.Status)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
-	if err != nil {
-		return core.Content{}, fmt.Errorf("detail %s: %w", storyID, err)
+		return core.Content{}, err
 	}
 	var root itemNode
 	if err := json.Unmarshal(raw, &root); err != nil {

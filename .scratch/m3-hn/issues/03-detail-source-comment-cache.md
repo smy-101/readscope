@@ -22,3 +22,9 @@
 - 评论 id 存 Algolia 原始数字串(PK 为 (item_id,id),item_id 已限定作用域)
 - "rss 不受影响"由既有全套 rss 测试照常通过钉住,另加 TestDetailRejectsNonDetailSource:探到非 DetailSource 是点名源的干净错误;未放"rss 类型不实现接口"的负面断言(测特性缺席,同义反复)
 - UI 未动(票面约定仍为正文层);GLOSSARY 无新术语
+
+**2025-12 两轴评审**(OK with notes,无 P0/P1)修复:
+
+- hn 传输骨架去重:`Source.get(ctx, url, op)` 助手供 Fetch/Detail 共用,unmarshal 留在调用方保住 "fetch/parse/detail" 阶段标签;id 前缀单源化(`itemIDPrefix` 常量,ItemID 与 Detail 共享)
+- comments 树序改 migration 005 `seq` 列(结构性保证父先于子;不再依赖可被 VACUUM 重排的 rowid,旧库行 seq=0 走 rowid 决胜保持原序);CommentsForItem 查询错误带 item 名
+- 转出:空树 vs 未打开在缓存层不可区分(04 需 opened 信号做加载态)、楼层 score 无数据面(评论节点 points 恒 null)→ 已转记 04 号票;文本帖 star 快照路径未测 → 01 范畴遗留

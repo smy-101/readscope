@@ -110,22 +110,9 @@ func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 	if def == nil {
 		return nil, fmt.Errorf("fetch %s: unknown hn feed", f.Key)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url(*def), nil)
+	raw, err := s.get(ctx, s.url(*def), "fetch "+f.Key)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", f.Key, err)
-	}
-	req.Header.Set("User-Agent", source.UserAgent)
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", f.Key, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch %s: HTTP %s", f.Key, resp.Status)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", f.Key, err)
+		return nil, err
 	}
 	var res searchResponse
 	if err := json.Unmarshal(raw, &res); err != nil {
@@ -194,4 +181,34 @@ func (h hit) item(feedKey string, now time.Time) core.Item {
 // global per story, not per feed (the shape the initial schema
 // comment fixed; a story roaming between Front and New re-homes its
 // single row).
-func ItemID(storyID string) string { return ID + ":algolia:" + storyID }
+func ItemID(storyID string) string { return itemIDPrefix + storyID }
+
+// itemIDPrefix is the single source of the id shape: ItemID builds
+// ids with it, Detail reverses it to recover the story id.
+const itemIDPrefix = ID + ":algolia:"
+
+// get performs the shared HTTP skeleton of every Algolia call — one
+// GET carrying the reader's identity, a hard body cap, and errors
+// that name the operation (op, e.g. "fetch front" / "detail 1001") —
+// and returns the raw JSON body. Parsing stays with the caller so
+// the fetch-vs-parse phase distinction in error messages survives.
+func (s *Source) get(ctx context.Context, url, op string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+	req.Header.Set("User-Agent", source.UserAgent)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: HTTP %s", op, resp.Status)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+	return raw, nil
+}
