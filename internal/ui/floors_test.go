@@ -127,6 +127,30 @@ func TestBuildFloorsPromotesOrphan(t *testing.T) {
 	}
 }
 
+// An orphan promotion mid-subtree must not strand the floors already
+// built: with the naive pointer-into-slice map, the reallocation the
+// promotion triggers leaves earlier floors' map entries pointing at
+// dead copies, so a later reply to floor 1 would vanish. The
+// index-based map keeps every append landing in the live slice.
+func TestBuildFloorsOrphanDoesNotStrandEarlierFloor(t *testing.T) {
+	tree := []core.Comment{
+		cm("f1", "", "alice", "floor one"),
+		cm("r11", "f1", "bob", ""),
+		cm("ghost", "nope", "mallory", "orphan"),
+		cm("r12", "f1", "erin", ""), // after the orphan: still floor 1's
+	}
+	floors := buildFloors(tree)
+	if len(floors) != 2 {
+		t.Fatalf("floors = %d, want 2 (f1 + promoted orphan)", len(floors))
+	}
+	if got := ids(floors[0].replies); len(got) != 2 || got[0] != "r11" || got[1] != "r12" {
+		t.Fatalf("floor 1 replies = %v, want [r11 r12] — r12 was stranded", got)
+	}
+	if floors[1].cm.ID != "ghost" {
+		t.Fatalf("promoted orphan = %s, want ghost", floors[1].cm.ID)
+	}
+}
+
 func TestFlattenRepliesTwoLayersWithParentPrefix(t *testing.T) {
 	floors := buildFloors(deepTree)
 	rows := flattenReplies(&floors[0]) // f1: r11, r111, r1111, r12

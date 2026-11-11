@@ -30,27 +30,26 @@ type replyRow struct {
 }
 
 // buildFloors splits a cached tree into floors. One forward scan with
-// a comment-id → floor map: ParentID "" opens a new floor, anything
-// else appends to its parent's floor. A reply whose parent id matches
-// nothing (impossible from a real fetch, possible from a corrupt
-// cache) is promoted to its own floor — a cached comment is never
-// silently dropped.
+// a comment-id → floor-index map (indexes, not pointers: appends to
+// the growing slice reallocate, and a pointer taken before an orphan
+// promotion would write replies into a dead copy): ParentID "" opens
+// a new floor, anything else appends to its parent's floor. A reply
+// whose parent id matches nothing (impossible from a real fetch,
+// possible from a corrupt cache) is promoted to its own floor — a
+// cached comment is never silently dropped.
 func buildFloors(tree []core.Comment) []floor {
-	owner := make(map[string]*floor, len(tree))
+	owner := make(map[string]int, len(tree))
 	floors := make([]floor, 0)
 	for _, c := range tree {
-		if c.ParentID == "" {
-			floors = append(floors, floor{cm: c})
-			owner[c.ID] = &floors[len(floors)-1]
+		idx, known := owner[c.ParentID]
+		if c.ParentID == "" || !known {
+			floors = append(floors, floor{cm: c}) // top-level or promoted orphan
+			owner[c.ID] = len(floors) - 1
 			continue
 		}
-		if f := owner[c.ParentID]; f != nil {
-			f.replies = append(f.replies, c)
-			owner[c.ID] = f
-		} else {
-			floors = append(floors, floor{cm: c}) // orphan: promote, never drop
-			owner[c.ID] = &floors[len(floors)-1]
-		}
+		flo := &floors[idx]
+		flo.replies = append(flo.replies, c)
+		owner[c.ID] = idx
 	}
 	return floors
 }

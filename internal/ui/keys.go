@@ -14,6 +14,7 @@ var helpBindings = []binding{
 	{"← → ↑ ↓", "region_nav"},
 	{"Enter", "open"},
 	{"Esc", "back"},
+	{"← →", "floor_nav"},
 	{"F1", "help"},
 	{"F2", "sources"},
 	{"F3", "favorites"},

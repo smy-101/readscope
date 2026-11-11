@@ -83,9 +83,11 @@ func hnStoryRow() core.Item {
 	}
 }
 
-// openHNDetail lands on the hn list with the story seeded and opens
-// the reader (body layer), pumping every open-time command.
-func openHNDetail(t *testing.T, seedCache []core.Comment, base string) Model {
+// openHNDetailCmd lands on the hn list with the story seeded and
+// opens the reader (body layer), returning the still-unpumped open
+// command — tests that inspect the cache-first load mid-flight drive
+// it from there. openHNDetail is the pump-to-quiescence wrapper.
+func openHNDetailCmd(t *testing.T, seedCache []core.Comment, base string) (Model, tea.Cmd) {
 	t.Helper()
 	m := seededModel(t, nil, nil)
 	if _, _, err := m.st.SaveFeedItems(context.Background(), "hn", "front", []core.Item{hnStoryRow()}); err != nil {
@@ -109,6 +111,12 @@ func openHNDetail(t *testing.T, seedCache []core.Comment, base string) Model {
 	if m.reader == nil {
 		t.Fatal("Enter on the hn row must open the reader")
 	}
+	return m, cmd
+}
+
+func openHNDetail(t *testing.T, seedCache []core.Comment, base string) Model {
+	t.Helper()
+	m, cmd := openHNDetailCmd(t, seedCache, base)
 	return pump(t, m, cmd)
 }
 
@@ -276,19 +284,7 @@ func TestCommentHTMLThroughPipeline(t *testing.T) {
 // landing replaces it with the floor count.
 func TestFirstOpenShowsLoadingThenLands(t *testing.T) {
 	base, _ := hnDetailServer(t, hnDetailJSON())
-	m := seededModel(t, nil, nil)
-	if _, _, err := m.st.SaveFeedItems(context.Background(), "hn", "front", []core.Item{hnStoryRow()}); err != nil {
-		t.Fatalf("seed story: %v", err)
-	}
-	t.Setenv("READSCOPE_HN_BASE", base)
-	m = size(m, 100, 30)
-	var cmd tea.Cmd
-	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
-	m = pump(t, m, cmd)
-	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
-	m = pump(t, m, cmd)
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := openHNDetailCmd(t, nil, base)
 	if m.reader == nil || !m.reader.loading {
 		t.Fatal("setup: first open must start in the loading state")
 	}
@@ -312,22 +308,7 @@ func TestReopenIsCacheFirstThenSilentRefresh(t *testing.T) {
 		{ID: "13", Author: "erin", Text: "<p>cached floor two</p>"},
 	}
 	base, hits := hnDetailServer(t, hnDetailJSON())
-	m := seededModel(t, nil, nil)
-	if _, _, err := m.st.SaveFeedItems(context.Background(), "hn", "front", []core.Item{hnStoryRow()}); err != nil {
-		t.Fatalf("seed story: %v", err)
-	}
-	if err := m.st.SaveComments(context.Background(), "hn:algolia:1001", fewerFloors); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-	t.Setenv("READSCOPE_HN_BASE", base)
-	m = size(m, 100, 30)
-	var cmd tea.Cmd
-	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
-	m = pump(t, m, cmd)
-	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
-	m = pump(t, m, cmd)
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := openHNDetailCmd(t, fewerFloors, base)
 
 	// Only the cache leg has run: 2 cached floors, no server hit yet.
 	msg := cmd()
@@ -545,5 +526,33 @@ func TestReplyPrefixUsesDeletedPlaceholder(t *testing.T) {
 	header := doc.Blocks[0].(render.Para)
 	if got := header.Spans[0].Text; got != "@[deleted] " {
 		t.Fatalf("@parent prefix = %q, want the deleted placeholder", got)
+	}
+}
+
+// First open with nothing cached and the fetch failing (dead network):
+// the footer states the failure, the status bar carries the error, and
+// the body layer stays readable — the loud half of the silence rule.
+func TestFirstOpenFetchFailureKeepsBodyReadable(t *testing.T) {
+	url, _ := deadFeedURL(t)
+	m, cmd := openHNDetailCmd(t, nil, url)
+	m = pump(t, m, cmd)
+
+	d := m.reader
+	if d.loading || d.loaded || d.loadErr == nil {
+		t.Fatalf("failed first open: loading=%v loaded=%v err=%v", d.loading, d.loaded, d.loadErr)
+	}
+	if !strings.Contains(m.View(), "comment fetch failed") {
+		t.Fatalf("footer should state the failed fetch:\n%s", m.View())
+	}
+	if !strings.Contains(m.status, "comment fetch failed") {
+		t.Fatalf("status bar should carry the error: %q", m.status)
+	}
+	if !strings.Contains(m.View(), "Hot story") || !strings.Contains(m.View(), "https://example.com/article") {
+		t.Fatalf("the body must stay readable after the failure:\n%s", m.View())
+	}
+	// The floor layer carries the same state instead of a blank screen.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.reader.layer != layerFloors || !strings.Contains(m.View(), "comment fetch failed") {
+		t.Fatalf("floor layer should show the failure state:\n%s", m.View())
 	}
 }

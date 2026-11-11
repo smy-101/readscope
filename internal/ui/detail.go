@@ -433,10 +433,9 @@ func (m Model) floorDoc(f *floor) *render.Document {
 // is nil by construction for hn (Algolia's tree endpoint has no
 // per-comment points); the segment exists for sources that have one.
 func (m Model) floorHeaderSpans(f *floor) []render.Span {
-	author := f.cm.Author
-	style := render.SpanBold
-	if author == "" {
-		author, style = m.cat.Get("detail.deleted"), render.SpanDim
+	author, style := m.authorOrDeleted(f.cm.Author), render.SpanBold
+	if f.cm.Author == "" {
+		style = render.SpanDim
 	}
 	spans := []render.Span{{Text: author, Style: style}}
 	if f.cm.Score != nil {
@@ -477,10 +476,7 @@ func (m *Model) layoutReplies() {
 	f := &d.floors[d.floorIdx]
 	d.replies = flattenReplies(f)
 	d.replyFloor = d.floorIdx
-	author := f.cm.Author
-	if author == "" {
-		author = m.cat.Get("detail.deleted")
-	}
+	author := m.authorOrDeleted(f.cm.Author)
 	header := &render.Document{Blocks: []render.Block{
 		render.Para{Spans: []render.Span{
 			{Text: m.cat.Get("detail.replies_to", author), Style: render.SpanDim},
@@ -505,15 +501,11 @@ func (m *Model) layoutReplies() {
 func (m Model) replyDoc(row replyRow) *render.Document {
 	var header []render.Span
 	if row.depth >= 2 {
-		parent := row.parentAuthor
-		if parent == "" {
-			parent = m.cat.Get("detail.deleted")
-		}
-		header = append(header, render.Span{Text: "@" + parent + " ", Style: render.SpanDim})
+		header = append(header, render.Span{Text: "@" + m.authorOrDeleted(row.parentAuthor) + " ", Style: render.SpanDim})
 	}
-	author, style := row.cm.Author, render.SpanBold
-	if author == "" {
-		author, style = m.cat.Get("detail.deleted"), render.SpanDim
+	author, style := m.authorOrDeleted(row.cm.Author), render.SpanBold
+	if row.cm.Author == "" {
+		style = render.SpanDim
 	}
 	header = append(header, render.Span{Text: author, Style: style})
 	if row.cm.CreatedAt != nil {
@@ -531,6 +523,15 @@ func (m Model) replyDoc(row replyRow) *render.Document {
 
 func dimSpan(text string) render.Span {
 	return render.Span{Text: text, Style: render.SpanDim}
+}
+
+// authorOrDeleted is a comment author's display name: the author, or
+// the [deleted] placeholder for deleted nodes (no author stored).
+func (m Model) authorOrDeleted(author string) string {
+	if author == "" {
+		return m.cat.Get("detail.deleted")
+	}
+	return author
 }
 
 // --- scrolling -----------------------------------------------------------
