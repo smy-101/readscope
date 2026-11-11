@@ -23,6 +23,8 @@ front = "热门"
 new = "最新"
 ask = "Ask HN"
 show = "Show HN"
+pts = "%d 分"
+comments = "%d 条评论"
 
 [sidebar]
 feeds = "订阅"

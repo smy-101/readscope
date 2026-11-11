@@ -19,6 +19,114 @@ func item(id, title, body string) core.Item {
 
 func ptrTime(t time.Time) *time.Time { return &t }
 
+func ptrInt(n int) *int { return &n }
+
+// HN heat snapshots ride the same write path as every other snapshot
+// column: first save stores them, a refresh updates them in place,
+// and rows from sources without heat semantics stay NULL (nil on the
+// Item) forever.
+func TestSaveFeedItemsSnapshotsHeat(t *testing.T) {
+	s := migrated(t)
+	hnStory := func(points, comments *int) core.Item {
+		return core.Item{
+			ID: "hn:algolia:1001", Source: "hn", Feed: "front",
+			Title: "Hot story", Author: "alice", FetchedAt: nowUTC(),
+			Points: points, NumComments: comments,
+		}
+	}
+	if _, _, err := s.SaveFeedItems(t.Context(), "hn", "front",
+		[]core.Item{hnStory(ptrInt(120), ptrInt(45))}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	rows, err := s.FeedItems(t.Context(), "hn", "front", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems = %d rows, %v", len(rows), err)
+	}
+	if rows[0].Item.Points == nil || *rows[0].Item.Points != 120 ||
+		rows[0].Item.NumComments == nil || *rows[0].Item.NumComments != 45 {
+		t.Fatalf("heat snapshot lost: %+v", rows[0].Item)
+	}
+
+	// Refresh: the fetched-at values update in place, not new rows.
+	if _, _, err := s.SaveFeedItems(t.Context(), "hn", "front",
+		[]core.Item{hnStory(ptrInt(173), ptrInt(50))}); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	rows, err = s.FeedItems(t.Context(), "hn", "front", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems after refresh = %d rows, %v", len(rows), err)
+	}
+	if *rows[0].Item.Points != 173 || *rows[0].Item.NumComments != 50 {
+		t.Fatalf("heat snapshot not updated: %+v", rows[0].Item)
+	}
+
+	// An rss row in the same database never grows heat values.
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex",
+		[]core.Item{item("rss:ex:1", "One", "b")}); err != nil {
+		t.Fatalf("save rss: %v", err)
+	}
+	rssRows, err := s.FeedItems(t.Context(), "rss", "ex", false)
+	if err != nil || len(rssRows) != 1 {
+		t.Fatalf("FeedItems(rss) = %d rows, %v", len(rssRows), err)
+	}
+	if rssRows[0].Item.Points != nil || rssRows[0].Item.NumComments != nil {
+		t.Fatalf("rss row must keep NULL heat: %+v", rssRows[0].Item)
+	}
+}
+
+// A database last touched before the heat columns existed upgrades in
+// place: Migrate adds the columns, existing rows survive untouched
+// with NULL heat, and replaying stays a no-op.
+func TestMigrateUpgradesOldDBPreservingRows(t *testing.T) {
+	s := openTemp(t)
+	// Build a pre-004 database: the first three migrations applied and
+	// recorded by hand, plus one rss row written the old way.
+	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY, applied_at TIMESTAMP NOT NULL)`); err != nil {
+		t.Fatalf("seed schema_migrations: %v", err)
+	}
+	for _, name := range []string{
+		"migrations/001_init.sql",
+		"migrations/002_read_state_independent.sql",
+		"migrations/003_feed_fetch_state.sql",
+	} {
+		body, err := migrationsFS.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if _, err := s.db.Exec(string(body)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	for v := 1; v <= 3; v++ {
+		if _, err := s.db.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, v, nowUTC()); err != nil {
+			t.Fatalf("record version %d: %v", v, err)
+		}
+	}
+	if _, err := s.db.Exec(`INSERT INTO items (id, source, feed, title, url, author, fetched_at, body)
+		VALUES ('rss:ex:1', 'rss', 'ex', 'Old row', 'https://example.com/', 'a', ?, 'b')`, nowUTC()); err != nil {
+		t.Fatalf("seed old row: %v", err)
+	}
+
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("upgrade Migrate: %v", err)
+	}
+	if v, err := s.Version(); err != nil || v != LatestVersion() {
+		t.Fatalf("Version after upgrade = %d (want %d), %v", v, LatestVersion(), err)
+	}
+	rows, err := s.FeedItems(t.Context(), "rss", "ex", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems after upgrade = %d rows, %v", len(rows), err)
+	}
+	if rows[0].Item.Title != "Old row" || rows[0].Item.Points != nil || rows[0].Item.NumComments != nil {
+		t.Fatalf("old row must survive with NULL heat: %+v", rows[0].Item)
+	}
+	// Replay is a no-op (the standing idempotence contract).
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("replay Migrate: %v", err)
+	}
+}
+
 func migrated(t *testing.T) *Store {
 	t.Helper()
 	s := openTemp(t)

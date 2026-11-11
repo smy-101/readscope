@@ -23,6 +23,8 @@ front = "Front"
 new = "New"
 ask = "Ask HN"
 show = "Show HN"
+pts = "%d pts"
+comments = "%d comments"
 
 [sidebar]
 feeds = "Feeds"

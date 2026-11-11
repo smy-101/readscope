@@ -7,7 +7,7 @@
 **Status:** ready-for-agent
 
 - [x] Tab 切到 HN:边栏四类 feed,标签双语(zh-CN / en),i18n 键树一致
-- [ ] 四类 feed 分别映射 `front_page` / `search_by_date` / `ask_hn` / `show_hn`,列表按返回序渲染 →映射与入库已落地;front/ask/show 的返回序=points 序,排序随 02 的 points 快照列交付(02 已加勾选框),01 中列表沿用共享的 published DESC(new feed 即返回序)
+- [x] 四类 feed 分别映射 `front_page` / `search_by_date` / `ask_hn` / `show_hn`,列表按返回序渲染 →映射与入库已落地;front/ask/show 的返回序=points 序排序已随 02 交付(feedDefs 声明 ListSortPoints,列表按快照列稳定排序;02 号票测试覆盖)
 - [x] F5 拉当前 feed:链接帖/文本帖入库为快照;id 确定性,重复刷新不产生重复行、不触碰已读状态(跨 feed 同帖重归属已测)
 - [x] ● 未读点、Ctrl+R、F4、Ctrl+A 对 HN 条目与 RSS 行为一致(沿用源无关机制,不另造)
 - [x] httptest 假 Algolia(fixture JSON)集成测试,离线可跑(CI 无网络依赖)

@@ -334,10 +334,12 @@ func TestRefreshFailureKeepsStoredState(t *testing.T) {
 // moves. READSCOPE_HN_BASE points the hn source at the fake server;
 // no external network anywhere.
 func TestRefreshHNTracerBullet(t *testing.T) {
+	points := 10 // mutated between cycles: a refresh updates the heat snapshot
 	hit := func(id, title string) string {
 		return fmt.Sprintf(`{"hits":[{"objectID":%q,"title":%q,"url":"https://example.com/s",`+
-			`"author":"u","created_at_i":1700000000}],"nbHits":1,"page":0,"nbPages":1,"hitsPerPage":20}`,
-			id, title)
+			`"author":"u","points":%d,"num_comments":3,"created_at_i":1700000000}],`+
+			`"nbHits":1,"page":0,"nbPages":1,"hitsPerPage":20}`,
+			id, title, points)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fixtures := map[string]string{
@@ -385,11 +387,13 @@ func TestRefreshHNTracerBullet(t *testing.T) {
 		t.Fatal("front feed missing from results")
 	}
 
-	// Reading a story, then refreshing again: no new rows, and the
-	// read dot survives the snapshot refresh.
+	// Reading a story, then refreshing again (with the story's heat
+	// having moved): no new rows, the read dot survives, and the heat
+	// snapshot picks up the fetched-at values.
 	if err := st.SetRead(context.Background(), "hn:algolia:1001", true); err != nil {
 		t.Fatalf("SetRead: %v", err)
 	}
+	points = 25
 	results2, err := Source(context.Background(), st, srcs, "hn")
 	if err != nil {
 		t.Fatalf("second Source: %v", err)
@@ -408,5 +412,9 @@ func TestRefreshHNTracerBullet(t *testing.T) {
 	}
 	if rows[0].Item.ID != "hn:algolia:1001" {
 		t.Fatalf("item id = %q, want hn:algolia:1001", rows[0].Item.ID)
+	}
+	if rows[0].Item.Points == nil || *rows[0].Item.Points != 25 ||
+		rows[0].Item.NumComments == nil || *rows[0].Item.NumComments != 3 {
+		t.Fatalf("heat snapshot not refreshed: %+v", rows[0].Item)
 	}
 }

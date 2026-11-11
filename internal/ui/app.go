@@ -7,6 +7,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strconv"
@@ -236,6 +237,34 @@ func (m Model) currentFeedKey() string {
 	return m.selectedFeedKey()
 }
 
+// sortItems applies the selected feed's declared list order once rows
+// land: feeds marked ListSortPoints (hn's popularity feeds, whose
+// Algolia return order is points order) rank by the heat snapshot,
+// hottest first, with rows that never had one keeping the loaded time
+// order behind the ranked rows. Everything else — chronological feeds,
+// the star-ordered favorites view — renders exactly as loaded.
+func (m *Model) sortItems() {
+	if m.favorites {
+		return
+	}
+	f := m.selectedFeed()
+	if f == nil || f.ListSort != core.ListSortPoints {
+		return
+	}
+	slices.SortStableFunc(m.items, func(a, b store.ItemRow) int {
+		switch {
+		case a.Item.Points == nil && b.Item.Points == nil:
+			return 0
+		case a.Item.Points == nil:
+			return 1 // unknown heat sinks below every ranked row
+		case b.Item.Points == nil:
+			return -1
+		default:
+			return cmp.Compare(*b.Item.Points, *a.Item.Points)
+		}
+	})
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -263,6 +292,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		sameFeed := msg.feed == m.loadedFeed
 		m.items = msg.rows
 		m.loadedFeed = msg.feed
+		m.sortItems()
 		if sameFeed {
 			m.clampListCursor()
 		} else {

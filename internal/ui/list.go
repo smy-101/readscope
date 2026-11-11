@@ -1,8 +1,9 @@
 // List rendering for the active feed's cached items: the row layout
-// (unread dot · title · relative time), the truncation math that keeps
-// a narrow terminal intact, and the clamped cursor + scroll window.
-// Moved here from app.go so the shell model changes for shell reasons
-// and the list changes for list reasons (plan package layout: list.go).
+// (unread dot · title · source-formatted meta), the truncation math
+// that keeps a narrow terminal intact, and the clamped cursor + scroll
+// window. Moved here from app.go so the shell model changes for shell
+// reasons and the list changes for list reasons (plan package layout:
+// list.go).
 package ui
 
 import (
@@ -11,6 +12,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/smy-101/readscope/internal/core"
+	"github.com/smy-101/readscope/internal/store"
 )
 
 func (m Model) listWidth() int {
@@ -92,9 +96,24 @@ func (m Model) listView() string {
 			Render(m.th.Dim.Render(empty))
 	}
 	usable := w - 1 // List has PaddingLeft(1)
-	metaW := 10     // room for "45 分钟前"
+	// Meta column: content-formatted per source (rowMeta), sized to the
+	// widest meta across the whole list so scrolling never makes the
+	// column jump, clamped to [metaMinW, metaMaxW]. A too-narrow
+	// terminal still drops the column before squeezing the title — the
+	// standing rule from the time-only days.
+	metas := make([]string, len(m.items))
+	metaW := metaMinW
+	for i, row := range m.items {
+		metas[i] = m.rowMeta(row)
+		if dw := runewidth.StringWidth(metas[i]); dw > metaW {
+			metaW = dw
+		}
+	}
+	if metaW > metaMaxW {
+		metaW = metaMaxW
+	}
 	if usable < metaW+5 {
-		metaW = 0 // too narrow: drop the time column before the title
+		metaW = 0 // too narrow: drop the meta column before the title
 	}
 	titleW := usable - 2 // dot + its gap
 	if metaW > 0 {
@@ -122,7 +141,7 @@ func (m Model) listView() string {
 		title := runewidth.FillRight(runewidth.Truncate(row.Item.Title, titleW, "…"), titleW)
 		line := dot + " " + titleStyle.Render(title)
 		if metaW > 0 {
-			meta := runewidth.FillLeft(m.relTime(row.Item.PublishedAt), metaW)
+			meta := runewidth.FillLeft(runewidth.Truncate(metas[i], metaW, "…"), metaW)
 			line += " " + m.th.Meta.Render(meta)
 		}
 		if i == m.listSel {
@@ -131,6 +150,46 @@ func (m Model) listView() string {
 		lines = append(lines, line)
 	}
 	return m.th.List.Width(w).Height(h).Render(strings.Join(lines, "\n"))
+}
+
+// The meta column's width clamps: metaMinW is the old fixed
+// time-column width (room for "45 分钟前"), kept as the floor so feeds
+// whose metas stay short — every relative-time row — render
+// byte-identically to before. metaMaxW caps how far a wide meta (hn's
+// heat radar) may grow, so a long author tail truncates with "…"
+// instead of eating the title.
+const (
+	metaMinW = 10
+	metaMaxW = 32
+)
+
+// rowMeta formats the meta column by source: hn rows carry the heat
+// radar, every other source keeps the relative age. The favorites list
+// mixes sources row by row, so the choice is per row, not per feed.
+func (m Model) rowMeta(row store.ItemRow) string {
+	if row.Item.Source == "hn" {
+		return m.hnMeta(row.Item)
+	}
+	return m.relTime(row.Item.PublishedAt)
+}
+
+// hnMeta renders the heat radar "N pts · N comments · author" from the
+// fetched-at snapshot. Each segment drops when the record lacks it — a
+// hit without points renders "N comments · author", never an empty
+// "· ·" run; a completely bare record renders an empty meta like the
+// date-less rows always have.
+func (m Model) hnMeta(it core.Item) string {
+	segs := make([]string, 0, 3)
+	if it.Points != nil {
+		segs = append(segs, m.cat.Get("hn.pts", *it.Points))
+	}
+	if it.NumComments != nil {
+		segs = append(segs, m.cat.Get("hn.comments", *it.NumComments))
+	}
+	if it.Author != "" {
+		segs = append(segs, it.Author)
+	}
+	return strings.Join(segs, " · ")
 }
 
 // relTime renders a coarse relative age for the meta column; items

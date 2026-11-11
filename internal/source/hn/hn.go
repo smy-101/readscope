@@ -36,22 +36,26 @@ const fetchTimeout = 30 * time.Second
 
 // feedDef is one of HN's four fixed feeds: the Algolia endpoint
 // (search ranks by popularity, search_by_date by recency) plus the
-// tags filter selecting the story set. Slice order is sidebar order.
+// tags filter selecting the story set, and the list ordering the feed
+// declares. Slice order is sidebar order.
 type feedDef struct {
 	key      string
 	labelKey string // i18n key; the UI resolves the display label
 	endpoint string
 	tags     string
+	sort     core.ListSort
 }
 
 // feedDefs mirrors hn.algolia.com's own tabs. New keeps a story tags
 // filter so comments never leak into the story list; ask_hn/show_hn
-// ride the popularity endpoint like the site's category pages.
+// ride the popularity endpoint like the site's category pages. The
+// three popularity feeds declare ListSortPoints — their Algolia return
+// order is points order — while New stays chronological.
 var feedDefs = []feedDef{
-	{"front", "hn.front", "search", "front_page"},
-	{"new", "hn.new", "search_by_date", "story"},
-	{"ask", "hn.ask", "search", "ask_hn"},
-	{"show", "hn.show", "search", "show_hn"},
+	{"front", "hn.front", "search", "front_page", core.ListSortPoints},
+	{"new", "hn.new", "search_by_date", "story", core.ListSortTime},
+	{"ask", "hn.ask", "search", "ask_hn", core.ListSortPoints},
+	{"show", "hn.show", "search", "show_hn", core.ListSortPoints},
 }
 
 func init() { source.Register(ID, New) }
@@ -84,7 +88,7 @@ func (s *Source) ID() string { return ID }
 func (s *Source) Feeds() []core.Feed {
 	out := make([]core.Feed, len(feedDefs))
 	for i, d := range feedDefs {
-		out[i] = core.Feed{Key: d.key, LabelKey: d.labelKey, URL: s.url(d)}
+		out[i] = core.Feed{Key: d.key, LabelKey: d.labelKey, URL: s.url(d), ListSort: d.sort}
 	}
 	return out
 }
@@ -149,12 +153,14 @@ type searchResponse struct {
 // optional in the wild: text posts carry story_text instead of url,
 // and degenerate records miss author or dates entirely.
 type hit struct {
-	ObjectID   string `json:"objectID"`
-	Title      string `json:"title"`
-	URL        string `json:"url"`
-	Author     string `json:"author"`
-	CreatedAtI int64  `json:"created_at_i"`
-	StoryText  string `json:"story_text"`
+	ObjectID    string `json:"objectID"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	Author      string `json:"author"`
+	CreatedAtI  int64  `json:"created_at_i"`
+	StoryText   string `json:"story_text"`
+	Points      *int   `json:"points"`       // absent → nil, distinct from a real 0
+	NumComments *int   `json:"num_comments"` // absent → nil
 }
 
 // item maps one hit to its snapshot row. The body holds the one-line
@@ -180,6 +186,7 @@ func (h hit) item(feedKey string, now time.Time) core.Item {
 	} else {
 		it.Body = h.StoryText
 	}
+	it.Points, it.NumComments = h.Points, h.NumComments
 	return it
 }
 

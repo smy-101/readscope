@@ -128,6 +128,11 @@ func TestFetchMapsHitsToSnapshotItems(t *testing.T) {
 	if link.Title != "Why link posts win" || link.URL != "https://example.com/article" || link.Author != "alice" {
 		t.Fatalf("mapping = %+v", link)
 	}
+	// Heat snapshot: points and comment count travel onto the item as
+	// optionals, so "missing" stays distinct from a real zero.
+	if link.Points == nil || *link.Points != 120 || link.NumComments == nil || *link.NumComments != 45 {
+		t.Fatalf("heat snapshot = %v/%v, want 120/45", link.Points, link.NumComments)
+	}
 	// Link post: the body is the one-line article link.
 	if link.Body != "https://example.com/article" {
 		t.Fatalf("link post body = %q, want the article url", link.Body)
@@ -149,6 +154,11 @@ func TestFetchMapsHitsToSnapshotItems(t *testing.T) {
 	// Degenerate hit: missing fields map to empty, never a crash.
 	if bare.URL != "" || bare.Author != "" || bare.Body != "" || bare.PublishedAt != nil {
 		t.Fatalf("bare hit should map to zero optionals: %+v", bare)
+	}
+	// A hit without points/comments maps to nil heat — the list drops
+	// those meta segments rather than rendering "0 pts".
+	if bare.Points != nil || bare.NumComments != nil {
+		t.Fatalf("bare hit must keep nil heat: %v/%v", bare.Points, bare.NumComments)
 	}
 }
 
@@ -179,6 +189,23 @@ func TestFetchHitsEachFeedEndpoint(t *testing.T) {
 	for i, f := range src.Feeds() {
 		if got[i] != want[f.Key] {
 			t.Errorf("feed %s hit %q, want %q", f.Key, got[i], want[f.Key])
+		}
+	}
+}
+
+func TestFeedsDeclareRankedListSort(t *testing.T) {
+	src := srcAt(t, "https://hn.algolia.com/api/v1")
+	// The popularity endpoints rank by points (their return order),
+	// New stays chronological.
+	want := map[string]core.ListSort{
+		"front": core.ListSortPoints,
+		"new":   core.ListSortTime,
+		"ask":   core.ListSortPoints,
+		"show":  core.ListSortPoints,
+	}
+	for _, f := range src.Feeds() {
+		if f.ListSort != want[f.Key] {
+			t.Errorf("feed %s ListSort = %q, want %q", f.Key, f.ListSort, want[f.Key])
 		}
 	}
 }

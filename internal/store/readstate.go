@@ -81,7 +81,7 @@ func (s *Store) MarkFeedRead(ctx context.Context, sourceID, feedKey string) erro
 // which is the whole point of keeping one.
 func (s *Store) StarredItems(ctx context.Context) ([]ItemRow, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT r.item_id, i.id, i.source, i.feed, i.title, i.url, i.author,
-		i.published_at, i.fetched_at, i.body, r.read_at IS NOT NULL, r.star_snapshot
+		i.published_at, i.fetched_at, i.body, i.points, i.num_comments, r.read_at IS NOT NULL, r.star_snapshot
 		FROM read_state r LEFT JOIN items i ON i.id = r.item_id
 		WHERE r.starred_at IS NOT NULL
 		ORDER BY r.starred_at DESC`)
@@ -97,16 +97,18 @@ func (s *Store) StarredItems(ctx context.Context) ([]ItemRow, error) {
 		// so it names the row even when the snapshot below is corrupt.
 		var itemID, id, source, feed, title, url, author, body, snapshot sql.NullString
 		var published, fetched sql.NullTime
+		var points, comments sql.NullInt64
 		var r ItemRow
 		if err := rows.Scan(&itemID, &id, &source, &feed, &title, &url, &author,
-			&published, &fetched, &body, &r.Read, &snapshot); err != nil {
+			&published, &fetched, &body, &points, &comments, &r.Read, &snapshot); err != nil {
 			return nil, err
 		}
 		if id.Valid && id.String != "" {
 			r.Item = core.Item{
 				ID: id.String, Source: source.String, Feed: feed.String,
 				Title: title.String, URL: url.String, Author: author.String,
-				Body: body.String,
+				Body:   body.String,
+				Points: nullInt(points), NumComments: nullInt(comments),
 			}
 			if published.Valid {
 				r.Item.PublishedAt = &published.Time

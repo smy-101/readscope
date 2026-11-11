@@ -59,14 +59,17 @@ func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, ite
 
 		if existing[it.ID] {
 			_, err = tx.ExecContext(ctx, `UPDATE items
-				SET feed = ?, title = ?, url = ?, author = ?, published_at = ?, fetched_at = ?, body = ?
+				SET feed = ?, title = ?, url = ?, author = ?, published_at = ?, fetched_at = ?, body = ?,
+				    points = ?, num_comments = ?
 				WHERE id = ?`,
-				feedKey, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body, it.ID)
+				feedKey, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body,
+				it.Points, it.NumComments, it.ID)
 		} else {
 			_, err = tx.ExecContext(ctx, `INSERT INTO items
-				(id, source, feed, title, url, author, published_at, fetched_at, body)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				it.ID, it.Source, it.Feed, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body)
+				(id, source, feed, title, url, author, published_at, fetched_at, body, points, num_comments)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				it.ID, it.Source, it.Feed, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body,
+				it.Points, it.NumComments)
 			newCount++
 		}
 		if err != nil {
@@ -130,7 +133,8 @@ type ItemRow struct {
 // this: cache first, no network anywhere.
 func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string, unreadOnly bool) ([]ItemRow, error) {
 	q := `SELECT i.id, i.source, i.feed, i.title, i.url, i.author,
-		i.published_at, i.fetched_at, i.body, r.read_at IS NOT NULL, r.starred_at IS NOT NULL
+		i.published_at, i.fetched_at, i.body, i.points, i.num_comments,
+		r.read_at IS NOT NULL, r.starred_at IS NOT NULL
 		FROM items i LEFT JOIN read_state r ON r.item_id = i.id
 		WHERE i.source = ? AND i.feed = ?`
 	if unreadOnly {
@@ -146,16 +150,29 @@ func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string, unreadO
 	for rows.Next() {
 		var r ItemRow
 		var published sql.NullTime
+		var points, comments sql.NullInt64
 		if err := rows.Scan(&r.Item.ID, &r.Item.Source, &r.Item.Feed, &r.Item.Title,
-			&r.Item.URL, &r.Item.Author, &published, &r.Item.FetchedAt, &r.Item.Body, &r.Read, &r.Starred); err != nil {
+			&r.Item.URL, &r.Item.Author, &published, &r.Item.FetchedAt, &r.Item.Body,
+			&points, &comments, &r.Read, &r.Starred); err != nil {
 			return nil, err
 		}
 		if published.Valid {
 			r.Item.PublishedAt = &published.Time
 		}
+		r.Item.Points, r.Item.NumComments = nullInt(points), nullInt(comments)
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// nullInt widens a nullable column into the optional int snapshot
+// shape (nil = the record never had the field, not zero).
+func nullInt(n sql.NullInt64) *int {
+	if !n.Valid {
+		return nil
+	}
+	v := int(n.Int64)
+	return &v
 }
 
 // FeedCount is one feed's list-layer stats: how many cached items it

@@ -31,6 +31,10 @@ _Avoid_: 外链帖、转帖
 **文本帖**:
 自带正文的 HN 帖子(Ask HN / Show HN);正文全文进渲染管线。
 
+**热度快照**:
+items 行上的 points 与评论数,取 fetched 时刻的值;列表的 "N pts · N comments · author" 热度雷达与 front/ask/show 的 points 序都读这里,刷新时随快照一起更新。RSS 行恒为空。
+_Avoid_: 热度值、统计数据、实时热度
+
 **楼层**:
 帖子下的一条顶层评论;楼层头显示 author · score · N replies。
 _Avoid_: 一楼/盖楼(口语)、顶层评论(冗长时)
