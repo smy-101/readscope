@@ -32,15 +32,15 @@ _Avoid_: 外链帖、转帖
 自带正文的 HN 帖子(Ask HN / Show HN);正文全文进渲染管线。
 
 **热度快照**:
-items 行上的 points 与评论数,取 fetched 时刻的值;列表的 "N pts · N comments · author" 热度雷达与 front/ask/show 的 points 序都读这里,刷新时随快照一起更新。RSS 行恒为空。
+items 行上的 points 与评论数,取 fetched 时刻的值;列表的 "N pts · N comments · author" 热度雷达与 front/ask/show 的 points 序都读这里,刷新时随快照一起更新。知乎热榜的热度("2045 万热度")折算后同存于此。RSS 与日报行恒为空。
 _Avoid_: 热度值、统计数据、实时热度
 
 **分页源**:
-实现了 PagedSource 扩展的源——列表能按页向前翻(hn 走 Algolia page 参数);未实现的源(rss 全量快照)Ctrl+N 统一提示"没有更多了"。与 ConditionalSource/DetailSource 同款 probe-don't-register 模式。
+实现了 PagedSource 扩展的源——列表能按页向前翻(hn 走 Algolia page 参数,关注流走服务端游标);未实现的源(rss 全量快照)Ctrl+N 统一提示"没有更多了"。与 ConditionalSource/DetailSource 同款 probe-don't-register 模式。
 _Avoid_: 无限滚动、下拉加载
 
 **页深**:
-feed_fetch_state.pages_fetched——某 feed 已从第 0 页起连续拉取的页数。Ctrl+N 拉当前页深的那一页,仅在有命中时前进;空页=到底且页深不动(索引增长后同页重试);F5 只保底 1 不抬高。重启后从存储页深续翻,不重拉已知页。
+feed_fetch_state.pages_fetched——某 feed 已从第 0 页起连续拉取的页数。Ctrl+N 拉当前页深的那一页,仅在有命中时前进;空页=到底且页深不动(索引增长后同页重试);F5 只保底 1 不抬高。重启后从存储页深续翻,不重拉已知页。关注流以服务端游标代替页码,游标前进语义与页深相同。
 _Avoid_: 翻页进度、offset
 
 **楼层**:
@@ -62,3 +62,29 @@ _Avoid_: opened 位、已读评论(不同的概念)
 **三层详情**:
 HN 帖子的阅读结构:正文层 → 楼层层(单楼视图)→ 回复层(扁平化文档);Esc 逐层退,各层滚动状态独立保留。
 _Avoid_: 评论页、二级页
+
+## 知乎
+
+**热榜**:
+知乎源内置的免登录 feed,全站热门问题榜单(上限约 30 条);列表元信息列显示热度。
+_Avoid_: 排行榜、热搜
+
+**关注流**:
+登录后可用的 feed,收录你关注的人的最新回答与提问;只收问题卡,文章/想法/视频不进列表。
+_Avoid_: 动态、时间线
+
+**知乎日报**:
+知乎源内置的免登录 feed,每天数条编辑精选文章,全文随条目快照、离线可读。
+_Avoid_: 日报盒子、专栏
+
+**问题卡**:
+指向一个问题的列表条目;回答卡在列表层归并为所属问题的问题卡,同题不重复出现。热榜与关注流共用。
+_Avoid_: 回答卡、帖子
+
+**回答层**:
+知乎问题详情的中间层:单个回答全文,←→ 在回答间移动。问题层里楼层=回答,楼层头显示 author · 赞 N · N 条评论。
+_Avoid_: 答案页
+
+**评论层**:
+知乎问题详情的第三层:当前回答的评论区,根评论各成一楼、子回复扁平化两层带 @parent。对应 HN 的回复层。
+_Avoid_: 回复层(HN 的对应概念)、评论页
