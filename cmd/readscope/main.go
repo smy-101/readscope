@@ -26,6 +26,8 @@ Usage:
   readscope            Start the TUI (default)
   readscope doctor     Environment self-check
   readscope rss refresh  Fetch RSS/Atom feeds from sources.toml into the offline cache
+  readscope rss import F  Merge OPML subscriptions into sources.toml
+  readscope rss export F  Write subscriptions as OPML for other readers
   readscope render     Render a local HTML file or URL to terminal text
   readscope version    Print version
 

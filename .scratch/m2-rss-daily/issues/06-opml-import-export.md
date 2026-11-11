@@ -4,10 +4,18 @@
 
 **Blocked by:** 01(`readscope rss refresh` — 订阅拉取入缓存)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] 导入:解析真实世界 OPML(folder 分组、xmlUrl/title 属性),合并写入 sources.toml,报告 新增/跳过
-- [ ] 导出:生成标准 OPML(outline 层级),主流阅读器可导入
-- [ ] 往返测试:export → import 后订阅集合一致
-- [ ] 容错:脏 OPML(缺 title、非标嵌套)不崩,能导入多少导多少并警告
-- [ ] 双语 CLI 输出(走 i18n 语言包)
+- [x] 导入:解析真实世界 OPML(folder 分组、xmlUrl/title 属性),合并写入 sources.toml,报告 新增/跳过
+- [x] 导出:生成标准 OPML(outline 层级),主流阅读器可导入
+- [x] 往返测试:export → import 后订阅集合一致
+- [x] 容错:脏 OPML(缺 title、非标嵌套)不崩,能导入多少导多少并警告
+- [x] 双语 CLI 输出(走 i18n 语言包)
+
+## Comments
+
+- 落点 `internal/opml`(Parse/Import/Encode/Report,与 refresh 包同构:数据结果 + 本地化报告),CLI 薄接线在 `cmd/readscope/rss.go`。
+- 键派生规则:ASCII 标题 slug 化("Hacker News" → `hacker-news`);CJK 标题保留为 label、以 URL host 为稳定键;冲突加 `-2` 后缀;缺标题以 host 命名并警告。
+- 导入隐含启用 rss 源(enabled 缺 rss 时追加);已有订阅永不改动,URL 去重(配置内 + 文档内)。
+- 导出为标准 OPML 2.0,按键序稳定输出(无 dateCreated,字节级稳定);无 label 时 text 回退为键。
+- refresh 保持严格配置错误退出;import/export 用宽松目录加载(config.toml 坏不阻塞维护命令)。

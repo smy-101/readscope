@@ -4,7 +4,7 @@
 
 **Blocked by:** 02(TUI 列表屏 — 边栏真实 feeds + 缓存先行列表)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 - [x] read_state DAO:已读/收藏写入与查询;star_snapshot 存收藏时刻完整快照
 - [x] Ctrl+R 切换已读/未读,列表即时反映(变暗/未读点)
