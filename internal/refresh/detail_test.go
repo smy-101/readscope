@@ -61,7 +61,6 @@ func detailStore(t *testing.T) *store.Store {
 	if err := st.Migrate(); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
 	if _, _, err := st.SaveFeedItems(t.Context(), "hn", "front", []core.Item{{
 		ID: "hn:algolia:1001", Source: "hn", Feed: "front",
 		Title: "Why link posts win", URL: "https://example.com/article",
