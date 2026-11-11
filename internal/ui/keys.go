@@ -19,6 +19,7 @@ var helpBindings = []binding{
 	{"F3", "favorites"},
 	{"F4", "unread_only"},
 	{"F5", "refresh"},
+	{"Ctrl+N", "load_more"},
 	{"Ctrl+R", "toggle_read"},
 	{"Ctrl+F", "toggle_star"},
 	{"Ctrl+A", "mark_all_read"},

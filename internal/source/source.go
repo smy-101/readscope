@@ -48,6 +48,11 @@ type ConditionalSource interface {
 type DetailSource interface {
 	Source
 	Detail(ctx context.Context, it core.Item) (core.Content, error)
+	// CommentURL is the web page behind one comment of the detail
+	// layer — Ctrl+O/Ctrl+Y target it when the reader sits on a floor
+	// or reply. Implementations accept both the bare comment id (what
+	// the cache stores) and their own item ids (the story page).
+	CommentURL(id string) string
 }
 
 // UserAgent identifies readscope to every content host (feeds now,

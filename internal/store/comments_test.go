@@ -114,3 +114,58 @@ func TestSaveCommentsRequiresExistingItem(t *testing.T) {
 		t.Fatal("want FK error for unknown item, got nil")
 	}
 }
+
+// Ticket 04: the opened marker. "0 cached comments" and "never
+// opened" must stay distinguishable — a story whose discussion is
+// empty was still opened (and must not re-fetch as if first open on
+// every visit). DetailFetched is that signal: false until the first
+// whole-tree save lands, true from then on, per item.
+func TestDetailFetchedMarksOpened(t *testing.T) {
+	s := migrated(t)
+	mustSaveItems(t, s, hnStory())
+
+	if ok, err := s.DetailFetched(t.Context(), "hn:algolia:1001"); err != nil || ok {
+		t.Fatalf("before any save: DetailFetched = %v, %v; want false, nil", ok, err)
+	}
+	if err := s.SaveComments(t.Context(), "hn:algolia:1001", treeFixture()); err != nil {
+		t.Fatalf("SaveComments: %v", err)
+	}
+	if ok, err := s.DetailFetched(t.Context(), "hn:algolia:1001"); err != nil || !ok {
+		t.Fatalf("after save: DetailFetched = %v, %v; want true, nil", ok, err)
+	}
+	// Another item stays unopened.
+	other := hnStory()
+	other.ID = "hn:algolia:2002"
+	mustSaveItems(t, s, other)
+	if ok, _ := s.DetailFetched(t.Context(), "hn:algolia:2002"); ok {
+		t.Fatal("unrelated item must not inherit the marker")
+	}
+}
+
+// The empty-tree half of the contract: a story with no comments was
+// still opened — the marker lands even when the tree is empty, which
+// is exactly the case a naive "comments exist?" probe cannot tell
+// from never-opened.
+func TestDetailFetchedSurvivesEmptyTree(t *testing.T) {
+	s := migrated(t)
+	mustSaveItems(t, s, hnStory())
+	if err := s.SaveComments(t.Context(), "hn:algolia:1001", nil); err != nil {
+		t.Fatalf("empty save: %v", err)
+	}
+	if ok, err := s.DetailFetched(t.Context(), "hn:algolia:1001"); err != nil || !ok {
+		t.Fatalf("empty tree: DetailFetched = %v, %v; want true, nil", ok, err)
+	}
+}
+
+// The marker rides the tree's own transaction: a save that fails
+// (unknown item) must not leave a marker behind — opened and tree
+// always agree.
+func TestDetailFetchedAtomicWithTree(t *testing.T) {
+	s := migrated(t)
+	if err := s.SaveComments(t.Context(), "hn:algolia:9999", treeFixture()); err == nil {
+		t.Fatal("want FK error for unknown item")
+	}
+	if ok, err := s.DetailFetched(t.Context(), "hn:algolia:9999"); err != nil || ok {
+		t.Fatalf("failed save must not mark opened: %v, %v", ok, err)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/smy-101/readscope/internal/core"
 )
@@ -47,7 +48,31 @@ func (s *Store) SaveComments(ctx context.Context, itemID string, comments []core
 			return fmt.Errorf("store comment %s/%s: %w", itemID, cm.ID, err)
 		}
 	}
+	// The opened marker rides the same transaction (ticket 04): an
+	// empty tree still marks the item opened — that is the whole point
+	// of the marker.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO detail_fetch (item_id, fetched_at)
+		VALUES (?, ?) ON CONFLICT(item_id) DO UPDATE SET fetched_at = excluded.fetched_at`,
+		itemID, time.Now().UTC()); err != nil {
+		return fmt.Errorf("mark detail fetched %s: %w", itemID, err)
+	}
 	return tx.Commit()
+}
+
+// DetailFetched reports whether the item's detail layer was ever
+// fetched and cached (ticket 04's opened marker). false = never
+// opened: the caller shows a loading state and fetches. true with an
+// empty comment cache = the discussion is genuinely empty.
+func (s *Store) DetailFetched(ctx context.Context, itemID string) (bool, error) {
+	err := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM detail_fetch WHERE item_id = ?`, itemID).Scan(new(int))
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("probe detail_fetch %s: %w", itemID, err)
+	}
+	return true, nil
 }
 
 // CommentsForItem returns one item's cached comment tree in tree

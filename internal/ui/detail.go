@@ -1,12 +1,20 @@
-// detail.go: the overlay reader covering the list pane. Enter on a list
-// row opens the item's cached snapshot through the M1 pipeline —
+// detail.go: the overlay reader covering the list pane. Enter on a
+// list row opens the item's cached snapshot through the M1 pipeline —
 // DOM → blocks → wrap → theme — and Esc drops back to the list with
-// focus and cursor untouched (they never move while reading). The body
-// is the SQLite snapshot, so reading is offline by construction;
-// Ctrl+O/Ctrl+Y hand the item URL to the system browser / clipboard.
+// focus and cursor untouched (they never move while reading). The
+// body is the SQLite snapshot, so reading is offline by construction.
+//
+// Ticket 04 extends the reader from one layer to three for sources
+// with a detail layer (hn): body → floors → replies. Each layer keeps
+// its own scroll state, Esc steps back exactly one layer, and the
+// comment cache loads cache-first — a first open shows a loading
+// footer while the fetch runs, a re-open renders the cached tree
+// immediately and refreshes silently in the background.
+
 package ui
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -15,19 +23,82 @@ import (
 
 	"github.com/smy-101/readscope/internal/browser"
 	"github.com/smy-101/readscope/internal/core"
+	"github.com/smy-101/readscope/internal/refresh"
 	"github.com/smy-101/readscope/internal/render"
+	"github.com/smy-101/readscope/internal/source"
 	"github.com/smy-101/readscope/internal/store"
 )
+
+// detailLayer is the reader's position in the three-layer stack.
+// Sources without a detail layer (rss) only ever see layerBody.
+type detailLayer int
+
+const (
+	layerBody    detailLayer = iota // the article itself
+	layerFloors                     // one top-level comment per screen
+	layerReplies                    // one floor's reply tree, flattened
+)
+
+// floorSkip is how far Ctrl+N hops in the floor layer — the in-memory
+// analogue of the list's "load next page": a fast-forward through
+// floors that are all already cached, zero requests.
+const floorSkip = 10
 
 // detail is the reader state for one open item: the snapshot row (kept
 // by value — refreshes reloading m.items never disturb the reading
 // session), the parsed document and its laid-out lines at the current
-// width.
+// width, and — when the source provides a detail layer — the comment
+// stack: floors, the current floor's laid-out screen, and the reply
+// layer for the floor it was last built for.
 type detail struct {
 	item  store.ItemRow
 	doc   *render.Document
 	lines []render.Line
-	top   int // first visible line
+	top   int // first visible line (body layer)
+
+	// Comment layers. hasDetail is false for sources without the
+	// DetailSource extension (rss): Enter stays a no-op, no footer.
+	hasDetail  bool
+	commentURL func(id string) string // ds.CommentURL bound at open
+	loading    bool                   // first open: fetch in flight, nothing cached
+	loaded     bool                   // a definitive tree sits in floors (cache or net)
+	loadErr    error                  // fetch failure while nothing is loaded
+	floors     []floor
+
+	layer      detailLayer
+	floorIdx   int // which floor the floor layer shows
+	floorLines []render.Line
+	floorTop   int
+
+	replies     []replyRow // flattened rows of floor `replyFloor`
+	replyStarts []int      // each reply's first line in replyLines (ascending)
+	replyLines  []render.Line
+	replyTop    int
+	replyFloor  int // floorIdx replyLines/replies belong to; -1 = none
+}
+
+// activeLines / activeTop point the scroll plumbing at whichever
+// layer is on screen.
+func (d *detail) activeLines() []render.Line {
+	switch d.layer {
+	case layerFloors:
+		return d.floorLines
+	case layerReplies:
+		return d.replyLines
+	default:
+		return d.lines
+	}
+}
+
+func (d *detail) activeTop() *int {
+	switch d.layer {
+	case layerFloors:
+		return &d.floorTop
+	case layerReplies:
+		return &d.replyTop
+	default:
+		return &d.top
+	}
 }
 
 // Side effects with seams for tests: neither spawning a browser nor
@@ -47,16 +118,28 @@ var (
 // --- open / layout -------------------------------------------------------
 
 // openDetail lays the selected item over the list. Returns false when
-// there is nothing to open (empty list / cursor out of range).
-func (m *Model) openDetail() bool {
+// there is nothing to open (empty list / cursor out of range); the
+// command kicks the cache-first comment load for detail sources.
+func (m *Model) openDetail() (bool, tea.Cmd) {
 	if m.listSel >= len(m.items) {
-		return false
+		return false, nil
 	}
-	d := &detail{item: m.items[m.listSel]}
-	d.doc = m.detailDoc(d.item.Item)
-	d.layout(m.detailWidth())
+	d := &detail{item: m.items[m.listSel], replyFloor: -1}
+	if m.srcs != nil {
+		if src, err := source.New(d.item.Item.Source, m.srcs); err == nil {
+			if ds, ok := src.(source.DetailSource); ok {
+				d.hasDetail = true
+				d.commentURL = ds.CommentURL
+				d.loading = true // until the cache probe says otherwise
+			}
+		}
+	}
 	m.reader = d
-	return true
+	m.rebuildBodyDoc()
+	if d.hasDetail {
+		return true, m.readCommentsCmd(d.item.Item)
+	}
+	return true, nil
 }
 
 // detailWidth is the reading column: the list pane minus its left
@@ -71,6 +154,60 @@ func (m Model) detailWidth() int {
 
 func (d *detail) layout(width int) {
 	d.lines = render.Layout(d.doc, width)
+}
+
+// relayoutReader re-wraps every layer the resize touches: the body
+// always, the active comment layer in place (position kept, clamped);
+// inactive layer caches are invalidated for their next entry.
+func (m *Model) relayoutReader() {
+	d := m.reader
+	d.layout(m.detailWidth())
+	switch d.layer {
+	case layerFloors:
+		m.layoutFloor()
+	case layerReplies:
+		if d.replyFloor == d.floorIdx && d.replyLines != nil {
+			m.layoutReplies()
+		} else {
+			d.replyLines = nil
+		}
+	default:
+		d.floorLines, d.replyLines = nil, nil
+	}
+	m.clampDetail()
+}
+
+// rebuildBodyDoc recomputes the body layer's document — header, body,
+// and (for detail sources) the comments footer whose text tracks the
+// load state — keeping the reading position clamped.
+func (m *Model) rebuildBodyDoc() {
+	d := m.reader
+	doc := m.detailDoc(d.item.Item)
+	if d.hasDetail {
+		doc.Blocks = append(doc.Blocks,
+			render.Rule{},
+			render.Para{Spans: []render.Span{{Text: m.commentsFooter(), Style: render.SpanDim}}},
+		)
+	}
+	d.doc = doc
+	d.layout(m.detailWidth())
+	m.clampDetail()
+}
+
+// commentsFooter is the one-line comment state under the article:
+// loading / failed / empty / floor count.
+func (m Model) commentsFooter() string {
+	d := m.reader
+	switch {
+	case d.loading:
+		return m.cat.Get("detail.loading")
+	case d.loadErr != nil:
+		return m.cat.Get("detail.load_failed")
+	case len(d.floors) == 0:
+		return m.cat.Get("detail.no_comments")
+	default:
+		return m.cat.Get("detail.floor_count", len(d.floors))
+	}
 }
 
 // detailDoc builds the reading document: title heading, dim meta line,
@@ -136,15 +273,275 @@ func plainDoc(body string) *render.Document {
 	return doc
 }
 
+// --- comment loading -----------------------------------------------------
+
+// commentsMsg carries one leg of the cache-first comment load. The
+// cache leg (fromNet=false) reports the store probe; the net leg
+// (fromNet=true) reports refresh.Detail's fetch-and-save.
+type commentsMsg struct {
+	itemID   string
+	comments []core.Comment
+	opened   bool // cache leg: the opened marker was present
+	fromNet  bool // this is the refresh half, not the cache probe
+	err      error
+}
+
+// readCommentsCmd is the cache half: read the cached tree and the
+// opened marker — local SQLite only, no network.
+func (m Model) readCommentsCmd(it core.Item) tea.Cmd {
+	st := m.st
+	return func() tea.Msg {
+		ctx := context.Background()
+		comments, err := st.CommentsForItem(ctx, it.ID)
+		if err != nil {
+			return commentsMsg{itemID: it.ID, err: err}
+		}
+		opened, err := st.DetailFetched(ctx, it.ID)
+		if err != nil {
+			return commentsMsg{itemID: it.ID, err: err}
+		}
+		return commentsMsg{itemID: it.ID, comments: comments, opened: opened}
+	}
+}
+
+// refreshCommentsCmd is the network half: fetch the whole tree and
+// cache it (refresh.Detail), whatever the cache said.
+func (m Model) refreshCommentsCmd(it core.Item) tea.Cmd {
+	st, srcs := m.st, m.srcs
+	return func() tea.Msg {
+		c, err := refresh.Detail(context.Background(), st, srcs, it)
+		return commentsMsg{itemID: it.ID, comments: c.Comments, fromNet: true, err: err}
+	}
+}
+
+// commentsLanded folds a commentsMsg into the reader: cache first
+// (render immediately when opened), then the background refresh —
+// silent on success and on failure-when-cache-exists, loud only when
+// a first open has nothing to fall back on. Stale messages (reader
+// closed, another item open) are dropped.
+func (m *Model) commentsLanded(msg commentsMsg) tea.Cmd {
+	d := m.reader
+	if d == nil || !d.hasDetail || d.item.Item.ID != msg.itemID {
+		return nil
+	}
+	if msg.err != nil {
+		if !msg.fromNet {
+			return m.refreshCommentsCmd(d.item.Item) // cache probe failed; the net half decides
+		}
+		d.loading = false
+		if !d.loaded { // first open, nothing cached: say so, keep the body readable
+			d.loadErr = msg.err
+			m.status = m.cat.Get("errors.detail_fetch", msg.err)
+			if d.layer == layerFloors {
+				m.layoutFloor()
+			}
+		}
+		return nil
+	}
+	if !msg.fromNet {
+		if msg.opened {
+			d.loading = false
+			m.setFloors(msg.comments)
+		}
+		return m.refreshCommentsCmd(d.item.Item) // background refresh either way
+	}
+	d.loading = false
+	m.setFloors(msg.comments)
+	return nil
+}
+
+// setFloors installs a definitive tree (cache or net) and refreshes
+// whatever the reader is showing: the active comment layer re-lays
+// out in place (scroll kept, clamped), inactive caches are
+// invalidated for their next entry, and the body footer recounts.
+func (m *Model) setFloors(comments []core.Comment) {
+	d := m.reader
+	d.floors = buildFloors(comments)
+	d.loaded = true
+	d.loadErr = nil
+	if d.floorIdx >= len(d.floors) {
+		d.floorIdx = max(0, len(d.floors)-1)
+		d.floorTop = 0
+		d.floorLines = nil
+	}
+	switch d.layer {
+	case layerFloors:
+		m.layoutFloor()
+	case layerReplies:
+		if d.replyFloor == d.floorIdx && d.floorIdx < len(d.floors) && len(d.floors[d.floorIdx].replies) > 0 {
+			m.layoutReplies() // same floor, fresh tree; replyTop clamped
+		} else {
+			d.layer = layerFloors // the floor or its replies vanished: step back
+			m.layoutFloor()
+		}
+	default:
+		d.floorLines, d.replyLines = nil, nil
+	}
+	m.rebuildBodyDoc()
+}
+
+// --- floor / reply layer rendering ---------------------------------------
+
+// layoutFloor renders the floor layer's current screen: the floor
+// header, a rule, then the floor's own text through the pipeline —
+// or, before anything is loaded, the one-line state the layer is in.
+func (m *Model) layoutFloor() {
+	d := m.reader
+	if !d.loaded || len(d.floors) == 0 {
+		d.floorLines = m.pendingLines()
+		d.floorTop = 0
+		return
+	}
+	if d.floorIdx >= len(d.floors) {
+		d.floorIdx = len(d.floors) - 1
+	}
+	d.floorLines = render.Layout(m.floorDoc(&d.floors[d.floorIdx]), m.detailWidth())
+	m.clampDetail()
+}
+
+// pendingLines is the floor layer's placeholder screen while there is
+// no tree to show: loading, failed, or genuinely empty.
+func (m Model) pendingLines() []render.Line {
+	d := m.reader
+	text := m.cat.Get("detail.no_comments")
+	switch {
+	case d.loading:
+		text = m.cat.Get("detail.loading")
+	case d.loadErr != nil:
+		text = m.cat.Get("detail.load_failed")
+	}
+	return []render.Line{{Spans: []render.Span{{Text: text, Style: render.SpanDim}}}}
+}
+
+// floorDoc is one floor's document: "author · N replies" header, rule,
+// body. The body's link table rides along (inline numbers and the
+// appendix stay paired), so their appendix sits at the end of the
+// floor — the nearest possible place.
+func (m Model) floorDoc(f *floor) *render.Document {
+	body := m.commentDoc(f.cm)
+	return &render.Document{
+		Blocks: append([]render.Block{
+			render.Para{Spans: m.floorHeaderSpans(f)},
+			render.Rule{},
+		}, body.Blocks...),
+		Links: body.Links,
+	}
+}
+
+// floorHeaderSpans is "author · score? · N replies" with the standing
+// degradation rule: absent segments drop, never an empty "· ·". Score
+// is nil by construction for hn (Algolia's tree endpoint has no
+// per-comment points); the segment exists for sources that have one.
+func (m Model) floorHeaderSpans(f *floor) []render.Span {
+	author := f.cm.Author
+	style := render.SpanBold
+	if author == "" {
+		author, style = m.cat.Get("detail.deleted"), render.SpanDim
+	}
+	spans := []render.Span{{Text: author, Style: style}}
+	if f.cm.Score != nil {
+		spans = append(spans, dimSpan(" · "+m.cat.Get("hn.pts", *f.cm.Score)))
+	}
+	spans = append(spans, dimSpan(" · "+m.cat.Get("detail.floor_meta", len(f.replies))))
+	return spans
+}
+
+// commentDoc renders one comment's text through the shared M1
+// pipeline (blocks and link table together — callers keep them
+// paired); an empty text (deleted placeholder) renders the dim
+// [deleted] line so the node stays visible for its children.
+func (m Model) commentDoc(c core.Comment) *render.Document {
+	if strings.TrimSpace(c.Text) == "" {
+		return &render.Document{Blocks: []render.Block{render.Para{Spans: []render.Span{
+			{Text: m.cat.Get("detail.deleted"), Style: render.SpanDim},
+		}}}}
+	}
+	if strings.Contains(c.Text, "<") {
+		if doc, err := render.ParseHTML(c.Text); err == nil {
+			return doc
+		}
+	}
+	return plainDoc(c.Text)
+}
+
+// layoutReplies renders the reply layer: a dim context header naming
+// the floor, then one block group per flattened reply row — direct
+// replies flat, deeper replies wrapped in a quote (the pipeline's own
+// nesting visual) with an @parent prefix on their header. Each
+// reply's links stay local to its group, appendix and all. replyStarts
+// records where each reply begins, which is how Ctrl+N (next reply)
+// and Ctrl+O/Y (topmost visible reply) find their target.
+func (m *Model) layoutReplies() {
+	d := m.reader
+	w := m.detailWidth()
+	f := &d.floors[d.floorIdx]
+	d.replies = flattenReplies(f)
+	d.replyFloor = d.floorIdx
+	author := f.cm.Author
+	if author == "" {
+		author = m.cat.Get("detail.deleted")
+	}
+	header := &render.Document{Blocks: []render.Block{
+		render.Para{Spans: []render.Span{
+			{Text: m.cat.Get("detail.replies_to", author), Style: render.SpanDim},
+		}},
+		render.Rule{},
+	}}
+	lines := render.Layout(header, w)
+	d.replyStarts = make([]int, len(d.replies))
+	for i, row := range d.replies {
+		d.replyStarts[i] = len(lines)
+		lines = append(lines, render.Layout(m.replyDoc(row), w)...)
+		lines = append(lines, render.Line{}) // gap between replies
+	}
+	d.replyLines = lines
+	m.clampDetail()
+}
+
+// replyDoc is one reply row's document: header line ("@parent author
+// · age"), then the body — inside a quote when the row is a compressed
+// deeper reply, so the second visual level is the pipeline's quote
+// bar. The row's links stay local: appendix right below the reply.
+func (m Model) replyDoc(row replyRow) *render.Document {
+	var header []render.Span
+	if row.depth >= 2 {
+		parent := row.parentAuthor
+		if parent == "" {
+			parent = m.cat.Get("detail.deleted")
+		}
+		header = append(header, render.Span{Text: "@" + parent + " ", Style: render.SpanDim})
+	}
+	author, style := row.cm.Author, render.SpanBold
+	if author == "" {
+		author, style = m.cat.Get("detail.deleted"), render.SpanDim
+	}
+	header = append(header, render.Span{Text: author, Style: style})
+	if row.cm.CreatedAt != nil {
+		header = append(header, dimSpan(" · "+m.relTime(row.cm.CreatedAt)))
+	}
+	body := m.commentDoc(row.cm)
+	blocks := []render.Block{render.Para{Spans: header}}
+	if row.depth >= 2 {
+		blocks = append(blocks, render.Quote{Blocks: body.Blocks})
+	} else {
+		blocks = append(blocks, body.Blocks...)
+	}
+	return &render.Document{Blocks: blocks, Links: body.Links}
+}
+
+func dimSpan(text string) render.Span {
+	return render.Span{Text: text, Style: render.SpanDim}
+}
+
 // --- scrolling -----------------------------------------------------------
 
-// scrollDetail moves the reading window by delta lines (±pages from
-// the key layer); clampDetail pins it to [0, last page].
+// scrollDetail moves the active layer's window by delta lines (±pages
+// from the key layer); clampDetail pins it to [0, last page].
 func (m *Model) scrollDetail(delta int) {
 	if m.reader == nil {
 		return
 	}
-	m.reader.top += delta
+	*m.reader.activeTop() += delta
 	m.clampDetail()
 }
 
@@ -153,15 +550,16 @@ func (m *Model) clampDetail() {
 	if d == nil {
 		return
 	}
-	maxTop := len(d.lines) - m.bodyHeight()
+	top := d.activeTop()
+	maxTop := len(d.activeLines()) - m.bodyHeight()
 	if maxTop < 0 {
 		maxTop = 0
 	}
-	if d.top > maxTop {
-		d.top = maxTop
+	if *top > maxTop {
+		*top = maxTop
 	}
-	if d.top < 0 {
-		d.top = 0
+	if *top < 0 {
+		*top = 0
 	}
 }
 
@@ -173,12 +571,36 @@ func (m *Model) clampDetail() {
 // to the shared switch in Update. The help overlay (checked by the
 // caller) always wins over the reader.
 func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	d := m.reader
 	switch msg.String() {
-	case "esc":
-		m.reader = nil // back to the list: focus and cursor never moved
+	case "esc": // one layer back; from the body, back to the list
+		switch d.layer {
+		case layerReplies:
+			d.layer = layerFloors
+		case layerFloors:
+			d.layer = layerBody
+		default:
+			m.reader = nil // focus and cursor never moved
+		}
 		return true, nil
-	case "enter": // already open; never re-open (would reset scroll)
-		return true, nil
+
+	case "enter":
+		switch d.layer {
+		case layerBody: // into the floors (detail sources only)
+			if d.hasDetail {
+				m.enterFloors()
+			}
+			return true, nil // never re-open the body (would reset scroll)
+		case layerFloors:
+			if m.enterReplies() {
+				return true, nil
+			}
+			m.status = m.cat.Get("detail.no_replies") // replyless floor: no-op, say why
+			return true, nil
+		default:
+			return true, nil // replies is the deepest layer
+		}
+
 	case "up":
 		m.scrollDetail(-1)
 		return true, nil
@@ -192,15 +614,32 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.scrollDetail(m.bodyHeight())
 		return true, nil
 	case "home":
-		m.reader.top = 0
+		*d.activeTop() = 0
 		return true, nil
 	case "end":
-		m.reader.top = len(m.reader.lines)
+		*d.activeTop() = len(d.activeLines())
 		m.clampDetail()
 		return true, nil
-	case "left", "right":
-		// Region navigation is suspended under the overlay.
+
+	case "left", "right": // floor-to-floor; suspended elsewhere
+		if d.layer == layerFloors {
+			if msg.String() == "left" {
+				m.moveFloor(-1)
+			} else {
+				m.moveFloor(1)
+			}
+		}
 		return true, nil
+
+	case "ctrl+n": // in-memory fast-forward: no request ever leaves
+		switch d.layer {
+		case layerFloors:
+			m.moveFloor(floorSkip)
+		case layerReplies:
+			m.nextReplyStart()
+		}
+		return true, nil
+
 	case "ctrl+r": // toggle the open item's read state; list follows
 		// via the reload chain when Esc drops back
 		m.reader.item.Read = !m.reader.item.Read
@@ -209,14 +648,14 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.reader.item.Starred = !m.reader.item.Starred
 		return true, m.setStarredCmd(m.reader.item.Item, m.reader.item.Starred)
 	case "ctrl+o":
-		url := m.reader.item.Item.URL
+		url := m.detailTargetURL()
 		if url == "" {
 			m.status = m.cat.Get("detail.no_url")
 			return true, nil
 		}
 		return true, openBrowserCmd(url)
 	case "ctrl+y":
-		url := m.reader.item.Item.URL
+		url := m.detailTargetURL()
 		if url == "" {
 			m.status = m.cat.Get("detail.no_url")
 			return true, nil
@@ -224,6 +663,106 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, copyLinkCmd(url)
 	}
 	return false, nil
+}
+
+// enterFloors opens the floor layer at the current floor (0 on first
+// entry; the index survives round trips through the body layer).
+func (m *Model) enterFloors() {
+	d := m.reader
+	d.layer = layerFloors
+	if d.floorLines == nil {
+		m.layoutFloor()
+	}
+}
+
+// enterReplies opens the reply layer for the floor on screen. False
+// (and no transition) when the floor has no replies — the ticket's
+// "replyless floors don't respond to Enter".
+func (m *Model) enterReplies() bool {
+	d := m.reader
+	if !d.loaded || d.floorIdx >= len(d.floors) {
+		return false
+	}
+	if len(d.floors[d.floorIdx].replies) == 0 {
+		return false
+	}
+	if d.replyFloor != d.floorIdx || d.replyLines == nil {
+		d.replyTop = 0
+		m.layoutReplies()
+	}
+	d.layer = layerReplies
+	return true
+}
+
+// moveFloor moves the floor cursor by delta (clamped); a real move
+// resets that screen's scroll — a new floor reads from its top.
+func (m *Model) moveFloor(delta int) {
+	d := m.reader
+	if !d.loaded || len(d.floors) == 0 {
+		return
+	}
+	next := d.floorIdx + delta
+	next = max(0, min(next, len(d.floors)-1))
+	if next != d.floorIdx {
+		d.floorIdx = next
+		d.floorTop = 0
+	}
+	m.layoutFloor()
+}
+
+// nextReplyStart scrolls the reply layer to the next reply's first
+// line — Ctrl+N's "one more reply", all in memory.
+func (m *Model) nextReplyStart() {
+	d := m.reader
+	for _, s := range d.replyStarts {
+		if s > d.replyTop {
+			d.replyTop = s
+			m.clampDetail()
+			return
+		}
+	}
+	d.replyTop = len(d.replyLines) // at the last reply already: go to the end
+	m.clampDetail()
+}
+
+// detailTargetURL is Ctrl+O/Ctrl+Y's target per layer: the item URL on
+// the body (a text post with no URL falls back to its discussion
+// page), the floor's comment page on the floor layer, and the topmost
+// visible reply's page on the reply layer.
+func (m Model) detailTargetURL() string {
+	d := m.reader
+	switch d.layer {
+	case layerFloors:
+		if d.commentURL != nil && d.loaded && d.floorIdx < len(d.floors) {
+			return d.commentURL(d.floors[d.floorIdx].cm.ID)
+		}
+	case layerReplies:
+		if d.commentURL != nil && len(d.replies) > 0 {
+			return d.commentURL(d.replies[d.topmostReplyIdx()].cm.ID)
+		}
+	default:
+		if d.item.Item.URL != "" {
+			return d.item.Item.URL
+		}
+		if d.hasDetail && d.commentURL != nil {
+			return d.commentURL(d.item.Item.ID) // text post: its own HN page
+		}
+	}
+	return ""
+}
+
+// topmostReplyIdx is which reply the scroll window starts inside —
+// the reply the user is looking at.
+func (d *detail) topmostReplyIdx() int {
+	idx := 0
+	for i, s := range d.replyStarts {
+		if s <= d.replyTop {
+			idx = i
+		} else {
+			break
+		}
+	}
+	return idx
 }
 
 // --- side-effect commands --------------------------------------------------
@@ -241,23 +780,27 @@ func copyLinkCmd(url string) tea.Cmd {
 
 // --- view ----------------------------------------------------------------
 
-// detailView renders the visible window of lines into the list pane's
-// style; Height pads with blanks so the list never bleeds through.
+// detailView renders the visible window of the active layer's lines
+// into the list pane's style; Height pads with blanks so the list
+// never bleeds through.
 func (m Model) detailView() string {
 	d := m.reader
 	w, h := m.listWidth(), m.bodyHeight()
-	end := min(d.top+h, len(d.lines))
-	text := render.ToANSI(d.lines[d.top:end], m.th.StyleFor)
+	lines := d.activeLines()
+	top := *d.activeTop()
+	end := min(top+h, len(lines))
+	text := render.ToANSI(lines[top:end], m.th.StyleFor)
 	return m.th.List.Width(w).Height(h).Render(text)
 }
 
 // detailPercent is the reading position for the status bar: how far
-// the bottom of the window is through the article.
+// the bottom of the window is through the active layer.
 func (m Model) detailPercent() int {
 	d := m.reader
-	if d == nil || len(d.lines) == 0 {
+	lines := d.activeLines()
+	if len(lines) == 0 {
 		return 0
 	}
-	end := min(d.top+m.bodyHeight(), len(d.lines))
-	return end * 100 / len(d.lines)
+	end := min(*d.activeTop()+m.bodyHeight(), len(lines))
+	return end * 100 / len(lines)
 }

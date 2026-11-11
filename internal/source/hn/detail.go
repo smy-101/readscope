@@ -41,6 +41,17 @@ func (s *Source) Detail(ctx context.Context, it core.Item) (core.Content, error)
 	return c, nil
 }
 
+// CommentURL implements source.DetailSource: the HN page for one
+// comment, or for the story itself when passed a story item id —
+// the reader's Ctrl+O/Ctrl+Y targets it per detail layer (ticket 04).
+// A bare comment id (what the comments cache stores) and a full item
+// id both resolve; anything else passes through as-is, matching HN's
+// own item?id= semantics.
+func (s *Source) CommentURL(id string) string {
+	n, _ := strings.CutPrefix(id, itemIDPrefix)
+	return "https://news.ycombinator.com/item?id=" + n
+}
+
 // itemNode is one node of Algolia's /items payload. The story sits at
 // the root (points on it, text holds a text post's HTML); comments
 // nest through children, their parent_id pointing at the immediate

@@ -106,6 +106,10 @@ type refreshDoneMsg struct {
 	err     error
 }
 
+// commentsMsg is defined in detail.go: one leg of the cache-first
+// comment load for the open reader (cache probe, then background
+// fetch).
+
 // stateSavedMsg lands when a read/star/mark-all write finished; the
 // reload chain then re-renders list and counts from the store.
 type stateSavedMsg struct {
@@ -270,8 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		if m.reader != nil { // re-wrap at the new width, keep the position
-			m.reader.layout(m.detailWidth())
-			m.clampDetail()
+			m.relayoutReader()
 		}
 		return m, nil
 
@@ -333,6 +336,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = m.cat.Get("status.copy_done")
 		}
 		return m, nil
+
+	case commentsMsg:
+		return m, m.commentsLanded(msg)
 
 	case tea.KeyMsg:
 		// Ctrl+A's confirmation is modal: only Enter commits, Esc (or
@@ -433,7 +439,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = regionList
 				return m, nil
 			}
-			m.openDetail()
+			if opened, cmd := m.openDetail(); opened {
+				return m, cmd
+			}
 			return m, nil
 		case "esc":
 			if m.help {
@@ -695,15 +703,21 @@ func (m Model) sidebarRow(label string, unread int, selected bool) string {
 func (m Model) statusBarView() string {
 	left := m.th.StatusNormal.Render(m.sourceLabel(m.active))
 	if m.reader != nil {
-		// Reading: the article's title (truncated) + position percent.
+		// Reading: the article's title (truncated) + where we are —
+		// the floor count on the floor layer, position percent always.
 		title := m.reader.item.Item.Title
 		maxTitle := m.width / 2
 		if maxTitle < 4 {
 			maxTitle = 4
 		}
 		title = runewidth.Truncate(title, maxTitle, "…")
-		left = m.th.StatusNormal.Render(title) + "  " +
-			m.th.StatusHint.Render(m.cat.Get("status.scroll", m.detailPercent()))
+		parts := []string{m.th.StatusNormal.Render(title)}
+		if m.reader.layer == layerFloors && m.reader.loaded && len(m.reader.floors) > 0 {
+			parts = append(parts, m.th.StatusNormal.Render(
+				m.cat.Get("detail.floor_pos", m.reader.floorIdx+1, len(m.reader.floors))))
+		}
+		parts = append(parts, m.th.StatusHint.Render(m.cat.Get("status.scroll", m.detailPercent())))
+		left = strings.Join(parts, "  ")
 	} else if m.favorites {
 		left = m.th.StatusNormal.Render(m.cat.Get("list.favorites"))
 		if n := len(m.items); n > 0 {
@@ -732,7 +746,14 @@ func (m Model) statusBarView() string {
 	}
 	right := m.th.StatusHint.Render(m.cat.Get("help.hint"))
 	if m.reader != nil {
-		right = m.th.StatusHint.Render(m.cat.Get("help.detail_hint"))
+		hintKey := "help.detail_hint"
+		switch m.reader.layer {
+		case layerFloors:
+			hintKey = "help.floor_hint"
+		case layerReplies:
+			hintKey = "help.reply_hint"
+		}
+		right = m.th.StatusHint.Render(m.cat.Get(hintKey))
 	}
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {

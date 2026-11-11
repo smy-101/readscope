@@ -236,3 +236,19 @@ func TestDetailRejectsForeignItemID(t *testing.T) {
 }
 
 func testCtx() context.Context { return context.Background() }
+
+// CommentURL (ticket 04) points Ctrl+O/Ctrl+Y at the HN page of one
+// comment — or of the story itself when handed the story's item id,
+// which is how the reader's body layer targets text posts (they carry
+// no external URL).
+func TestCommentURL(t *testing.T) {
+	s := newSource("http://127.0.0.1:1")
+	for _, tc := range []struct{ in, want string }{
+		{"12345", "https://news.ycombinator.com/item?id=12345"},
+		{ItemID("1001"), "https://news.ycombinator.com/item?id=1001"},
+	} {
+		if got := s.CommentURL(tc.in); got != tc.want {
+			t.Errorf("CommentURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
