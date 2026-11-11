@@ -2,11 +2,13 @@ package refresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/smy-101/readscope/internal/core"
@@ -150,6 +152,281 @@ func TestRefreshUnknownSource(t *testing.T) {
 	t.Setenv("READSCOPE_CONFIG", filepath.Join(t.TempDir(), "cfg"))
 	if _, err := Source(context.Background(), nil, core.DefaultSources(), "nope"); err == nil {
 		t.Fatal("expected error for unknown source")
+	}
+}
+
+// M3 ticket 05: F5 is feed-level. Feed refreshes exactly the named
+// feed — one Result, other feeds never dialed — through the same
+// per-feed path Source walks (conditional replay included), and a
+// paged source's depth floors at 1 so Ctrl+N walks on from page 1.
+func TestFeedRefreshesOnlyTheNamedFeed(t *testing.T) {
+	const alphaXML = `<?xml version="1.0"?><rss version="2.0"><channel><title>A</title>
+	<item><title>Alpha one</title><guid>a1</guid><description>alpha body</description></item>
+	</channel></rss>`
+	const betaXML = `<?xml version="1.0"?><rss version="2.0"><channel><title>B</title>
+	<item><title>Beta one</title><guid>b1</guid><description>beta body</description></item>
+	</channel></rss>`
+
+	var mu sync.Mutex
+	alphaHits, betaHits := 0, 0
+	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		alphaHits++
+		mu.Unlock()
+		w.Write([]byte(alphaXML))
+	}))
+	t.Cleanup(alpha.Close)
+	beta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		betaHits++
+		mu.Unlock()
+		w.Write([]byte(betaXML))
+	}))
+	t.Cleanup(beta.Close)
+
+	t.Setenv("READSCOPE_CONFIG", filepath.Join(t.TempDir(), "cfg"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srcs := core.DefaultSources()
+	srcs.RSS.Feeds = map[string]core.RSSFeed{
+		"alpha": {Label: "Alpha", URL: alpha.URL},
+		"beta":  {Label: "Beta", URL: beta.URL},
+	}
+	ctx := context.Background()
+
+	results, err := Feed(ctx, st, srcs, "rss", "beta")
+	if err != nil {
+		t.Fatalf("Feed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want exactly 1", len(results))
+	}
+	r := results[0]
+	if r.Err != nil || r.Feed != "beta" || r.Label != "Beta" || r.New != 1 || r.Total != 1 {
+		t.Fatalf("beta result = %+v", r)
+	}
+	mu.Lock()
+	a, b := alphaHits, betaHits
+	mu.Unlock()
+	if a != 0 || b != 1 {
+		t.Fatalf("dial counts = alpha:%d beta:%d, want alpha:0 beta:1 — F5 must not touch the other feeds", a, b)
+	}
+
+	// Unknown feed key is an error naming it, not a silent no-op.
+	if _, err := Feed(ctx, st, srcs, "rss", "nope"); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("unknown feed key should error naming it, got: %v", err)
+	}
+
+	// Unknown source id still errors like Source does.
+	if _, err := Feed(ctx, st, srcs, "nope", "beta"); err == nil {
+		t.Fatal("unknown source should error")
+	}
+}
+
+// The paging floor: a feed-level refresh of a paged source puts the
+// first page in the cache and the depth at 1 — never lower, never
+// higher no matter how many times it reruns.
+func TestFeedRefreshSetsPagingFloor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"hits":[{"objectID":"1001","title":"Floor story",` +
+			`"url":"https://example.com/s","author":"u","created_at_i":1700000000}],` +
+			`"nbHits":1,"page":0,"nbPages":1,"hitsPerPage":20}`))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_HN_BASE", srv.URL+"/api/v1")
+
+	t.Setenv("READSCOPE_CONFIG", filepath.Join(t.TempDir(), "cfg"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "hn.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	ctx := context.Background()
+
+	if n, _ := st.LoadPagesFetched(ctx, "hn", "front"); n != 0 {
+		t.Fatalf("depth before any refresh = %d, want 0", n)
+	}
+	if _, err := Feed(ctx, st, core.DefaultSources(), "hn", "front"); err != nil {
+		t.Fatalf("Feed(hn/front): %v", err)
+	}
+	if n, err := st.LoadPagesFetched(ctx, "hn", "front"); err != nil || n != 1 {
+		t.Fatalf("depth after first-page refresh = (%d, %v), want 1", n, err)
+	}
+	if _, err := Feed(ctx, st, core.DefaultSources(), "hn", "front"); err != nil {
+		t.Fatalf("second Feed: %v", err)
+	}
+	if n, err := st.LoadPagesFetched(ctx, "hn", "front"); err != nil || n != 1 {
+		t.Fatalf("refresh must not grow the depth: (%d, %v), want 1", n, err)
+	}
+	// The other feeds were not part of the pull: their depth stays 0.
+	if n, _ := st.LoadPagesFetched(ctx, "hn", "new"); n != 0 {
+		t.Fatalf("untouched feed depth = %d, want 0", n)
+	}
+}
+
+// M3 ticket 05: Ctrl+N append. More walks the stored depth: page N is
+// fetched and merged through the upsert (no duplicate rows, read
+// state survives — Algolia pages shift, so a later page re-serving a
+// known id is normal), and the depth advances only when the page had
+// hits. An empty page reports end without moving the depth, so a
+// later Ctrl+N retries the same page once the index grows.
+func TestMoreAppendsNextPage(t *testing.T) {
+	hit := func(id, title string) string {
+		return fmt.Sprintf(`{"objectID":%q,"title":%q,"url":"https://example.com/s",`+
+			`"author":"u","points":5,"created_at_i":1700000000}`, id, title)
+	}
+	page := func(pageNo int, ids ...string) string {
+		hits := make([]string, len(ids))
+		for i, id := range ids {
+			hits[i] = hit(id, id+" story")
+		}
+		return fmt.Sprintf(`{"hits":[%s],"nbHits":%d,"page":%d,"nbPages":3,"hitsPerPage":1}`,
+			strings.Join(hits, ","), len(ids), pageNo)
+	}
+	// page 0: two stories; page 1: one old (1002, re-served as pages
+	// shift) + one new; page 2: empty until the index "grows".
+	page2Grew := false
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		grew := page2Grew
+		mu.Unlock()
+		p := r.URL.Query().Get("page")
+		tags := r.URL.Query().Get("tags")
+		if tags != "front_page" {
+			http.Error(w, "no fixture", http.StatusNotFound)
+			return
+		}
+		body := page(2) // empty hits: the index's end
+		switch p {
+		case "", "0":
+			body = page(0, "1001", "1002")
+		case "1":
+			body = page(1, "1002", "1003")
+		case "2":
+			if grew {
+				body = page(2, "1004")
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_HN_BASE", srv.URL+"/api/v1")
+
+	t.Setenv("READSCOPE_CONFIG", filepath.Join(t.TempDir(), "cfg"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "more.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srcs := core.DefaultSources()
+	ctx := context.Background()
+
+	// First page lands via a feed refresh (F5): depth 1, two rows.
+	if _, err := Feed(ctx, st, srcs, "hn", "front"); err != nil {
+		t.Fatalf("Feed: %v", err)
+	}
+	if err := st.SetRead(ctx, "hn:algolia:1002", true); err != nil {
+		t.Fatalf("SetRead: %v", err)
+	}
+
+	// Ctrl+N: page 1 appends — one new row (1003), 1002 re-served but
+	// not duplicated, its read state intact.
+	res, end, err := More(ctx, st, srcs, "hn", "front")
+	if err != nil || end {
+		t.Fatalf("first More = (res %+v, end %v, err %v)", res, end, err)
+	}
+	if res.New != 1 || res.Total != 3 {
+		t.Fatalf("first More = %+v, want New 1 / Total 3", res)
+	}
+	if n, err := st.LoadPagesFetched(ctx, "hn", "front"); err != nil || n != 2 {
+		t.Fatalf("depth after append = (%d, %v), want 2", n, err)
+	}
+	rows, err := st.FeedItems(ctx, "hn", "front", false)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows after append = (%d, %v), want 3 — no duplicates", len(rows), err)
+	}
+	read1002 := false
+	for _, r := range rows {
+		if r.Item.ID == "hn:algolia:1002" {
+			read1002 = r.Read
+		}
+	}
+	if !read1002 {
+		t.Fatal("the re-served story must stay read — paging never touches read state")
+	}
+
+	// Ctrl+N at the index's end: empty page, end reported, depth kept.
+	res, end, err = More(ctx, st, srcs, "hn", "front")
+	if err != nil || !end {
+		t.Fatalf("second More = (res %+v, end %v, err %v), want end", res, end, err)
+	}
+	if n, _ := st.LoadPagesFetched(ctx, "hn", "front"); n != 2 {
+		t.Fatalf("depth after end = %d, want 2 (end must not advance it)", n)
+	}
+
+	// The index grows: the same Ctrl+N retries page 2 and loads it.
+	mu.Lock()
+	page2Grew = true
+	mu.Unlock()
+	res, end, err = More(ctx, st, srcs, "hn", "front")
+	if err != nil || end {
+		t.Fatalf("third More = (res %+v, end %v, err %v)", res, end, err)
+	}
+	if res.New != 1 || res.Total != 4 {
+		t.Fatalf("third More = %+v, want New 1 / Total 4", res)
+	}
+	if n, _ := st.LoadPagesFetched(ctx, "hn", "front"); n != 3 {
+		t.Fatalf("depth after retry = %d, want 3", n)
+	}
+}
+
+// Ctrl+N on a source without pages is a typed miss, not a fetch: the
+// UI turns it into the "no more items" hint.
+func TestMoreOnUnpagedSourceIsErrNotPaged(t *testing.T) {
+	t.Setenv("READSCOPE_CONFIG", filepath.Join(t.TempDir(), "cfg"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "more.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	_, _, err = More(context.Background(), st, core.DefaultSources(), "rss", "whatever")
+	if !errors.Is(err, ErrNotPaged) {
+		t.Fatalf("want ErrNotPaged, got: %v", err)
+	}
+}
+
+// A feed key the source doesn't know is an error naming it, matching
+// Feed's contract.
+func TestMoreUnknownFeedKeyIsError(t *testing.T) {
+	t.Setenv("READSCOPE_CONFIG", filepath.Join(t.TempDir(), "cfg"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "more.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	_, _, err = More(context.Background(), st, core.DefaultSources(), "hn", "best")
+	if err == nil || !strings.Contains(err.Error(), "best") {
+		t.Fatalf("unknown feed key should error naming it, got: %v", err)
 	}
 }
 

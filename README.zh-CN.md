@@ -68,7 +68,8 @@ map 的键是稳定 slug（用于条目 id 与边栏）；`label` 可省，回�
 Tab 切到 Hacker News，边栏固定四类 feed——热门 / 最新 / Ask HN / Show HN——数据来自
 [Algolia HN Search](https://hn.algolia.com) 公共索引（免账号、免 key）。`F5` 把当前
 feed 拉进与 RSS 同一套离线缓存：帖子快照进 SQLite，● 未读点 / 已读 / 收藏机制完全
-一致，断网照样可读。HN 刷新恒为无条件重拉（索引无条件请求语义）。链接帖的正文
+一致，断网照样可读。列表里 `Ctrl+N` 追加下一页（不重复、已读保持）；帖子内
+`Ctrl+N` 在楼层/回复间内存翻页。HN 刷新恒为无条件重拉（索引无条件请求语义）。链接帖的正文
 就是一行原文链接（`Ctrl+O` 直接打开）；文本帖（Ask/Show）的正文走与 RSS 同一条
 渲染管线。注意：Algolia 索引滞后站点几分钟，排序按 points/时间而非 HN 官方排名
 ——readscope 不承诺官方排序。
@@ -89,7 +90,7 @@ feed 拉进与 RSS 同一套离线缓存：帖子快照进 SQLite，● 未读�
 | F1 | 键位帮助 | Ctrl+O | 浏览器打开 |
 | F3 | 收藏列表 | Ctrl+Y | 复制链接 |
 | F4 | 只看未读 | Ctrl+T | 切换主题 |
-| | | Ctrl+Q | 退出 |
+| Ctrl+N | 加载更多/翻页 | Ctrl+Q | 退出 |
 
 （F2，TUI 内订阅管理，后续里程碑提供。）
 

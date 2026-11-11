@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/smy-101/readscope/internal/core"
@@ -60,11 +61,18 @@ var feedDefs = []feedDef{
 
 func init() { source.Register(ID, New) }
 
-// Source is the Hacker News implementation of source.Source.
+// Source is the Hacker News implementation of source.Source and of
+// source.PagedSource (list paging behind Ctrl+N).
 type Source struct {
 	base   string // API root; ProdBase in production
 	client *http.Client
 }
+
+// The optional extensions hn carries, pinned at compile time.
+var (
+	_ source.PagedSource  = (*Source)(nil)
+	_ source.DetailSource = (*Source)(nil)
+)
 
 // New builds the HN source. HN has no per-user subscriptions — the
 // four feeds are fixed — so the subscription config goes unused.
@@ -95,11 +103,20 @@ func (s *Source) Feeds() []core.Feed {
 
 func (s *Source) url(d feedDef) string { return s.base + "/" + d.endpoint + "?tags=" + d.tags }
 
-// Fetch implements source.Source: one page of the feed from the
-// Algolia index, mapped to snapshot items. Algolia has no validator
-// semantics, so HN always fetches unconditionally — no
-// ConditionalSource extension, by design.
+// Fetch implements source.Source: the feed's first page — the same
+// request FetchPage makes at page 0, kept as the plain-Source entry
+// point every caller already uses.
 func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
+	return s.FetchPage(ctx, f, 0)
+}
+
+// FetchPage implements source.PagedSource: one page of the feed from
+// the Algolia index, page 0 the first. Page 0 goes out without a page
+// parameter (the API's default); later pages ride the query string.
+// An empty hits array is Algolia's own end signal — served with HTTP
+// 200 — and comes back as an empty slice, zero items, no error: the
+// caller reads that as "exhausted" and stops advancing.
+func (s *Source) FetchPage(ctx context.Context, f core.Feed, page int) ([]core.Item, error) {
 	var def *feedDef
 	for i := range feedDefs {
 		if feedDefs[i].key == f.Key {
@@ -110,7 +127,14 @@ func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 	if def == nil {
 		return nil, fmt.Errorf("fetch %s: unknown hn feed", f.Key)
 	}
-	raw, err := s.get(ctx, s.url(*def), "fetch "+f.Key)
+	if page < 0 {
+		return nil, fmt.Errorf("fetch %s: negative page %d", f.Key, page)
+	}
+	url := s.url(*def)
+	if page > 0 {
+		url += "&page=" + strconv.Itoa(page)
+	}
+	raw, err := s.get(ctx, url, "fetch "+f.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +154,8 @@ func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 }
 
 // searchResponse is the slice of Algolia's search payload readscope
-// consumes: just the hits (paging fields grow in with Ctrl+N, M3
-// ticket 05).
+// consumes: just the hits. End-of-index is the empty hits array the
+// API serves with HTTP 200, so no paging fields are needed.
 type searchResponse struct {
 	Hits []hit `json:"hits"`
 }

@@ -8,6 +8,7 @@ package refresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -46,31 +47,138 @@ func Source(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID s
 	}
 	results := make([]Result, 0, len(feeds))
 	for _, f := range feeds {
-		res := Result{Source: sourceID, Feed: f.Key, Label: f.Label}
-		// Conditional path (ticket 05): replay stored validators; a 304
-		// skips parse and item writes entirely. Sources without the
-		// extension (HN in M3, until it grows one) fetch in full.
-		if cond, ok := src.(source.ConditionalSource); ok {
-			res.Err = refreshConditional(ctx, st, cond, f, &res)
-			results = append(results, res)
-			continue
-		}
-		items, err := src.Fetch(ctx, f)
-		if err != nil {
-			res.Err = err
-			results = append(results, res)
-			continue
-		}
-		newCount, total, err := st.SaveFeedItems(ctx, sourceID, f.Key, items)
-		if err != nil {
-			res.Err = fmt.Errorf("store %s: %w", f.Key, err)
-			results = append(results, res)
-			continue
-		}
-		res.New, res.Total = newCount, total
-		results = append(results, res)
+		results = append(results, refreshOneFeed(ctx, st, src, f))
 	}
 	return results, nil
+}
+
+// Feed refreshes one feed of the named source — F5's feed-level pull
+// (M3 ticket 05: re-fetch the current feed's first page instead of
+// the whole source, so the other feeds are never dialed) — through
+// the same per-feed path Source walks, and returns its single
+// Result. A feed key the source doesn't list is an error naming it.
+func Feed(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID, feedKey string) ([]Result, error) {
+	src, err := source.New(sourceID, srcs)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range src.Feeds() {
+		if f.Key == feedKey {
+			return []Result{refreshOneFeed(ctx, st, src, f)}, nil
+		}
+	}
+	return nil, fmt.Errorf("refresh %s: no feed %q", sourceID, feedKey)
+}
+
+// refreshOneFeed runs one feed's refresh cycle — fetch (conditional
+// where the source can), snapshot, report. The error lands on the
+// Result, never in a return: one bad feed must not stop the others.
+// A successful cycle also floors a paged source's depth at 1 (see
+// bumpPagingFloor).
+func refreshOneFeed(ctx context.Context, st *store.Store, src source.Source, f core.Feed) Result {
+	res := Result{Source: src.ID(), Feed: f.Key, Label: f.Label}
+	// Conditional path: replay stored validators; a 304 skips parse
+	// and item writes entirely. Sources without the extension (hn,
+	// unconditional by design) fetch in full.
+	if cond, ok := src.(source.ConditionalSource); ok {
+		if err := refreshConditional(ctx, st, cond, f, &res); err != nil {
+			res.Err = err
+			return res
+		}
+		bumpPagingFloor(ctx, st, src, f)
+		return res
+	}
+	items, err := src.Fetch(ctx, f)
+	if err != nil {
+		res.Err = err
+		return res
+	}
+	newCount, total, err := st.SaveFeedItems(ctx, src.ID(), f.Key, items)
+	if err != nil {
+		res.Err = fmt.Errorf("store %s: %w", f.Key, err)
+		return res
+	}
+	res.New, res.Total = newCount, total
+	bumpPagingFloor(ctx, st, src, f)
+	return res
+}
+
+// bumpPagingFloor is the paged-source side effect of a successful
+// refresh: the feed's first page is in the cache now (or confirmed
+// current), so its paging depth is at least 1 — Ctrl+N walks on from
+// page 1 instead of re-fetching page 0. Unpaged sources (rss) are
+// untouched; a depth write that fails is deliberately silent — the
+// depth is advisory, and the worst case is one redundant page fetch.
+func bumpPagingFloor(ctx context.Context, st *store.Store, src source.Source, f core.Feed) {
+	if _, ok := src.(source.PagedSource); !ok {
+		return
+	}
+	depth, err := st.LoadPagesFetched(ctx, src.ID(), f.Key)
+	if err != nil || depth >= 1 {
+		return
+	}
+	_ = st.SavePagesFetched(ctx, src.ID(), f.Key, 1)
+}
+
+// ErrNotPaged reports a Ctrl+N against a source that has no pages
+// behind its first (rss: the list is a full-sync snapshot). Callers
+// turn it into the "no more items" hint rather than an error line.
+var ErrNotPaged = errors.New("source does not page its lists")
+
+// More appends the next page of one feed — Ctrl+N on the list (M3
+// ticket 05). The page number is the feed's stored paging depth (0 =
+// never fetched, so More bootstraps a cold feed by fetching page 0);
+// items merge through SaveFeedItems' upsert — no duplicate rows,
+// read/star state untouched — and the depth advances only when the
+// page had hits. end=true means the index served an empty page: the
+// depth stays put, so a later Ctrl+N retries the same page once the
+// index grows.
+func More(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID, feedKey string) (res Result, end bool, err error) {
+	src, err := source.New(sourceID, srcs)
+	if err != nil {
+		return Result{}, false, err
+	}
+	paged, ok := src.(source.PagedSource)
+	if !ok {
+		return Result{}, false, fmt.Errorf("more %s: %w", sourceID, ErrNotPaged)
+	}
+	feeds := src.Feeds()
+	var feed *core.Feed
+	for i := range feeds {
+		if feeds[i].Key == feedKey {
+			feed = &feeds[i]
+			break
+		}
+	}
+	if feed == nil {
+		return Result{}, false, fmt.Errorf("more %s: no feed %q", sourceID, feedKey)
+	}
+	pageNo, err := st.LoadPagesFetched(ctx, sourceID, feedKey)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("load depth %s: %w", feedKey, err)
+	}
+	items, err := paged.FetchPage(ctx, *feed, pageNo)
+	if err != nil {
+		return Result{}, false, err
+	}
+	res = Result{Source: sourceID, Feed: feedKey, Label: feed.Label}
+	if len(items) == 0 { // the index's end: report it, keep the depth
+		total, err := st.CountFeed(ctx, sourceID, feedKey)
+		if err != nil {
+			return Result{}, false, fmt.Errorf("count %s: %w", feedKey, err)
+		}
+		res.Total = total
+		return res, true, nil
+	}
+	newCount, total, err := st.SaveFeedItems(ctx, sourceID, feedKey, items)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("store %s: %w", feedKey, err)
+	}
+	if err := st.SavePagesFetched(ctx, sourceID, feedKey, pageNo+1); err != nil {
+		return Result{}, false, fmt.Errorf("save depth %s: %w", feedKey, err)
+	}
+	res.New, res.Total = newCount, total
+	return res, false, nil
 }
 
 // refreshConditional runs one feed's conditional fetch cycle and fills

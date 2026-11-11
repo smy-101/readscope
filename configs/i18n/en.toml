@@ -66,6 +66,10 @@ starred = "starred"
 unstarred = "unstarred"
 all_read = "all marked read"
 unread_only = "unread only"
+loading_more = "loading more…"
+more_done = "loaded %d more"
+more_none = "no new items"
+more_end = "no more items"
 
 [time]
 now = "now"

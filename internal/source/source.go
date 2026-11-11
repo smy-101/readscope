@@ -55,6 +55,21 @@ type DetailSource interface {
 	CommentURL(id string) string
 }
 
+// PagedSource is the optional list-paging extension, the same
+// probe-don't-register pattern as ConditionalSource and DetailSource:
+// a source whose list feeds can be walked forward page by page. hn
+// implements it on Algolia's page parameter; rss feeds are full-sync
+// snapshots with nothing behind the first page and don't. Callers
+// probe with a type assertion — Ctrl+N on the list layers pages only
+// where the source can.
+type PagedSource interface {
+	Source
+	// FetchPage returns one page of the feed, page 0 the first. An
+	// empty (non-error) page means the feed is exhausted: the caller
+	// reports the end instead of advancing its paging depth.
+	FetchPage(ctx context.Context, f core.Feed, page int) ([]core.Item, error)
+}
+
 // UserAgent identifies readscope to every content host (feeds now,
 // Hacker News in M3) — one client identity, so hosts and the doctor's
 // probe all see the same reader. The version suffix is not wired in

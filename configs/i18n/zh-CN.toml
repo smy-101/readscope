@@ -66,6 +66,10 @@ starred = "已收藏"
 unstarred = "已取消收藏"
 all_read = "已全部标为已读"
 unread_only = "只看未读"
+loading_more = "加载更多…"
+more_done = "已加载 %d 条"
+more_none = "没有新条目"
+more_end = "没有更多了"
 
 [time]
 now = "刚刚"

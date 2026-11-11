@@ -70,8 +70,9 @@ Tab over to Hacker News for four fixed feeds — Front / New / Ask HN / Show HN 
 the public [Algolia HN Search API](https://hn.algolia.com) (no account, no key). `F5`
 refreshes the current feed into the same offline cache as RSS: stories snapshot to
 SQLite, the unread dot / read / star mechanics all work identically, and everything
-stays readable offline. HN refreshes are always plain refetches — the index has no
-conditional-request semantics. Link posts store the article link as their body (open it
+stays readable offline. `Ctrl+N` appends the next Algolia page to the list (no duplicate
+rows, read state kept); inside a post it pages floors and replies in memory. HN
+refreshes are always plain refetches — the index has no conditional-request semantics. Link posts store the article link as their body (open it
 with `Ctrl+O`); text posts (Ask/Show) carry their own HTML through the same render
 pipeline as RSS bodies. Note the Algolia index lags the site by a few minutes and ranks
 by points/date, not by HN's official ordering — readscope does not promise official
@@ -98,6 +99,7 @@ Every binding is a non-printing key, so a Chinese IME never swallows it:
 | F1 | This help | Ctrl+O | Open in browser |
 | F3 | Favorites | Ctrl+Y | Copy link |
 | F4 | Unread-only view | Ctrl+T | Switch theme |
+| Ctrl+N | Load more / page | Ctrl+Q | Quit |
 | | | Ctrl+Q | Quit |
 
 (F2, subscription management inside the TUI, comes in a later milestone.)

@@ -239,6 +239,55 @@ func TestFetchUnknownFeedKeyIsError(t *testing.T) {
 	}
 }
 
+// Ticket 05: the list-paging extension. FetchPage walks Algolia's
+// page parameter — page 0 is the same request Fetch makes (no param,
+// the API default), later pages ride the query string. An empty hits
+// array is the end signal (HTTP 200, zero items), not an error.
+func TestFetchPageWalksPageParameter(t *testing.T) {
+	srv := fakeAlgoliaFor(t, map[string]string{"front_page": frontFixture})
+	src := srcAt(t, srv.URL+"/api/v1")
+	feed := src.Feeds()[0]
+
+	items, err := src.FetchPage(t.Context(), feed, 0)
+	if err != nil {
+		t.Fatalf("FetchPage 0: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("page 0 items = %d, want 3", len(items))
+	}
+	if _, err := src.FetchPage(t.Context(), feed, 2); err != nil {
+		t.Fatalf("FetchPage 2: %v", err)
+	}
+	want := []string{
+		"/api/v1/search?tags=front_page",
+		"/api/v1/search?tags=front_page&page=2",
+	}
+	if got := srv.requested(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+}
+
+func TestFetchPageEmptyHitsIsEndNotError(t *testing.T) {
+	empty := `{"hits":[],"nbHits":0,"page":5,"nbPages":1,"hitsPerPage":20}`
+	srv := fakeAlgoliaFor(t, map[string]string{"front_page": empty})
+	src := srcAt(t, srv.URL+"/api/v1")
+	items, err := src.FetchPage(t.Context(), src.Feeds()[0], 5)
+	if err != nil {
+		t.Fatalf("empty page must not error: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("empty page items = %d, want 0", len(items))
+	}
+}
+
+func TestFetchPageNegativeIsError(t *testing.T) {
+	src := srcAt(t, "https://hn.algolia.com/api/v1")
+	_, err := src.FetchPage(t.Context(), src.Feeds()[0], -1)
+	if err == nil || !strings.Contains(err.Error(), "front") {
+		t.Fatalf("negative page should error naming the feed, got: %v", err)
+	}
+}
+
 // hitFixture builds a one-hit response with distinct ids per feed, so
 // the refresh-level test in internal/refresh can assert per-feed
 // counts without ids colliding across feeds.

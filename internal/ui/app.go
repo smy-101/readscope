@@ -9,6 +9,7 @@ package ui
 import (
 	"cmp"
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -60,9 +61,10 @@ type Model struct {
 	items      []store.ItemRow            // selected feed's items
 	loadedFeed string                     // feed key of m.items ("" = none)
 
-	refreshing bool   // F5 fetch in flight
-	help       bool   // F1 overlay open
-	status     string // transient hint in the status bar
+	refreshing  bool   // F5 fetch in flight
+	loadingMore bool   // Ctrl+N page append in flight
+	help        bool   // F1 overlay open
+	status      string // transient hint in the status bar
 
 	unreadOnly bool // F4 filter: list shows unread items only
 	favorites  bool // F3 mode: list shows starred items across feeds
@@ -104,6 +106,16 @@ type refreshDoneMsg struct {
 	source  string // the source that was refreshed
 	results []refresh.Result
 	err     error
+}
+
+// moreDoneMsg lands when a Ctrl+N page append finished (refresh.More
+// — the loading/failure/end feedback lives in its Update case).
+type moreDoneMsg struct {
+	source string // the source the page belongs to
+	feed   string // feed key
+	res    refresh.Result
+	end    bool // the index served an empty page
+	err    error
 }
 
 // commentsMsg is defined in detail.go: one leg of the cache-first
@@ -224,9 +236,37 @@ func (m Model) refreshCmd() tea.Cmd {
 		return nil
 	}
 	id, srcs, st := m.activeSourceID(), m.srcs, m.st
+	// F5 is feed-level (M3 ticket 05): re-pull the selected feed's
+	// first page. Views without a current feed — favorites, or a
+	// sidebar with nothing selected — fall back to the whole-source
+	// refresh, which also reports the no-feeds hint where due.
+	feedKey := ""
+	if !m.favorites {
+		feedKey = m.selectedFeedKey()
+	}
 	return func() tea.Msg {
-		results, err := refresh.Source(context.Background(), st, srcs, id)
+		var results []refresh.Result
+		var err error
+		if feedKey != "" {
+			results, err = refresh.Feed(context.Background(), st, srcs, id, feedKey)
+		} else {
+			results, err = refresh.Source(context.Background(), st, srcs, id)
+		}
 		return refreshDoneMsg{source: id, results: results, err: err}
+	}
+}
+
+// moreCmd fires the Ctrl+N append for the selected feed's list:
+// refresh.More walks the stored paging depth, merges the next page
+// through the upsert and reports the index's end.
+func (m Model) moreCmd() tea.Cmd {
+	if m.st == nil || m.srcs == nil {
+		return nil
+	}
+	id, feedKey, srcs, st := m.activeSourceID(), m.selectedFeedKey(), m.srcs, m.st
+	return func() tea.Msg {
+		res, end, err := refresh.More(context.Background(), st, srcs, id, feedKey)
+		return moreDoneMsg{source: id, feed: feedKey, res: res, end: end, err: err}
 	}
 }
 
@@ -310,6 +350,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshing = false
 		m.status = m.refreshStatus(msg)
 		return m, m.loadFeedsCmd() // counts + list pick up what just landed
+
+	case moreDoneMsg:
+		m.loadingMore = false
+		// A page landing for a list the user already left is still a
+		// good append — only the feedback would be wrong. Skip it.
+		if msg.source != m.activeSourceID() || msg.feed != m.currentFeedKey() {
+			return m, nil
+		}
+		switch {
+		case errors.Is(msg.err, refresh.ErrNotPaged):
+			m.status = m.cat.Get("status.more_end")
+		case msg.err != nil:
+			m.status = m.cat.Get("rss.feed_error", m.feedLabel(m.selectedFeed()), msg.err)
+		case msg.end:
+			m.status = m.cat.Get("status.more_end")
+		case msg.res.New == 0:
+			m.status = m.cat.Get("status.more_none")
+		default:
+			m.status = m.cat.Get("status.more_done", msg.res.New)
+			return m, m.loadFeedsCmd() // list rows and counts pick up the page
+		}
+		return m, nil
 
 	case stateSavedMsg:
 		if msg.err != nil {
@@ -518,6 +580,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.refreshing = true
 			return m, m.refreshCmd()
+
+		case "ctrl+n":
+			// List-layer Ctrl+N (the reader handles its own while open:
+			// in-memory floor hops and reply paging). Views with no feed
+			// behind them — favorites, an unselected sidebar — have
+			// nothing to page and say so; sources without pages get the
+			// same line back from refresh.ErrNotPaged.
+			if m.loadingMore {
+				return m, nil
+			}
+			if m.favorites || m.selectedFeedKey() == "" {
+				m.status = m.cat.Get("status.more_end")
+				return m, nil
+			}
+			if _, err := source.New(m.activeSourceID(), m.srcs); err != nil {
+				m.status = m.cat.Get("status.todo")
+				return m, nil
+			}
+			m.loadingMore = true
+			return m, m.moreCmd()
 
 		case "f2":
 			m.status = m.cat.Get("status.todo")
@@ -737,6 +819,9 @@ func (m Model) statusBarView() string {
 	}
 	if m.refreshing {
 		left = m.th.StatusAccent.Render(m.cat.Get("status.refreshing")) + "  " + left
+	}
+	if m.loadingMore {
+		left = m.th.StatusAccent.Render(m.cat.Get("status.loading_more")) + "  " + left
 	}
 	if m.unreadOnly && !m.favorites {
 		left = m.th.StatusAccent.Render(m.cat.Get("status.unread_only")) + "  " + left
