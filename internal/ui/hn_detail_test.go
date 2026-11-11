@@ -468,6 +468,11 @@ func TestHelpAndHintsCoverTheLayers(t *testing.T) {
 	if !strings.Contains(view, "Ctrl+N") || !strings.Contains(view, "Load more") {
 		t.Fatalf("F1 must document Ctrl+N:\n%s", view)
 	}
+	// Ticket 06: F1 must also cover the M3 floor navigation, not just
+	// the paging key.
+	if !strings.Contains(view, "Prev/next floor") {
+		t.Fatalf("F1 must document the ← → floor navigation:\n%s", view)
+	}
 }
 
 // The reader over an rss row (no detail layer) never grows a comment

@@ -29,7 +29,7 @@ cd readscope
 go build ./cmd/readscope
 ```
 
-RSS daily reading already works (M2); Hacker News (M3) and the EPUB library (M4) land next.
+RSS daily reading (M2) and Hacker News (M3) already work; the EPUB library (M4) lands next.
 
 ## Usage
 
@@ -71,10 +71,13 @@ the public [Algolia HN Search API](https://hn.algolia.com) (no account, no key).
 refreshes the current feed into the same offline cache as RSS: stories snapshot to
 SQLite, the unread dot / read / star mechanics all work identically, and everything
 stays readable offline. `Ctrl+N` appends the next Algolia page to the list (no duplicate
-rows, read state kept); inside a post it pages floors and replies in memory. HN
-refreshes are always plain refetches — the index has no conditional-request semantics. Link posts store the article link as their body (open it
-with `Ctrl+O`); text posts (Ask/Show) carry their own HTML through the same render
-pipeline as RSS bodies. Note the Algolia index lags the site by a few minutes and ranks
+rows, read state kept); inside a post it pages floors and replies in memory. Reading a
+post runs three layers deep — body, floors (one per top-level comment), then a floor's
+reply tree — with deep reply chains flattened to two levels and prefixed `@parent`, so
+even a narrow terminal keeps who-replied-to-whom readable. HN refreshes are always
+plain refetches — the index has no conditional-request semantics. Link posts store the
+article link as their body (open it with `Ctrl+O`); text posts (Ask/Show) carry their own
+HTML through the same render pipeline as RSS bodies. Note the Algolia index lags the site by a few minutes and ranks
 by points/date, not by HN's official ordering — readscope does not promise official
 ranking.
 
