@@ -160,9 +160,14 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 			}
 			// The paging detail (zhihu questions): its layers load more
 			// on the network — Ctrl+N on the question and comment layers
-			// walks the source's own cursors.
-			if dp, ok := src.(source.DetailPager); ok {
-				d.pager = dp
+			// walks the source's own cursors. Gated on hasDetail
+			// (DetailOnDemand): a daily story shares the source but has
+			// no detail layers — binding the pager would dress it in a
+			// question layer it does not have (spec story 14).
+			if d.hasDetail {
+				if dp, ok := src.(source.DetailPager); ok {
+					d.pager = dp
+				}
 			}
 			// The lazy body: only a body-less row qualifies, and only
 			// when the source fetches this item's body on demand — a
@@ -693,7 +698,10 @@ func (m Model) floorHeaderSpans(f *floor) []render.Span {
 		if f.cm.Score != nil {
 			spans = append(spans, dimSpan(" · "+m.cat.Get("zhihu.voteup", m.zhihuCount(int64(*f.cm.Score)))))
 		}
-		if n := m.floorCommentCount(f); n != nil {
+		// The count segment: the tree's own replies once any are
+		// loaded (what the reader actually holds), else the server's
+		// count — zero drops (无赞不占位, the display rule).
+		if n := m.floorCommentCount(f); n != nil && *n > 0 {
 			spans = append(spans, dimSpan(" · "+m.cat.Get("zhihu.comments_n", m.zhihuCount(int64(*n)))))
 		}
 		return spans
@@ -1129,7 +1137,7 @@ type commentsPageMsg struct {
 }
 
 // commentsPageLanded folds the page in: the merged tree re-renders
-// (the reply layer rebuilds in place when the reader sits in it on
+// (the comment layer rebuilds in place when the reader sits in it on
 // this answer), the answer's walk position records the next offset,
 // and the status bar counts the answer's comments so far.
 func (m *Model) commentsPageLanded(msg commentsPageMsg) tea.Cmd {

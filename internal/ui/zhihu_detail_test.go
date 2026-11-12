@@ -324,6 +324,31 @@ func TestZhihuCtrlNPerLayer(t *testing.T) {
 	}
 }
 
+// A server-reported zero-comment answer: Enter is a no-op with the
+// no-replies line, and NOT a wasted root_comment dial — the floor's
+// verbatim NumChildren=0 is the fast path (ticket 06 review).
+func TestZhihuZeroCommentAnswerEntersNowhere(t *testing.T) {
+	srv, p := zhihuPlane(t)
+	m := openQuestion(t, srv)
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // → answer layer (甲)
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRight}) // → 乙 (0 comments)
+	if got := m.reader.floors[m.reader.floorIdx].cm.ID; got != "9002" {
+		t.Fatalf("setup: should sit on 乙, on %s", got)
+	}
+	before := p.count()
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.reader.layer != layerFloors {
+		t.Fatalf("Enter on a zero-comment answer must not open a layer, got %v", m.reader.layer)
+	}
+	if !strings.Contains(m.status, "no replies") {
+		t.Fatalf("status should say why, got %q", m.status)
+	}
+	if n := p.count(); n != before {
+		t.Fatalf("the zero-count fast path must not dial, hits %d → %d", before, n)
+	}
+}
+
 // The failure translations on open: 404 is the friendly gone line,
 // 401/403 with a cookie is the Ctrl+U guidance — both instead of a
 // raw HTTP error.

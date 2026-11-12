@@ -30,3 +30,5 @@
 **测试**:zhihu 数据面(fakeZhihu 扩展 404 臂/child 页序列/精确路径断言)、refresh 纯合并矩阵、UI 按键泵(四层导航/滚动独立/Ctrl+N 三层/404/403/离线重开零请求)+ 回答内容组合 golden(answer-body.golden:sticker/video-box href 原样/懒加载双图合并//50/ 剥离)。清洗规则本体 03 号票已全覆盖,未改 clean.go 一行。
 
 **移交 07**:真网 smoke 的三层走查(开 5 问题、热评缺口补全真网行为、Ctrl+U 换号)、README 知乎详情段落、F1 帮助键位收口(评论层 Ctrl+N 语义)、`readscope zhihu probe` 的 -qid 深走(票面本来就在)。
+
+**评审(2026-12-08,Standards+Spec 双轴)**:Standards 零硬违规;措辞 P2(commentsPageLanded 注释一处 "reply layer"→comment layer)已修;测试假面跨包重复/`commentsNext` 三态原始类型/`pager != nil` 多处分支均为接受项(第三份假面出现再抽 testsupport;分叉是票面声明的决策)。**Spec P1**:openDetail 的 DetailPager 探针未过 DetailOnDemand 门,日报条目误穿问题层("0 answers" footer + Ctrl+N 误报 no more)——已修(gate on hasDetail)+ 回归断言(日报视图不含 answers footer)。**Spec P2**:`nonzeroPtr` 把 comment_count 0 折成 nil,零评论快路径死代码、白费一次请求——已修:NumChildren 改存原值(数据不折,0 保留;楼层头的零段丢弃是显示层规则),快路径复活并有零拨号断言;赞数仍 nonzero 折叠(无数据读方,遵循 hn 的 nil=缺席惯例)。

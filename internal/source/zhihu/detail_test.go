@@ -155,8 +155,14 @@ func TestDetailTwoRequestsMapTheQuestion(t *testing.T) {
 		t.Errorf("floor 0 comment count = %v, want 541", f0.NumChildren)
 	}
 	f1 := c.Comments[1]
-	if f1.Score != nil || f1.NumChildren != nil || f1.CreatedAt != nil {
-		t.Errorf("zero 赞/评论/时间 must be nil (不占位), got %+v", f1)
+	if f1.Score != nil || f1.CreatedAt != nil {
+		t.Errorf("zero 赞/时间 must be nil (不占位), got %+v", f1)
+	}
+	// The comment count stays DATA: zero kept verbatim (the comment
+	// layer's zero-request fast path reads it), the drop of the
+	// zero segment is the display's rule.
+	if f1.NumChildren == nil || *f1.NumChildren != 0 {
+		t.Errorf("zero comment count = %v, want a verbatim 0 (data, not display)", f1.NumChildren)
 	}
 
 	// The cursor rides verbatim — Ctrl+N walks the server's own address.

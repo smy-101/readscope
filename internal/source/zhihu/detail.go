@@ -174,10 +174,16 @@ func answerFloors(page feedsPage) []core.Comment {
 			continue // nothing addressable; skip, never crash
 		}
 		cm := core.Comment{
-			ID:          aid,
-			Author:      t.Author.Name,
-			Text:        CleanHTML(t.Content),
-			NumChildren: nonzeroPtr(t.CommentCount),
+			ID:     aid,
+			Author: t.Author.Name,
+			Text:   CleanHTML(t.Content),
+			// NumChildren carries the server's count VERBATIM, zero
+			// included — it is data (the comment layer's zero-request
+			// fast path reads "reported zero" off it), and the floor
+			// head's zero-drop is the display's rule, not the fold's.
+			// Score stays nonzero-folded: nothing reads 赞 0 as data,
+			// and nil keeps "absent" distinct per the hn convention.
+			NumChildren: int64Ptr(t.CommentCount),
 		}
 		if v := t.VoteupCount; v != 0 {
 			cm.Score = nonzeroPtr(v)
@@ -197,6 +203,12 @@ func nonzeroPtr(n int64) *int {
 	if n == 0 {
 		return nil
 	}
+	v := int(n)
+	return &v
+}
+
+// int64Ptr boxes n verbatim — the value is data, zero included.
+func int64Ptr(n int64) *int {
 	v := int(n)
 	return &v
 }

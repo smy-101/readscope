@@ -121,9 +121,14 @@ func TestDailyEnterFetchesBodyAndRenders(t *testing.T) {
 		t.Fatalf("story hits = %d, want exactly 1", n)
 	}
 	// No comments footer: the digest has no comment layer — Enter
-	// already sits in the full-text layer.
+	// already sits in the full-text layer. And no question layer
+	// either (ticket 06 review): the pager probe must not dress a
+	// daily story in a "0 answers" floor list.
 	if strings.Contains(view, "no comments") {
 		t.Fatalf("daily reader must not show the comments footer:\n%s", view)
+	}
+	if strings.Contains(view, "0 answers") {
+		t.Fatalf("daily reader must not show the question layer's answers footer:\n%s", view)
 	}
 
 	// Second open: the snapshot renders, zero new requests.
