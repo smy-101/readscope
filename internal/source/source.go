@@ -47,12 +47,51 @@ type ConditionalSource interface {
 // unaffected — callers probe with a type assertion.
 type DetailSource interface {
 	Source
+	// DetailOnDemand reports whether this item carries a detail layer
+	// behind its list row — the per-item probe the same-named
+	// BodySource method is (one source may mix shapes: zhihu's
+	// question cards have the three layers, its daily stories are
+	// lazy bodies). Callers bind the reader's detail machinery only
+	// where this answers true.
+	DetailOnDemand(it core.Item) bool
+	// Detail fetches one item's detail layer (the whole comment tree
+	// for hn, one request; the two-request question open for zhihu).
+	// The caller snapshots it through the store's comments DAO.
 	Detail(ctx context.Context, it core.Item) (core.Content, error)
 	// CommentURL is the web page behind one comment of the detail
 	// layer — Ctrl+O/Ctrl+Y target it when the reader sits on a floor
 	// or reply. Implementations accept both the bare comment id (what
 	// the cache stores) and their own item ids (the story page).
 	CommentURL(id string) string
+}
+
+// DetailPager is the optional detail-layer paging extension (the
+// same probe-don't-register pattern as DetailSource): a detail source
+// whose layers page on the network. A zhihu question is the shape —
+// the question layer's answer floors walk the feeds cursor and the
+// comment layer walks root_comment's offset, so Ctrl+N there is a
+// fetch (with in-memory paging state; the comments cache replays
+// whatever was loaded). hn's single request carries the whole tree,
+// so it does not implement this and its reader Ctrl+N stays the
+// in-memory hop.
+type DetailPager interface {
+	DetailSource
+	// FetchFloorsPage returns the answer floors after cursor — "" the
+	// first page — plus the cursor of the page after it ("" = none
+	// served: the walk's end). Floors arrive as top-level comments
+	// (ParentID ""), the same shape Detail's Comments carry.
+	FetchFloorsPage(ctx context.Context, it core.Item, cursor string) (floors []core.Comment, next string, err error)
+	// FetchAnswerComments returns one answer's comments at root
+	// offset: the roots served there with their child gaps completed
+	// (the hot-preview children deduped against the fetched pages),
+	// tree order, roots' ParentID the answer id. nextOffset is where
+	// the next page starts; -1 = the answer's comments are exhausted.
+	FetchAnswerComments(ctx context.Context, it core.Item, answerID string, offset int) (comments []core.Comment, nextOffset int, err error)
+	// AnswerURL is the Ctrl+O/Ctrl+Y target for one answer floor of
+	// this item — the question page anchored at the answer. A bare
+	// comment id cannot pair with its question alone, which is why
+	// this rides here and not on CommentURL.
+	AnswerURL(it core.Item, answerID string) string
 }
 
 // BodySource is the optional lazy-body extension, the same

@@ -39,6 +39,12 @@ var (
 	// the cookie is NOT cleared (v3 403 vs v4 403 is unjudgeable
 	// client-side, and the hot/daily feeds don't care either way).
 	ErrSessionExpired = errors.New("zhihu: login session expired — re-login (Ctrl+U / readscope zhihu login)")
+
+	// ErrContentGone: a detail-family endpoint answered 404 — the
+	// question (or the answer behind a comments call) was deleted or
+	// never existed. The UI translates this into the friendly 不存在
+	// 或已删除 line instead of a raw HTTP error.
+	ErrContentGone = errors.New("zhihu: question or answer not found (404)")
 )
 
 // Family is how an HTTP 401/403 reads on one endpoint — the spec's
@@ -115,6 +121,10 @@ var (
 		Name: "comments-root", Referer: "https://www.zhihu.com/",
 		Cookie: true, Gated: true, Family: FamilyDetail, // x-zse-93 harmless here; not sent (comment_v5 doesn't gate)
 	}
+	epChildComments = Endpoint{
+		Name: "child-comments", Referer: "https://www.zhihu.com/",
+		Cookie: true, Gated: true, Family: FamilyDetail, // the root's child-gap completion walk (ticket 06)
+	}
 )
 
 // Transport is one host set + cookie + client behind every zhihu GET.
@@ -186,6 +196,11 @@ func (t *Transport) Get(ctx context.Context, ep Endpoint, url string) Response {
 	res := Response{Status: resp.StatusCode, Body: body}
 	switch {
 	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusNotFound && ep.Family == FamilyDetail:
+		// The question (or the answer behind a comments call) is gone:
+		// deleted upstream, or the id never existed. A distinct error
+		// so the UI can say 不存在或已删除 instead of a raw status.
+		res.Err = fmt.Errorf("%s: %w (HTTP 404)", ep.Name, ErrContentGone)
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		if ep.Family == FamilyDetail {
 			// Stale z_c0, a bumped version gate, or risk control —

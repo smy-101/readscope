@@ -63,22 +63,50 @@ type Item struct {
 // onto the comments table). ParentID is "" for a top-level floor;
 // Text is the HTML (or plain) snapshot as fetched; Score stays nil
 // for sources whose API gives no per-comment points (Algolia's tree
-// endpoint never does).
+// endpoint never does). NumChildren is the server-reported count of
+// child comments (zhihu: an answer floor's comment_count — the
+// floor-head triple's third segment), nil when the source reports
+// none (hn: the tree itself carries the replies, so the count is
+// len(replies), not a column).
 type Comment struct {
-	ID        string
-	ParentID  string
-	Author    string
-	Text      string
-	Score     *int
-	CreatedAt *time.Time
+	ID          string
+	ParentID    string
+	Author      string
+	Text        string
+	Score       *int
+	CreatedAt   *time.Time
+	NumChildren *int
+}
+
+// QuestionInfo is the question layer's meta triple behind one zhihu
+// question item: the asker, the answer count and the visit count the
+// v4 meta endpoint reports. It is snapshot data carried through
+// Content on the detail fetch and cached onto the detail_fetch row
+// (JSON), so the question layer's meta line renders offline. The
+// formatting (提问人 提问 · N 个回答 · N 万浏览) is the UI's — the
+// source folds, the UI unfolds, same as the heat snapshot.
+type QuestionInfo struct {
+	Author      string `json:"author"`
+	AnswerCount int64  `json:"answers"`
+	VisitCount  int64  `json:"visits"`
 }
 
 // Content is the detail layer behind one list item: what a
 // DetailSource returns when the reader opens a post. For hn it is the
 // whole comment tree in tree order — floors in payload order, each
-// followed by its subtree, parents strictly before children.
+// followed by its subtree, parents strictly before children — with
+// every optional field zero. For zhihu questions the detail fetch is
+// two requests (meta + first answers page): Body carries the cleaned
+// question description (persisted into the body snapshot for offline
+// re-opens), Question the meta triple, Comments the answer floors
+// (each answer one top-level "comment"), and Next the feeds cursor —
+// the address of the further answers Ctrl+N walks ("" = none served:
+// the walk's end).
 type Content struct {
 	Comments []Comment
+	Body     string
+	Question *QuestionInfo
+	Next     string
 }
 
 // FetchState is one feed's conditional-request memory: the validators

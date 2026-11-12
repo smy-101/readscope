@@ -15,7 +15,9 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/aymanbagabas/go-osc52/v2"
@@ -26,6 +28,7 @@ import (
 	"github.com/smy-101/readscope/internal/refresh"
 	"github.com/smy-101/readscope/internal/render"
 	"github.com/smy-101/readscope/internal/source"
+	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 )
 
@@ -64,6 +67,22 @@ type detail struct {
 	loaded     bool                   // a definitive tree sits in floors (cache or net)
 	loadErr    error                  // fetch failure while nothing is loaded
 	floors     []floor
+
+	// The zhihu paging detail (ticket 06): pager is non-nil when the
+	// source pages its detail layers on the network. The question
+	// layer's meta triple (question), the floors cursor and total
+	// (feedsCursor / floorsTotal), and the comment layer's per-answer
+	// next offset (commentsNext: answer id → next root offset, -1 =
+	// exhausted; missing key = never loaded) all ride the open
+	// session in memory — the comments cache replays whatever they
+	// walked in, and a fresh open starts the walks over.
+	pager        source.DetailPager
+	question     *core.QuestionInfo
+	feedsCursor  string
+	floorsTotal  int64
+	commentsNext map[string]int
+	commentsBusy bool
+	floorsBusy   bool
 
 	// The lazy-body half (source.BodySource, ticket 03): a first open
 	// of a body-less row whose full text is fetched now — daily
@@ -130,18 +149,26 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 	if m.listSel >= len(m.items) {
 		return false, nil
 	}
-	d := &detail{item: m.items[m.listSel], replyFloor: -1}
+	d := &detail{item: m.items[m.listSel], replyFloor: -1, commentsNext: map[string]int{}}
 	var bodyCmd tea.Cmd
 	if m.srcs != nil {
 		if src, err := source.New(d.item.Item.Source, m.srcs); err == nil {
-			if ds, ok := src.(source.DetailSource); ok {
+			if ds, ok := src.(source.DetailSource); ok && ds.DetailOnDemand(d.item.Item) {
 				d.hasDetail = true
 				d.commentURL = ds.CommentURL
 				d.loading = true // until the cache probe says otherwise
 			}
+			// The paging detail (zhihu questions): its layers load more
+			// on the network — Ctrl+N on the question and comment layers
+			// walks the source's own cursors.
+			if dp, ok := src.(source.DetailPager); ok {
+				d.pager = dp
+			}
 			// The lazy body: only a body-less row qualifies, and only
 			// when the source fetches this item's body on demand — a
-			// cached snapshot renders offline, zero requests.
+			// cached snapshot renders offline, zero requests. (A zhihu
+			// question's description arrives through the detail fetch's
+			// Content.Body instead — not this path.)
 			if strings.TrimSpace(d.item.Item.Body) == "" {
 				if bs, ok := src.(source.BodySource); ok && bs.BodyOnDemand(d.item.Item) {
 					d.bodyLoading = true
@@ -194,12 +221,17 @@ func (m *Model) relayoutReader() {
 }
 
 // rebuildBodyDoc recomputes the body layer's document — header, body,
-// and (for detail sources) the comments footer whose text tracks the
-// load state — keeping the reading position clamped.
+// and (for detail sources) the state footer whose text tracks the
+// load state — keeping the reading position clamped. A paging detail
+// (zhihu question) instead assembles the whole question layer:
+// description, then the answer floor list (one floor-head line per
+// answer), then the answers footer with its load-more state.
 func (m *Model) rebuildBodyDoc() {
 	d := m.reader
 	doc := m.detailDoc(d.item.Item)
-	if d.hasDetail {
+	if d.pager != nil {
+		doc.Blocks = append(doc.Blocks, m.questionLayerBlocks()...)
+	} else if d.hasDetail {
 		doc.Blocks = append(doc.Blocks,
 			render.Rule{},
 			render.Para{Spans: []render.Span{{Text: m.commentsFooter(), Style: render.SpanDim}}},
@@ -210,8 +242,43 @@ func (m *Model) rebuildBodyDoc() {
 	m.clampDetail()
 }
 
+// questionLayerBlocks is the zhihu question layer below the
+// description: the answer floor list (the floor-head triple per
+// answer, GLOSSARY: 回答层 — the list the reader scans to pick), then
+// the one-line answers footer (loading / failed / loaded of total
+// with the Ctrl+N hint while more pages remain).
+func (m Model) questionLayerBlocks() []render.Block {
+	d := m.reader
+	blocks := []render.Block{render.Rule{}}
+	for i := range d.floors {
+		blocks = append(blocks, render.Para{Spans: m.floorHeaderSpans(&d.floors[i])})
+	}
+	return append(blocks, render.Rule{},
+		render.Para{Spans: []render.Span{{Text: m.answersFooter(), Style: render.SpanDim}}})
+}
+
+// answersFooter is the question layer's one-line state under the
+// floor list: loading, failed, or loaded of the server's total —
+// with the Ctrl+N hint while a further page remains.
+func (m Model) answersFooter() string {
+	d := m.reader
+	switch {
+	case d.loading && !d.loaded:
+		return m.cat.Get("detail.loading")
+	case d.loadErr != nil && !d.loaded:
+		return m.cat.Get("detail.load_failed")
+	case d.floorsTotal > 0 && int64(len(d.floors)) < d.floorsTotal && d.feedsCursor != "":
+		return m.cat.Get("zhihu.answers_more", len(d.floors), d.floorsTotal)
+	case d.floorsTotal > 0:
+		return m.cat.Get("zhihu.n_answers", len(d.floors))
+	default:
+		return m.cat.Get("zhihu.n_answers", len(d.floors))
+	}
+}
+
 // commentsFooter is the one-line comment state under the article:
-// loading / failed / empty / floor count.
+// loading / failed / empty / floor count. (hn's body layer; the zhihu
+// question layer carries answersFooter instead.)
 func (m Model) commentsFooter() string {
 	d := m.reader
 	switch {
@@ -270,7 +337,13 @@ func (m Model) detailDoc(it core.Item) *render.Document {
 }
 
 // detailMeta is the dim line under the title: author · relative age.
+// A zhihu question carries its own triple instead — 提问人 提问 · N 个
+// 回答 · N 万浏览 — from the cached meta (the detail fetch's
+// QuestionInfo), the same line the web page's header shows.
 func (m Model) detailMeta(it core.Item) string {
+	if d := m.reader; d != nil && d.pager != nil && d.question != nil && d.item.Item.ID == it.ID {
+		return m.questionMetaLine(*d.question)
+	}
 	var parts []string
 	if it.Author != "" {
 		parts = append(parts, it.Author)
@@ -279,6 +352,49 @@ func (m Model) detailMeta(it core.Item) string {
 		parts = append(parts, m.relTime(it.PublishedAt))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// questionMetaLine renders the question layer's meta triple, absent
+// segments dropping per the standing rule (never a dangling "·").
+func (m Model) questionMetaLine(q core.QuestionInfo) string {
+	var parts []string
+	if q.Author != "" {
+		parts = append(parts, m.cat.Get("zhihu.asked", q.Author))
+	}
+	if q.AnswerCount > 0 {
+		parts = append(parts, m.cat.Get("zhihu.n_answers", q.AnswerCount))
+	}
+	if q.VisitCount > 0 {
+		parts = append(parts, m.cat.Get("zhihu.visits", m.zhihuCount(q.VisitCount)))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// zhihuCount folds a count for the detail headers, the display
+// convention the web UI itself uses: zh folds past 10000 into 万 with
+// one decimal (45000 → "4.5 万"), the rest into K/M ("45K"). Folding
+// is the UI's job everywhere — the source stores semantics (the heat
+// snapshot pair's rule, GLOSSARY: 热度快照).
+func (m Model) zhihuCount(n int64) string {
+	if strings.HasPrefix(m.cat.Code, "zh") {
+		if n >= 10000 {
+			return strconv.FormatFloat(float64(n)/10000, 'f', 1, 64) + " 万"
+		}
+		return strconv.FormatInt(n, 10)
+	}
+	switch {
+	case n >= 1_000_000:
+		return trimZero(strconv.FormatFloat(float64(n)/1_000_000, 'f', 1, 64)) + "M"
+	case n >= 1000:
+		return trimZero(strconv.FormatFloat(float64(n)/1000, 'f', 1, 64)) + "K"
+	default:
+		return strconv.FormatInt(n, 10)
+	}
+}
+
+// trimZero drops a trailing ".0" from a one-decimal fold (4.0 → 4).
+func trimZero(s string) string {
+	return strings.TrimSuffix(s, ".0")
 }
 
 // plainDoc renders a body with no HTML in it as one paragraph per
@@ -300,17 +416,24 @@ func plainDoc(body string) *render.Document {
 
 // commentsMsg carries one leg of the cache-first comment load. The
 // cache leg (fromNet=false) reports the store probe; the net leg
-// (fromNet=true) reports refresh.Detail's fetch-and-save.
+// (fromNet=true) reports refresh.Detail's fetch-and-save. The
+// optional fields ride the net leg (and the question triple the
+// cache leg): body/question are the zhihu question layer's own
+// caches, next the floors cursor the session walks from.
 type commentsMsg struct {
 	itemID   string
 	comments []core.Comment
 	opened   bool // cache leg: the opened marker was present
 	fromNet  bool // this is the refresh half, not the cache probe
+	body     string
+	question *core.QuestionInfo
+	next     string
 	err      error
 }
 
-// readCommentsCmd is the cache half: read the cached tree and the
-// opened marker — local SQLite only, no network.
+// readCommentsCmd is the cache half: read the cached tree, the
+// opened marker and the question meta triple — local SQLite only, no
+// network.
 func (m Model) readCommentsCmd(it core.Item) tea.Cmd {
 	st := m.st
 	return func() tea.Msg {
@@ -323,17 +446,25 @@ func (m Model) readCommentsCmd(it core.Item) tea.Cmd {
 		if err != nil {
 			return commentsMsg{itemID: it.ID, err: err}
 		}
-		return commentsMsg{itemID: it.ID, comments: comments, opened: opened}
+		msg := commentsMsg{itemID: it.ID, comments: comments, opened: opened}
+		if q, ok, err := st.QuestionInfoForItem(ctx, it.ID); err == nil && ok {
+			msg.question = &q
+		}
+		return msg
 	}
 }
 
-// refreshCommentsCmd is the network half: fetch the whole tree and
-// cache it (refresh.Detail), whatever the cache said.
+// refreshCommentsCmd is the network half: fetch the detail layer and
+// cache it (refresh.Detail — merged for paging sources), whatever the
+// cache said.
 func (m Model) refreshCommentsCmd(it core.Item) tea.Cmd {
 	st, srcs := m.st, m.srcs
 	return func() tea.Msg {
 		c, err := refresh.Detail(context.Background(), st, srcs, it)
-		return commentsMsg{itemID: it.ID, comments: c.Comments, fromNet: true, err: err}
+		return commentsMsg{
+			itemID: it.ID, comments: c.Comments, fromNet: true,
+			body: c.Body, question: c.Question, next: c.Next, err: err,
+		}
 	}
 }
 
@@ -354,9 +485,12 @@ func (m *Model) commentsLanded(msg commentsMsg) tea.Cmd {
 		d.loading = false
 		if !d.loaded { // first open, nothing cached: say so, keep the body readable
 			d.loadErr = msg.err
-			m.status = m.cat.Get("errors.detail_fetch", msg.err)
+			m.status = m.detailErrStatus(msg.err)
 			if d.layer == layerFloors {
 				m.layoutFloor()
+			}
+			if d.layer == layerBody {
+				m.rebuildBodyDoc()
 			}
 		}
 		return nil
@@ -364,13 +498,52 @@ func (m *Model) commentsLanded(msg commentsMsg) tea.Cmd {
 	if !msg.fromNet {
 		if msg.opened {
 			d.loading = false
+			if msg.question != nil {
+				d.question = msg.question
+				if q := msg.question; q.AnswerCount > d.floorsTotal {
+					d.floorsTotal = q.AnswerCount // the totals the footer counts to
+				}
+			}
 			m.setFloors(msg.comments)
+			m.rebuildBodyDoc() // the question layer's meta line / floor list render from cache
 		}
 		return m.refreshCommentsCmd(d.item.Item) // background refresh either way
 	}
 	d.loading = false
+	if msg.question != nil {
+		d.question = msg.question
+		if q := msg.question; q.AnswerCount > d.floorsTotal {
+			d.floorsTotal = q.AnswerCount
+		}
+	}
+	if msg.body != "" {
+		d.item.Item.Body = msg.body // the description's snapshot (persisted by refresh)
+		// the list row's copy follows — the next open reads the row
+		// (the daily flow's bodyLanded does the same for its rows)
+		for i := range m.items {
+			if m.items[i].Item.ID == msg.itemID {
+				m.items[i].Item.Body = msg.body
+				break
+			}
+		}
+	}
+	d.feedsCursor = msg.next
 	m.setFloors(msg.comments)
+	m.rebuildBodyDoc()
 	return nil
+}
+
+// detailErrStatus maps one detail-fetch failure to its status line:
+// zhihu session errors become login guidance, a gone question/answer
+// the friendly 不存在或已删除 line, everything else the raw error.
+func (m Model) detailErrStatus(err error) string {
+	if s := m.zhihuSessionStatus(err); s != "" {
+		return s
+	}
+	if errors.Is(err, zhihu.ErrContentGone) {
+		return m.cat.Get("zhihu.question_gone")
+	}
+	return m.cat.Get("errors.detail_fetch", err)
 }
 
 // setFloors installs a definitive tree (cache or net) and refreshes
@@ -393,6 +566,8 @@ func (m *Model) setFloors(comments []core.Comment) {
 	case layerReplies:
 		if d.replyFloor == d.floorIdx && d.floorIdx < len(d.floors) && len(d.floors[d.floorIdx].replies) > 0 {
 			m.layoutReplies() // same floor, fresh tree; replyTop clamped
+		} else if d.pager != nil && d.replyFloor == d.floorIdx && d.floorIdx < len(d.floors) {
+			m.layoutReplies() // zhihu: the page answered empty — the placeholder says so, the reader stays
 		} else {
 			d.layer = layerFloors // the floor or its replies vanished: step back
 			m.layoutFloor()
@@ -400,7 +575,7 @@ func (m *Model) setFloors(comments []core.Comment) {
 	default:
 		d.floorLines, d.replyLines = nil, nil
 	}
-	m.rebuildBodyDoc()
+	m.rebuildBodyDoc() // the question layer's floor list recounts too
 }
 
 // --- lazy body (ticket 03) -----------------------------------------------
@@ -410,7 +585,7 @@ func (m *Model) setFloors(comments []core.Comment) {
 type bodyMsg struct {
 	itemID string
 	body   string
-	err     error
+	err    error
 }
 
 // fetchBodyCmd is the network half of the lazy body: fetch the full
@@ -502,21 +677,45 @@ func (m Model) floorDoc(f *floor) *render.Document {
 	}
 }
 
-// floorHeaderSpans is "author · score? · N replies" with the standing
-// degradation rule: absent segments drop, never an empty "· ·". Score
-// is nil by construction for hn (Algolia's tree endpoint has no
-// per-comment points); the segment exists for sources that have one.
+// floorHeaderSpans is the floor's header line with the standing
+// degradation rule: absent segments drop, never an empty "· ·". hn:
+// author · score? · N replies (score nil by construction — Algolia's
+// tree endpoint has no per-comment points; the segment exists for
+// sources that have one). zhihu: author · 赞 N · N 条评论 (the triple
+// the web UI's answer list shows; zero segments drop, 站方形态).
 func (m Model) floorHeaderSpans(f *floor) []render.Span {
 	author, style := m.authorOrDeleted(f.cm.Author), render.SpanBold
 	if f.cm.Author == "" {
 		style = render.SpanDim
 	}
 	spans := []render.Span{{Text: author, Style: style}}
+	if m.reader != nil && m.reader.pager != nil {
+		if f.cm.Score != nil {
+			spans = append(spans, dimSpan(" · "+m.cat.Get("zhihu.voteup", m.zhihuCount(int64(*f.cm.Score)))))
+		}
+		if n := m.floorCommentCount(f); n != nil {
+			spans = append(spans, dimSpan(" · "+m.cat.Get("zhihu.comments_n", m.zhihuCount(int64(*n)))))
+		}
+		return spans
+	}
 	if f.cm.Score != nil {
 		spans = append(spans, dimSpan(" · "+m.cat.Get("hn.pts", *f.cm.Score)))
 	}
 	spans = append(spans, dimSpan(" · "+m.cat.Get("detail.floor_meta", len(f.replies))))
 	return spans
+}
+
+// floorCommentCount is an answer floor's server-reported comment
+// count — the floor-head triple's third segment. The report wins
+// over the tree while the comment layer is still unopened (it is the
+// count the web shows); once the tree carries replies, the tree's
+// own count takes over (what the reader actually has).
+func (m Model) floorCommentCount(f *floor) *int {
+	if len(f.replies) > 0 {
+		n := len(f.replies)
+		return &n
+	}
+	return f.cm.NumChildren
 }
 
 // commentDoc renders one comment's text through the shared M1
@@ -543,17 +742,30 @@ func (m Model) commentDoc(c core.Comment) *render.Document {
 // nesting visual) with an @parent prefix on their header. Each
 // reply's links stay local to its group, appendix and all. replyStarts
 // records where each reply begins, which is how Ctrl+N (next reply)
-// and Ctrl+O/Y (topmost visible reply) find their target.
+// and Ctrl+O/Y (topmost visible reply) find their target. A zhihu
+// answer whose comments have not landed yet renders the one-line
+// pending state instead (loading / none).
 func (m *Model) layoutReplies() {
 	d := m.reader
 	w := m.detailWidth()
 	f := &d.floors[d.floorIdx]
+	if d.pager != nil && len(flattenReplies(f)) == 0 {
+		d.replies, d.replyStarts = nil, nil
+		d.replyLines = m.commentPendingLines(f)
+		d.replyFloor = d.floorIdx
+		d.replyTop = 0
+		return
+	}
 	d.replies = flattenReplies(f)
 	d.replyFloor = d.floorIdx
 	author := m.authorOrDeleted(f.cm.Author)
+	headerKey := "detail.replies_to"
+	if d.pager != nil {
+		headerKey = "zhihu.comments_of"
+	}
 	header := &render.Document{Blocks: []render.Block{
 		render.Para{Spans: []render.Span{
-			{Text: m.cat.Get("detail.replies_to", author), Style: render.SpanDim},
+			{Text: m.cat.Get(headerKey, author), Style: render.SpanDim},
 		}},
 		render.Rule{},
 	}}
@@ -566,6 +778,18 @@ func (m *Model) layoutReplies() {
 	}
 	d.replyLines = lines
 	m.clampDetail()
+}
+
+// commentPendingLines is the zhihu comment layer's placeholder while
+// the answer's comments have not landed: loading (a fetch is in
+// flight), or none (the fetch answered empty — same reading for the
+// reader as the server reporting zero).
+func (m Model) commentPendingLines(f *floor) []render.Line {
+	text := m.cat.Get("detail.no_comments")
+	if m.reader.commentsBusy {
+		text = m.cat.Get("detail.loading")
+	}
+	return []render.Line{{Spans: []render.Span{{Text: text, Style: render.SpanDim}}}}
 }
 
 // replyDoc is one reply row's document: header line ("@parent author
@@ -667,8 +891,8 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 			}
 			return true, nil // never re-open the body (would reset scroll)
 		case layerFloors:
-			if m.enterReplies() {
-				return true, nil
+			if ok, cmd := m.enterReplies(); ok {
+				return true, cmd
 			}
 			m.status = m.cat.Get("detail.no_replies") // replyless floor: no-op, say why
 			return true, nil
@@ -706,12 +930,37 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 
-	case "ctrl+n": // in-memory fast-forward: no request ever leaves
+	case "ctrl+n":
+		// The layer decides: hn hops in memory (floor skip / next
+		// reply); a zhihu question layer fetches the next answers page
+		// and its comment layer the next roots page — the detail
+		// walk's own load-more (spec story 8).
 		switch d.layer {
+		case layerBody:
+			if d.pager != nil {
+				return true, m.moreFloorsCmd()
+			}
+			return true, nil
 		case layerFloors:
-			m.moveFloor(floorSkip)
+			m.moveFloor(floorSkip) // the answer layer pages nothing (回答层无翻页)
+			return true, nil
 		case layerReplies:
-			m.nextReplyStart()
+			if d.pager == nil {
+				m.nextReplyStart()
+				return true, nil
+			}
+			// Hop while the window still hides loaded rows below; once
+			// everything loaded is in view (or the window sits at the
+			// end), the only way forward is the next roots page.
+			if d.replyTop < len(d.replyLines)-m.bodyHeight() {
+				m.nextReplyStart()
+				return true, nil
+			}
+			off := 0 // the walk's next roots page (0 = first load)
+			if v, ok := d.commentsNext[d.floors[d.floorIdx].cm.ID]; ok {
+				off = v
+			}
+			return true, m.commentsPageCmd(off)
 		}
 		return true, nil
 
@@ -751,22 +1000,169 @@ func (m *Model) enterFloors() {
 }
 
 // enterReplies opens the reply layer for the floor on screen. False
-// (and no transition) when the floor has no replies — the ticket's
-// "replyless floors don't respond to Enter".
-func (m *Model) enterReplies() bool {
+// (and no transition) when there is nothing to read: hn's replyless
+// floors, or a zhihu answer the server itself reported comment-less
+// (or whose page already came back empty). A zhihu answer whose
+// comments are simply not loaded yet enters on a pending screen and
+// returns the fetch — the comments cache replays it offline on every
+// later open.
+func (m *Model) enterReplies() (bool, tea.Cmd) {
 	d := m.reader
 	if !d.loaded || d.floorIdx >= len(d.floors) {
-		return false
+		return false, nil
 	}
-	if len(d.floors[d.floorIdx].replies) == 0 {
-		return false
+	f := &d.floors[d.floorIdx]
+	if len(f.replies) > 0 {
+		if d.replyFloor != d.floorIdx || d.replyLines == nil {
+			d.replyTop = 0
+			m.layoutReplies()
+		}
+		d.layer = layerReplies
+		return true, nil
 	}
-	if d.replyFloor != d.floorIdx || d.replyLines == nil {
-		d.replyTop = 0
-		m.layoutReplies()
+	if d.pager == nil {
+		return false, nil
 	}
+	if _, loaded := d.commentsNext[f.cm.ID]; loaded {
+		return false, nil // fetched already: the answer genuinely has none
+	}
+	if f.cm.NumChildren != nil && *f.cm.NumChildren == 0 {
+		return false, nil // the server itself reported zero
+	}
+	var cmd tea.Cmd
+	if !d.commentsBusy {
+		cmd = m.commentsPageCmd(0)
+	}
+	d.replyTop = 0
+	m.layoutReplies() // the pending screen (loading or none)
 	d.layer = layerReplies
-	return true
+	return true, cmd
+}
+
+// --- the paging detail's loads (zhihu, ticket 06) ------------------------
+
+// moreFloorsCmd fetches the next answers page along the session's
+// feeds cursor (the question layer's Ctrl+N). No cursor left — or a
+// fetch already in flight — answers immediately without dialing;
+// the end check also weighs the server's answer-count total (到底
+// 判定含 answer_count): a cursor the count has already served is
+// residue, not a page.
+func (m *Model) moreFloorsCmd() tea.Cmd {
+	d := m.reader
+	if d.floorsBusy {
+		return nil
+	}
+	if d.feedsCursor == "" || (d.floorsTotal > 0 && int64(len(d.floors)) >= d.floorsTotal) {
+		m.status = m.cat.Get("status.more_end")
+		return nil
+	}
+	d.floorsBusy = true
+	m.status = m.cat.Get("status.loading_more")
+	it, cursor, st, srcs := d.item.Item, d.feedsCursor, m.st, m.srcs
+	return func() tea.Msg {
+		tree, next, err := refresh.DetailFloorsPage(context.Background(), st, srcs, it, cursor)
+		return floorsMsg{itemID: it.ID, tree: tree, next: next, err: err}
+	}
+}
+
+// floorsMsg lands when a question-layer Ctrl+N page came back.
+type floorsMsg struct {
+	itemID string
+	tree   []core.Comment
+	next   string
+	err    error
+}
+
+// floorsLanded folds the page in: the merged tree re-renders, the
+// cursor advances only past a page that served rows or a real next
+// address, and the status bar counts what the reader now holds.
+func (m *Model) floorsLanded(msg floorsMsg) tea.Cmd {
+	d := m.reader
+	if d == nil || d.pager == nil || d.item.Item.ID != msg.itemID {
+		return nil
+	}
+	d.floorsBusy = false
+	if msg.err != nil {
+		m.status = m.detailErrStatus(msg.err)
+		return nil
+	}
+	m.setFloors(msg.tree)
+	if msg.next != "" && d.floorsTotal > 0 && int64(len(d.floors)) >= d.floorsTotal {
+		msg.next = "" // the count is served: the cursor's residue is not a page
+	}
+	d.feedsCursor = msg.next
+	m.status = m.cat.Get("zhihu.answers_loaded", len(d.floors))
+	return nil
+}
+
+// commentsPageCmd fetches one answer's comments page at offset — the
+// comment layer's first entry and its Ctrl+N at the walk's end.
+func (m *Model) commentsPageCmd(offset int) tea.Cmd {
+	d := m.reader
+	if d.commentsBusy {
+		return nil
+	}
+	if d.floorIdx >= len(d.floors) {
+		return nil
+	}
+	answerID := d.floors[d.floorIdx].cm.ID
+	if offset < 0 || d.commentsNext[answerID] < 0 {
+		m.status = m.cat.Get("status.more_end") // the walk already ended
+		return nil
+	}
+	d.commentsBusy = true
+	m.status = m.cat.Get("status.loading_more")
+	it, st, srcs := d.item.Item, m.st, m.srcs
+	return func() tea.Msg {
+		tree, next, err := refresh.DetailCommentsPage(context.Background(), st, srcs, it, answerID, offset)
+		return commentsPageMsg{itemID: it.ID, answerID: answerID, tree: tree, next: next, err: err}
+	}
+}
+
+// commentsPageMsg lands when a comment-layer page came back.
+type commentsPageMsg struct {
+	itemID   string
+	answerID string
+	tree     []core.Comment
+	next     int
+	err      error
+}
+
+// commentsPageLanded folds the page in: the merged tree re-renders
+// (the reply layer rebuilds in place when the reader sits in it on
+// this answer), the answer's walk position records the next offset,
+// and the status bar counts the answer's comments so far.
+func (m *Model) commentsPageLanded(msg commentsPageMsg) tea.Cmd {
+	d := m.reader
+	if d == nil || d.pager == nil || d.item.Item.ID != msg.itemID {
+		return nil
+	}
+	d.commentsBusy = false
+	if msg.err != nil {
+		m.status = m.detailErrStatus(msg.err)
+		if d.layer == layerReplies && d.replyFloor == d.floorIdx &&
+			d.floorIdx < len(d.floors) && len(d.floors[d.floorIdx].replies) == 0 {
+			m.layoutReplies() // back to the placeholder; the status said why
+		}
+		return nil
+	}
+	d.commentsNext[msg.answerID] = msg.next
+	m.setFloors(msg.tree)
+	if d.floorIdx < len(d.floors) {
+		m.status = m.cat.Get("zhihu.comments_loaded", len(d.floors[d.floorIdx].replies))
+	}
+	// A queued entry follows: the reader may sit in another answer's
+	// comment layer on the pending screen (entered while this fetch
+	// was busy) — its own fetch starts now that the walk is free.
+	if d.layer == layerReplies && d.floorIdx < len(d.floors) {
+		f := &d.floors[d.floorIdx]
+		if len(f.replies) == 0 {
+			if _, queued := d.commentsNext[f.cm.ID]; !queued {
+				return m.commentsPageCmd(0)
+			}
+		}
+	}
+	return nil
 }
 
 // moveFloor moves the floor cursor by delta (clamped); a real move
@@ -803,9 +1199,20 @@ func (m *Model) nextReplyStart() {
 // detailTargetURL is Ctrl+O/Ctrl+Y's target per layer: the item URL on
 // the body (a text post with no URL falls back to its discussion
 // page), the floor's comment page on the floor layer, and the topmost
-// visible reply's page on the reply layer.
+// visible reply's page on the reply layer. A paging detail (zhihu)
+// anchors the question page at the current answer instead — the
+// floor and reply layers both sit on one answer, and a bare comment
+// id cannot address a page alone.
 func (m Model) detailTargetURL() string {
 	d := m.reader
+	if d.pager != nil {
+		if d.layer == layerFloors || d.layer == layerReplies {
+			if d.loaded && d.floorIdx < len(d.floors) {
+				return d.pager.AnswerURL(d.item.Item, d.floors[d.floorIdx].cm.ID)
+			}
+		}
+		return d.item.Item.URL // the question layer: the question page
+	}
 	switch d.layer {
 	case layerFloors:
 		if d.commentURL != nil && d.loaded && d.floorIdx < len(d.floors) {

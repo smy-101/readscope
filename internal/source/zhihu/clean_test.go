@@ -132,6 +132,41 @@ func TestCleanMergesAdjacentSameImages(t *testing.T) {
 	}
 }
 
+// answerBodyHTML is an answer-content subset (ticket 06's golden):
+// stickers as alt text, a video-box card (href kept verbatim per the
+// 03-review amendment), the lazy-img pair with its duplicate echo,
+// and a /50/ thumb — the full rule set in one body, the shape the
+// 回答层 renders.
+const answerBodyHTML = `<p>先说结论：<img class="sticker" data-sticker-id="stk_3" alt="[大笑]">这个问法不对。</p>
+<p><a class="video-box" href="https://link.zhihu.com/?target=https%3A%2F%2Fwww.zhihu.com%2Fvideo%2F1234" data-lens-id="1234"><span class="box">封面</span></a></p>
+<p>对比图：<img src="data:image/svg+xml;utf8,&lt;svg&gt;" data-original="https://pic3.zhimg.com/50/v2-ans_hd.jpg" alt="对比"><img src="https://pic3.zhimg.com/50/v2-ans_hd.jpg" alt="对比"></p>
+<p>完。</p>`
+
+// The answer golden: the cleaned body through the pipeline's layout
+// — the sticker is its alt text, the video card a bare [视频] link
+// carrying the served href verbatim (恒可开), one image (not the lazy
+// duplicate echo), at full size (no /50/).
+func TestGoldenAnswerBodyThroughPipeline(t *testing.T) {
+	doc, err := render.ParseHTML(CleanHTML(answerBodyHTML))
+	if err != nil {
+		t.Fatalf("parse cleaned body: %v", err)
+	}
+	got := render.ToPlain(render.Layout(doc, 60)) + "\n"
+	golden := filepath.Join("testdata", "answer-body.golden")
+	if *update {
+		os.WriteFile(golden, []byte(got), 0o644)
+		t.Logf("updated %s", golden)
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden (run go test ./internal/source/zhihu -update first): %v", err)
+	}
+	if got != string(want) {
+		t.Errorf("layout differs from golden:\n--- got ---\n%s\n--- want ---\n%s", got, string(want))
+	}
+}
+
 // The golden pins the daily story subset end to end: the cleaned body
 // through the M1 pipeline's plain-text layout at width 60 — 图片降级
 // markers with the FULL-size link, no noscript echo, quote bar text.

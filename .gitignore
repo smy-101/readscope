@@ -24,3 +24,4 @@ go.work.sum
 
 # M4 probe samples (raw zhihu responses; moments data is personal)
 /.scratch/m4-zhihu/samples/
+zhihu.cookies

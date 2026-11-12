@@ -169,3 +169,114 @@ func TestDetailFetchedAtomicWithTree(t *testing.T) {
 		t.Fatalf("failed save must not mark opened: %v, %v", ok, err)
 	}
 }
+
+// --- ticket 06: the zhihu question's detail caches ------------------------
+
+// zhihuQuestion is one cached question card the detail tests hang
+// the comment tree and the meta triple off.
+func zhihuQuestion() core.Item {
+	return core.Item{
+		ID: "zh:question/1001", Source: "zhihu", Feed: "hot",
+		Title: "热门问题", URL: "https://www.zhihu.com/question/1001",
+		FetchedAt: nowUTC(),
+	}
+}
+
+// answerTree is two zhihu answer floors — the first with a loaded
+// comment subtree, the second bare — in tree order, the way the
+// detail fetch and the merges produce them. NumChildren is the
+// floor-head's server-reported comment count (nil for the second
+// floor's degenerate shape).
+func answerTree() []core.Comment {
+	seven := 7
+	return []core.Comment{
+		{ID: "9001", ParentID: "", Author: "张三", Text: "<p>回答甲</p>", NumChildren: &seven},
+		{ID: "c1", ParentID: "9001", Author: "李四", Text: "根评论一"},
+		{ID: "c2", ParentID: "c1", Author: "王五", Text: "子回复"},
+		{ID: "9002", ParentID: "", Author: "赵六", Text: "<p>回答乙</p>"},
+	}
+}
+
+// num_children is snapshot data that must survive the round trip —
+// the floor head's "N 条评论" renders from cache on offline re-opens,
+// before (and without) the comment layer ever being opened.
+func TestCommentsRoundTripPreservesNumChildren(t *testing.T) {
+	s := migrated(t)
+	mustSaveItems(t, s, zhihuQuestion())
+	if err := s.SaveComments(t.Context(), "zh:question/1001", answerTree()); err != nil {
+		t.Fatalf("SaveComments: %v", err)
+	}
+	got, err := s.CommentsForItem(t.Context(), "zh:question/1001")
+	if err != nil {
+		t.Fatalf("CommentsForItem: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("got %d comments, want 4", len(got))
+	}
+	if got[0].NumChildren == nil || *got[0].NumChildren != 7 {
+		t.Fatalf("floor 9001 num_children = %v, want 7", got[0].NumChildren)
+	}
+	if got[3].NumChildren != nil {
+		t.Fatalf("floor 9002 num_children = %v, want nil", got[3].NumChildren)
+	}
+	if got[1].NumChildren != nil {
+		t.Fatalf("reply num_children = %v, want nil (hn-shaped nodes keep nil)", got[1].NumChildren)
+	}
+}
+
+// The question meta triple caches onto the opened marker's row and
+// survives every later whole-tree replace (Ctrl+N appends re-save
+// the tree constantly): SaveComments' upsert must not clobber it.
+func TestQuestionInfoSurvivesTreeReplaces(t *testing.T) {
+	s := migrated(t)
+	mustSaveItems(t, s, zhihuQuestion())
+
+	if err := s.SaveComments(t.Context(), "zh:question/1001", answerTree()); err != nil {
+		t.Fatalf("save tree: %v", err)
+	}
+	q := core.QuestionInfo{Author: "问主", AnswerCount: 1234, VisitCount: 5600000}
+	if err := s.SaveQuestionInfo(t.Context(), "zh:question/1001", q); err != nil {
+		t.Fatalf("SaveQuestionInfo: %v", err)
+	}
+	// A later replace (more floors, the background refresh): the
+	// triple stays — it is the question's, not the tree's.
+	if err := s.SaveComments(t.Context(), "zh:question/1001", answerTree()); err != nil {
+		t.Fatalf("re-save tree: %v", err)
+	}
+	got, ok, err := s.QuestionInfoForItem(t.Context(), "zh:question/1001")
+	if err != nil || !ok {
+		t.Fatalf("QuestionInfoForItem = %v, %v; want true, nil", ok, err)
+	}
+	if got != q {
+		t.Fatalf("question info = %+v, want %+v", got, q)
+	}
+}
+
+// A never-opened question has no meta triple: ok=false, zero value,
+// no error — the caller renders without the meta line.
+func TestQuestionInfoAbsentWhenNeverOpened(t *testing.T) {
+	s := migrated(t)
+	mustSaveItems(t, s, zhihuQuestion())
+	got, ok, err := s.QuestionInfoForItem(t.Context(), "zh:question/1001")
+	if err != nil || ok {
+		t.Fatalf("QuestionInfoForItem = %+v, %v, %v; want zero, false, nil", got, ok, err)
+	}
+}
+
+// A corrupt cached triple (a hand-edited row, a shape moved) must
+// read as absent, not crash the open — the meta line degrades away.
+func TestQuestionInfoCorruptRowReadsAbsent(t *testing.T) {
+	s := migrated(t)
+	mustSaveItems(t, s, zhihuQuestion())
+	if err := s.SaveComments(t.Context(), "zh:question/1001", nil); err != nil {
+		t.Fatalf("open the row: %v", err)
+	}
+	if _, err := s.Exec(t.Context(),
+		`UPDATE detail_fetch SET question = '{not json' WHERE item_id = 'zh:question/1001'`); err != nil {
+		t.Fatalf("corrupt the row: %v", err)
+	}
+	_, ok, err := s.QuestionInfoForItem(t.Context(), "zh:question/1001")
+	if err != nil || ok {
+		t.Fatalf("corrupt row: QuestionInfoForItem = %v, %v; want false, nil", ok, err)
+	}
+}

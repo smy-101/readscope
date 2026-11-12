@@ -1,0 +1,383 @@
+package zhihu
+
+// Ticket 06 tests: the question's detail data plane — the two-request
+// open (meta with x-zse-93, feeds without — the measured matrix), the
+// Content mapping (cleaned description, meta triple, answer floors
+// with the floor-head data, feeds cursor), the floors cursor walk,
+// and the comment layer's root page + child-gap completion walk
+// (dedup, is_delete, six-page bound, soft stop). All offline against
+// the shared fakeZhihu; the real-network run is ticket 07's smoke.
+
+import (
+	"errors"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/smy-101/readscope/internal/core"
+)
+
+// detailSrcAt lands a cookie'd zhihu source on one fake server.
+func detailSrcAt(t *testing.T, fake *fakeZhihu) (*Source, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(fake)
+	t.Cleanup(srv.Close)
+	return newSource(Hosts{API: srv.URL, Daily: srv.URL, Web: srv.URL}, "z_c0=session; d_c0=dev"), srv
+}
+
+func detailItem() core.Item {
+	return core.Item{ID: ItemID(fakeQID), Source: ID, Feed: HotFeedKey, Title: "为什么终端阅读器又火了？"}
+}
+
+// detailMetaJSON carries the description through the full zhihu HTML
+// gauntlet — the open must ride CleanHTML before the pipeline.
+const detailMetaJSON = `{"title":"为什么终端阅读器又火了？","author":{"name":"张三"},
+ "answer_count":213,"visit_count":12000000,
+ "detail":"<p>问题描述</p><noscript><img src=\"https://pic.zhimg.com/80/x.jpg\"></noscript><img data-original=\"https://pic.zhimg.com/50/a.jpg\" src=\"data:image/svg+xml,e\"><img src=\"https://pic.zhimg.com/50/a.jpg\">"}`
+
+// detailFeedsJSON is the first answers page: two floors (one with a
+// zero 赞/评论 — both floor-head segments must go nil and drop), one
+// stray article card, and a cursor onto page two.
+const detailFeedsPage1 = `{"data":[
+ {"target":{"id":1912345678901234567,"type":"answer","author":{"name":"李四"},
+  "voteup_count":12345,"comment_count":541,"content":"<p>回答全文</p>","created_time":1700000000}},
+ {"target":{"id":200001,"type":"article","title":"混进来的文章卡"}},
+ {"target":{"id":300002,"type":"answer","author":{"name":"零赞新人"},
+  "voteup_count":0,"comment_count":0,"content":"<p>零赞回答</p>","created_time":0}}
+],"paging":{"next":"%s/feeds-page-2","is_end":false}}`
+
+// detailFeedsPage2 is the second answers page, no further cursor.
+const detailFeedsPage2 = `{"data":[
+ {"target":{"id":400003,"type":"answer","author":{"name":"王五"},
+  "voteup_count":9,"comment_count":2,"content":"<p>第二页回答</p>","created_time":1700000001}}
+],"paging":{"next":"","is_end":true}}`
+
+// detailRootsJSON is one answer's first root page: root 501 with a
+// hot preview of one child (h1) and child_comment_count 3 — gap 2,
+// the walk must fill c2/c3 and drop the re-served h1 duplicate and
+// the deleted row; root 502 with no children at all (gap 0, no walk);
+// a deleted root 503 that must not survive at all. paging.next
+// addresses offset 20.
+const detailRootsJSON = `{"data":[
+ {"id":501,"author":{"name":"赵七"},"like_count":231,"content":"根评论一",
+  "child_comment_count":3,"child_comments":[
+   {"id":901,"author":{"name":"热门子回复"},"like_count":5,"content":"<p>热门子回复</p>"}]},
+ {"id":502,"author":{"name":"钱八"},"like_count":0,"content":"根评论二",
+  "child_comment_count":0,"child_comments":[]},
+ {"id":503,"author":{"name":"已删"},"like_count":0,"content":"","is_delete":true}
+],"paging":{"next":"https://www.zhihu.com/api/v4/comment_v5/answers/x/root_comment?order_by=score&limit=20&offset=20","is_end":false}}`
+
+// childPage501 is root 501's completion page: the h1 duplicate, two
+// new children, one deleted row, end of walk.
+const childPage501 = `{"data":[
+ {"id":901,"author":{"name":"dup"},"like_count":0,"content":"dup"},
+ {"id":902,"author":{"name":"子回复二"},"like_count":0,"content":"<p>子回复二</p>"},
+ {"id":903,"author":{"name":"子回复三"},"like_count":0,"content":"子回复三"},
+ {"id":904,"author":{"name":"已删子回复"},"like_count":0,"content":"","is_delete":true}
+],"paging":{"next":"","is_end":true}}`
+
+func detailFake(t *testing.T) (*Source, *fakeZhihu, string) {
+	t.Helper()
+	fake := &fakeZhihu{
+		questionMetaOverride: detailMetaJSON,
+		rootOverride:         detailRootsJSON,
+		childPages:           map[string][]string{"501": {childPage501}},
+		childClicks:          map[string]int{},
+		extraPages:           map[string]string{},
+	}
+	src, srv := detailSrcAt(t, fake)
+	fake.feedsOverride = strings.ReplaceAll(detailFeedsPage1, "%s", srv.URL)
+	fake.extraPages["/feeds-page-2"] = detailFeedsPage2
+	return src, fake, srv.URL
+}
+
+// The open itself: two requests, the measured header matrix on each
+// leg, and the Content mapping — cleaned description (noscript gone,
+// /50/ proxy stripped, lazy placeholder dropped, duplicate image
+// merged), the meta triple, the answer floors with the floor-head
+// data (stray cards skipped, zero segments nil), and the cursor.
+func TestDetailTwoRequestsMapTheQuestion(t *testing.T) {
+	src, fake, _ := detailFake(t)
+	c, err := src.Detail(t.Context(), detailItem())
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+
+	// Header matrix: meta wears x-zse-93 + the question referer,
+	// feeds carries neither version header nor... it does carry the
+	// referer. Both ride the cookie.
+	metaHit := fake.hitExact("/api/v4/questions/" + fakeQID)
+	feedsHit := fake.hitExact("/api/v4/questions/" + fakeQID + "/feeds")
+	if metaHit == nil || feedsHit == nil {
+		t.Fatalf("both legs must dial: meta=%v feeds=%v", metaHit, feedsHit)
+	}
+	if !metaHit.zse93 || metaHit.zse93Val != XZse93 {
+		t.Errorf("meta leg must wear x-zse-93=%s, got %q", XZse93, metaHit.zse93Val)
+	}
+	if feedsHit.zse93 {
+		t.Error("feeds leg must NOT wear x-zse-93 (cursorless entry rejects it)")
+	}
+	if want := "https://www.zhihu.com/question/" + fakeQID; metaHit.referer != want || feedsHit.referer != want {
+		t.Errorf("referer = %q / %q, want %q on both legs", metaHit.referer, feedsHit.referer, want)
+	}
+	if !metaHit.cookie || !feedsHit.cookie {
+		t.Error("both legs are cookie-gated; the cookie must ride")
+	}
+
+	// Body: the cleaned description, not the raw one.
+	for _, gone := range []string{"noscript", "data:image", "/50/a.jpg"} {
+		if strings.Contains(c.Body, gone) {
+			t.Errorf("description still carries %q:\n%s", gone, c.Body)
+		}
+	}
+	if !strings.Contains(c.Body, "pic.zhimg.com/a.jpg") {
+		t.Errorf("the merged full-size image should survive:\n%s", c.Body)
+	}
+
+	// The meta triple.
+	if c.Question == nil || c.Question.Author != "张三" ||
+		c.Question.AnswerCount != 213 || c.Question.VisitCount != 12000000 {
+		t.Fatalf("question info = %+v", c.Question)
+	}
+
+	// Floors: two answers, the stray article card not among them.
+	if len(c.Comments) != 2 {
+		t.Fatalf("floors = %d, want 2 (stray cards skip):\n%+v", len(c.Comments), c.Comments)
+	}
+	f0 := c.Comments[0]
+	if f0.ID != fakeAID || f0.Author != "李四" || f0.Text != "<p>回答全文</p>" {
+		t.Errorf("floor 0 = %+v", f0)
+	}
+	if f0.Score == nil || *f0.Score != 12345 {
+		t.Errorf("floor 0 赞 = %v, want 12345", f0.Score)
+	}
+	if f0.NumChildren == nil || *f0.NumChildren != 541 {
+		t.Errorf("floor 0 comment count = %v, want 541", f0.NumChildren)
+	}
+	f1 := c.Comments[1]
+	if f1.Score != nil || f1.NumChildren != nil || f1.CreatedAt != nil {
+		t.Errorf("zero 赞/评论/时间 must be nil (不占位), got %+v", f1)
+	}
+
+	// The cursor rides verbatim — Ctrl+N walks the server's own address.
+	if !strings.HasSuffix(c.Next, "/feeds-page-2") {
+		t.Errorf("next cursor = %q, want the page-2 address", c.Next)
+	}
+}
+
+// The floors walk: page two via the cursor, verbatim address, no
+// x-zse-93 (cursor pages never needed it), and the end served as
+// an empty cursor.
+func TestFetchFloorsPageWalksCursor(t *testing.T) {
+	src, _, _ := detailFake(t)
+	it := detailItem()
+
+	floors, next, err := src.FetchFloorsPage(t.Context(), it, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(floors) != 2 || next == "" {
+		t.Fatalf("first page: %d floors, next=%q", len(floors), next)
+	}
+	floors2, next2, err := src.FetchFloorsPage(t.Context(), it, next)
+	if err != nil {
+		t.Fatalf("cursor page: %v", err)
+	}
+	if len(floors2) != 1 || floors2[0].ID != "400003" {
+		t.Fatalf("page two floors = %+v", floors2)
+	}
+	if next2 != "" {
+		t.Errorf("page two is the end, next = %q", next2)
+	}
+}
+
+// The comment layer's first page: roots in score order with the gap
+// walk filling only what is missing — the hot preview child survives
+// first, the fetched duplicates and deleted rows drop, tree order
+// keeps parents before children, roots' ParentID is the answer, and
+// the walk reports the next offset from paging.next.
+func TestFetchAnswerCommentsCompletesGaps(t *testing.T) {
+	src, fake, _ := detailFake(t)
+	comments, next, err := src.FetchAnswerComments(t.Context(), detailItem(), fakeAID, 0)
+	if err != nil {
+		t.Fatalf("FetchAnswerComments: %v", err)
+	}
+
+	want := []struct {
+		id, parent, author string
+	}{
+		{"501", fakeAID, "赵七"},
+		{"901", "501", "热门子回复"},
+		{"902", "501", "子回复二"},
+		{"903", "501", "子回复三"},
+		{"502", fakeAID, "钱八"},
+	}
+	if len(comments) != len(want) {
+		t.Fatalf("comments = %d, want %d (deleted root and deduped/deleted rows gone):\n%+v",
+			len(comments), len(want), comments)
+	}
+	for i, w := range want {
+		if comments[i].ID != w.id || comments[i].ParentID != w.parent || comments[i].Author != w.author {
+			t.Errorf("comment[%d] = {%s %s %s}, want {%s %s %s}",
+				i, comments[i].ID, comments[i].ParentID, comments[i].Author, w.id, w.parent, w.author)
+		}
+	}
+	if next != 20 {
+		t.Errorf("next offset = %d, want 20 (paging.next's offset)", next)
+	}
+	if n := fake.childHitCount("501"); n != 1 {
+		t.Errorf("root 501's walk clicked %d child pages, want 1 (gap 2, one page)", n)
+	}
+	if n := fake.childHitCount("502"); n != 0 {
+		t.Errorf("root 502 has no gap — the walk must not dial, clicked %d", n)
+	}
+}
+
+// The walk's end: no paging.next (or is_end) reports -1 — Ctrl+N has
+// nowhere further to go.
+func TestFetchAnswerCommentsEndIsMinusOne(t *testing.T) {
+	endRoots := `{"data":[{"id":601,"author":{"name":"末页"},"like_count":1,"content":"末页根"}],
+		"paging":{"next":"","is_end":true}}`
+	_, fake, _ := detailFake(t) // separate fake: same page shapes, override below
+	fake.rootOverride = endRoots
+	src2, _ := detailSrcAt(t, fake)
+	_, next, err := src2.FetchAnswerComments(t.Context(), detailItem(), fakeAID, 20)
+	if err != nil {
+		t.Fatalf("end page: %v", err)
+	}
+	if next != -1 {
+		t.Errorf("end page next = %d, want -1", next)
+	}
+}
+
+// The six-page bound: a root whose child walk never ends (the server
+// keeps serving a next cursor) stops at maxChildPages — the measured
+// restraint against runaway walks.
+func TestChildWalkStopsAtSixPages(t *testing.T) {
+	fake := &fakeZhihu{
+		rootOverride: `{"data":[{"id":999,"author":{"name":"无底洞"},"like_count":0,"content":"根",
+		"child_comment_count":1000,"child_comments":[]}],"paging":{"next":"","is_end":true}}`,
+		childPages:  map[string][]string{},
+		childClicks: map[string]int{},
+	}
+	src, srv := detailSrcAt(t, fake)
+	loop := `{"data":[{"id":910,"author":{"name":"循环"},"like_count":0,"content":"页"}],
+		"paging":{"next":"` + srv.URL + `/api/v4/comment_v5/comment/999/child_comment?limit=50&offset=50","is_end":false}}`
+	fake.childPages["999"] = []string{loop}
+	if _, _, err := src.FetchAnswerComments(t.Context(), detailItem(), fakeAID, 0); err != nil {
+		t.Fatalf("FetchAnswerComments: %v", err)
+	}
+	if n := fake.childHitCount("999"); n != maxChildPages {
+		t.Errorf("runaway walk clicked %d pages, want the %d-page bound", n, maxChildPages)
+	}
+}
+
+// A failed child page stops the walk softly: the page's roots and
+// preview children still land, the missing gap is simply not filled —
+// a partial comment tree beats a failed page.
+func TestChildWalkFailsSoft(t *testing.T) {
+	src, fake, _ := detailFake(t)
+	fake.childPages["501"] = nil // the child door 404s
+	comments, _, err := src.FetchAnswerComments(t.Context(), detailItem(), fakeAID, 0)
+	if err != nil {
+		t.Fatalf("a failed completion must not fail the page: %v", err)
+	}
+	var sawH1 bool
+	for _, c := range comments {
+		if c.ID == "901" {
+			sawH1 = true
+		}
+	}
+	if !sawH1 {
+		t.Errorf("the hot preview child must survive a failed walk: %+v", comments)
+	}
+}
+
+// The detail family's failure semantics on the open itself: 404 is
+// ErrContentGone (the friendly 不存在或已删除 translation), 401/403 with a
+// cookie is ErrSessionExpired (Ctrl+U guidance), and no cookie is
+// ErrLoginRequired with zero dials.
+func TestDetailFailureSemantics(t *testing.T) {
+	it := detailItem()
+
+	src, fake, _ := detailFake(t)
+	fake.goneStatus = 404
+	if _, err := src.Detail(t.Context(), it); !errors.Is(err, ErrContentGone) {
+		t.Errorf("404 = %v, want ErrContentGone", err)
+	}
+
+	src, fake, _ = detailFake(t)
+	fake.staleStatus = 403
+	if _, err := src.Detail(t.Context(), it); !errors.Is(err, ErrSessionExpired) {
+		t.Errorf("403 = %v, want ErrSessionExpired", err)
+	}
+
+	noCookie := &fakeZhihu{childPages: map[string][]string{}, childClicks: map[string]int{}}
+	_, srv := detailSrcAt(t, noCookie)
+	anon := newSource(Hosts{Web: srv.URL}, "")
+	if _, err := anon.Detail(t.Context(), it); !errors.Is(err, ErrLoginRequired) {
+		t.Errorf("no cookie = %v, want ErrLoginRequired", err)
+	}
+	if n := noCookie.hitCount("/api/v4/"); n != 0 {
+		t.Errorf("gated preflight must refuse before dialing, dialed %d times", n)
+	}
+
+	// The comment door answers 404 for a deleted answer with the same
+	// translation.
+	src, fake, _ = detailFake(t)
+	fake.goneStatus = 404
+	if _, _, err := src.FetchAnswerComments(t.Context(), it, fakeAID, 0); !errors.Is(err, ErrContentGone) {
+		t.Errorf("comments 404 = %v, want ErrContentGone", err)
+	}
+}
+
+// The pure halves: gap arithmetic (a deleted root owes nothing) and
+// the dedup filter (deleted rows drop, seen ids drop, survivors mark
+// seen for the next page).
+func TestChildGapArithmetic(t *testing.T) {
+	root := commentNode{ID: "1", ChildCommentCount: 3, ChildComments: make([]commentNode, 1)}
+	if g := childGap(root); g != 2 {
+		t.Errorf("gap = %d, want 2", g)
+	}
+	deleted := commentNode{ID: "2", IsDelete: true, ChildCommentCount: 9}
+	if g := childGap(deleted); g != 0 {
+		t.Errorf("deleted root gap = %d, want 0", g)
+	}
+	if g := childGap(commentNode{ID: "3"}); g != 0 {
+		t.Errorf("childless root gap = %d, want 0", g)
+	}
+}
+
+func TestDedupChildrenFiltersAndMarks(t *testing.T) {
+	seen := map[string]bool{"901": true}
+	nodes := []commentNode{
+		{ID: "901"},                 // the re-served hot preview
+		{ID: "902"},                 // new
+		{ID: "903", IsDelete: true}, // deleted
+		{ID: "902"},                 // same page duplicate
+	}
+	got := dedupChildren(nodes, seen)
+	if len(got) != 1 || got[0].ID != "902" {
+		t.Fatalf("dedup = %+v, want just 902", got)
+	}
+	if !seen["902"] {
+		t.Error("the survivor must be marked seen for the next page")
+	}
+}
+
+// AnswerURL anchors the question page at the answer; CommentURL maps
+// the item id to the question page and leaves bare comment ids to
+// AnswerURL's routing (they cannot pair with a question alone).
+func TestAnswerAndCommentURL(t *testing.T) {
+	src, _, _ := detailFake(t)
+	it := detailItem()
+	if got := src.AnswerURL(it, fakeAID); got != "https://www.zhihu.com/question/"+fakeQID+"/answer/"+fakeAID {
+		t.Errorf("AnswerURL = %q", got)
+	}
+	if got := src.CommentURL(it.ID); got != "https://www.zhihu.com/question/"+fakeQID {
+		t.Errorf("CommentURL(item) = %q", got)
+	}
+	if got := src.CommentURL(fakeAID); got != "" {
+		t.Errorf("CommentURL(bare id) = %q, want \"\"", got)
+	}
+}

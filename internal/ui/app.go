@@ -449,6 +449,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commentsMsg:
 		return m, m.commentsLanded(msg)
 
+	case floorsMsg:
+		return m, m.floorsLanded(msg)
+
+	case commentsPageMsg:
+		return m, m.commentsPageLanded(msg)
+
 	case bodyMsg:
 		return m, m.bodyLanded(msg)
 

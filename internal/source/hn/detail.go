@@ -18,6 +18,10 @@ import (
 	"github.com/smy-101/readscope/internal/core"
 )
 
+// DetailOnDemand implements source.DetailSource: every hn item is a
+// story with its comment tree behind it.
+func (s *Source) DetailOnDemand(core.Item) bool { return true }
+
 // Detail implements source.DetailSource: the story's whole comment
 // tree in one request. The story node itself is not returned — its
 // body already lives in the list snapshot; this call is about the

@@ -231,26 +231,9 @@ type feedsPage struct {
 	} `json:"paging"`
 }
 
-// commentsRoot is the first page of an answer's comments (the feed
-// behind the 评论层, GLOSSARY: 评论层): roots carry child_comment_count
-// and a 1-2 item hot-children preview; the gap between them is what
-// ticket 06's completion walk fills.
-type commentsRoot struct {
-	Data []struct {
-		ID                json.Number           `json:"id"`
-		Author            struct{ Name string } `json:"author"`
-		LikeCount         int64                 `json:"like_count"`
-		Content           string                `json:"content"`
-		ChildCommentCount int64                 `json:"child_comment_count"`
-		ChildComments     []struct {
-			ID json.Number `json:"id"`
-		} `json:"child_comments"`
-	} `json:"data"`
-	Paging struct {
-		Next  string `json:"next"`
-		IsEnd bool   `json:"is_end"`
-	} `json:"paging"`
-}
+// The comment_v5 shapes (commentsPage, commentNode) live in
+// detail.go — the walk's summary and ticket 06's comment layers read
+// the same payload shape.
 
 // Run walks the contract, streaming one line per endpoint to w and
 // returning every result (caller turns BLOCKED into exit 1).
@@ -472,7 +455,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 			tr.Get(ctx, epCommentsRoot,
 				h.Web+"/api/v4/comment_v5/answers/"+aid+"/root_comment?order_by=score&limit=20&offset="),
 			func(b []byte) (string, bool) {
-				var cs commentsRoot
+				var cs commentsPage
 				if err := json.Unmarshal(b, &cs); err != nil {
 					return "unparseable: " + err.Error(), false
 				}

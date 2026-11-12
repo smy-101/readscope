@@ -94,6 +94,16 @@ type fakeZhihu struct {
 	dailyStoryOverride  string // serve this body for /api/4/story/* (ticket 03 fixtures)
 	staleStatus         int    // ≠0: v4/comment_v5 answer this status despite a cookie (stale z_c0)
 	wrongVersion        string // ≠"": question-meta demands exactly this x-zse-93 value (zhihu bumped it)
+
+	// ticket 06 fixtures (detail.go): the question family's overrides,
+	// a 404 arm, and the child-comment walk's per-root page sequences.
+	questionMetaOverride string
+	feedsOverride        string
+	rootOverride         string
+	goneStatus           int                 // ≠0: v4/questions + comment_v5 answer this (404 fixture)
+	childPages           map[string][]string // root id → page bodies in walk order
+	childClicks          map[string]int
+	extraPages           map[string]string // path → body, for cursor-addressed pages (paging.next targets)
 }
 
 func (f *fakeZhihu) record(r *http.Request) request {
@@ -120,6 +130,10 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	write := func(status int, body string) {
 		w.WriteHeader(status)
 		fmt.Fprint(w, body)
+	}
+	if body, ok := f.extraPages[req.path]; ok {
+		write(200, body) // a cursor-addressed page: paging.next rides verbatim
+		return
 	}
 	switch {
 	case req.path == "/topstory/hot-list":
@@ -165,11 +179,44 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(f.staleStatusOr(401), v4ErrJSON)
 			return
 		}
+		if f.goneStatus != 0 {
+			write(f.goneStatus, v4ErrJSON) // the answer behind the comments is gone
+			return
+		}
+		if strings.Contains(req.path, "/child_comment") {
+			// one root's completion walk: the page sequence for the root
+			// id in the path, advancing per click; past the end serves the
+			// is_end page again (a runaway walk double-clicks and still
+			// terminates).
+			root := f.childRootID(req.path)
+			f.mu.Lock()
+			pages := f.childPages[root]
+			click := f.childClicks[root]
+			f.childClicks[root] = click + 1
+			f.mu.Unlock()
+			if len(pages) == 0 {
+				write(404, v4ErrJSON)
+				return
+			}
+			if click >= len(pages) {
+				click = len(pages) - 1
+			}
+			write(200, pages[click])
+			return
+		}
+		if f.rootOverride != "" {
+			write(200, f.rootOverride)
+			return
+		}
 		write(200, commentsJSON)
 	case strings.HasPrefix(req.path, "/api/v4/questions/"):
 		feeds := strings.HasSuffix(req.path, "/feeds")
 		if !req.cookie || f.staleStatus != 0 {
 			write(f.staleStatusOr(401), v4ErrJSON)
+			return
+		}
+		if f.goneStatus != 0 {
+			write(f.goneStatus, v4ErrJSON) // the question (or answer) is gone
 			return
 		}
 		if f.wrongVersion != "" && !feeds && req.zse93Val != f.wrongVersion {
@@ -185,13 +232,31 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if feeds {
+			if f.feedsOverride != "" {
+				write(200, f.feedsOverride)
+				return
+			}
 			write(200, feedsJSON)
 		} else {
+			if f.questionMetaOverride != "" {
+				write(200, f.questionMetaOverride)
+				return
+			}
 			write(200, questionMetaJSON)
 		}
 	default:
 		write(404, "{}")
 	}
+}
+
+// childRootID digs the root comment id out of a child_comment path
+// (/api/v4/comment_v5/comment/<id>/child_comment) — the fixture key.
+func (f *fakeZhihu) childRootID(path string) string {
+	rest := strings.TrimPrefix(path, "/api/v4/comment_v5/comment/")
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return rest[:i]
+	}
+	return rest
 }
 
 func (f *fakeZhihu) hit(pathPrefix string) *request {
@@ -226,6 +291,28 @@ func (f *fakeZhihu) hitCount(pathPrefix string) int {
 		}
 	}
 	return n
+}
+
+// childHitCount counts one root's completion-walk clicks (the
+// six-page bound's assert).
+func (f *fakeZhihu) childHitCount(rootID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.childClicks[rootID]
+}
+
+// hitExact finds the one hit with exactly this path (the question
+// meta and feeds doors share a prefix; only the path tells them
+// apart).
+func (f *fakeZhihu) hitExact(path string) *request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.hits {
+		if f.hits[i].path == path {
+			return &f.hits[i]
+		}
+	}
+	return nil
 }
 
 func newTestProbe(t *testing.T, fake *fakeZhihu, cookie string) (*Probe, *strings.Builder, string) {
