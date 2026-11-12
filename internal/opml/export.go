@@ -27,10 +27,10 @@ type exportBody struct {
 }
 
 type exportDocument struct {
-	XMLName xml.Name    `xml:"opml"`
-	Version string      `xml:"version,attr"`
-	Head    exportHead   `xml:"head"`
-	Body    exportBody   `xml:"body"`
+	XMLName xml.Name   `xml:"opml"`
+	Version string     `xml:"version,attr"`
+	Head    exportHead `xml:"head"`
+	Body    exportBody `xml:"body"`
 }
 
 // Encode writes the feeds as an OPML 2.0 document another reader can

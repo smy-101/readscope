@@ -9,11 +9,9 @@ package ui
 // guidance, raw HTTP errors stay raw.
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -234,8 +232,3 @@ func TestLoginFileNeverEchoedInDialogOutput(t *testing.T) {
 		}
 	}
 }
-
-// silence the unused-helper warning for context/filepath if the file
-// evolves; keeps imports honest as tests narrow.
-var _ = context.Background
-var _ = filepath.Join

@@ -22,7 +22,6 @@ package zhihu
 // JSON APIs risk-control non-browser fingerprints, so this package
 // deliberately does NOT use source.UserAgent (see the exception noted
 // there; rss/hn hosts don't care, zhihu's might). Single point of
-// and zhihu's might). Single point of
 // maintenance — the stop-loss ladder's first rung swaps this string.
 const DesktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 	"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

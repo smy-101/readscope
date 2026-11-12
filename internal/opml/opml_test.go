@@ -177,8 +177,8 @@ func TestImportKeyCollisionsAndMissingTitles(t *testing.T) {
 // regardless of map iteration order.
 func TestEncodeEmitsStandardOPML(t *testing.T) {
 	feeds := map[string]core.RSSFeed{
-		"ruanyq":               {Label: "阮一峰周刊", URL: "https://www.ruanyifeng.com/blog/atom.xml"},
-		"hacker-news":          {URL: "https://hnrss.org/frontpage"}, // no label → key as text
+		"ruanyq":      {Label: "阮一峰周刊", URL: "https://www.ruanyifeng.com/blog/atom.xml"},
+		"hacker-news": {URL: "https://hnrss.org/frontpage"}, // no label → key as text
 	}
 	raw := Encode(feeds)
 	back, err := Parse(raw)
@@ -228,8 +228,8 @@ func TestRoundtripExportImport(t *testing.T) {
 	}
 	want := map[string]string{
 		"https://www.ruanyifeng.com/blog/atom.xml": "阮一峰周刊",
-		"https://hnrss.org/frontpage":             "Hacker News",
-		"https://bare.example/atom":               "bare", // key became the label on export
+		"https://hnrss.org/frontpage":              "Hacker News",
+		"https://bare.example/atom":                "bare", // key became the label on export
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)

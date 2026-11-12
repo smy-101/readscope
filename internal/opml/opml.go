@@ -24,11 +24,11 @@ type Feed struct {
 // it carries xmlUrl, a folder otherwise (folders are recursed, feeds
 // may nest inside folders of folders — real exports are not shallow).
 type node struct {
-	XMLName xml.Name `xml:"outline"`
-	Text    string   `xml:"text,attr"`
-	Title   string   `xml:"title,attr"`
-	XMLURL  string   `xml:"xmlUrl,attr"`
-	Outlines []node  `xml:"outline"`
+	XMLName  xml.Name `xml:"outline"`
+	Text     string   `xml:"text,attr"`
+	Title    string   `xml:"title,attr"`
+	XMLURL   string   `xml:"xmlUrl,attr"`
+	Outlines []node   `xml:"outline"`
 }
 
 // document is the OPML skeleton; only body matters for subscriptions.

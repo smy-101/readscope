@@ -390,11 +390,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case errors.Is(msg.err, refresh.ErrNotPaged):
 			m.status = m.cat.Get("status.more_end")
 		case msg.err != nil:
-			if s := m.zhihuSessionStatus(msg.err); s != "" {
-				m.status = s
-			} else {
-				m.status = m.cat.Get("rss.feed_error", m.feedLabel(m.selectedFeed()), msg.err)
-			}
+			m.status = m.fetchErrText(m.feedLabel(m.selectedFeed()), msg.err)
 		case msg.end:
 			m.status = m.cat.Get("status.more_end")
 		case msg.res.New == 0:
@@ -958,25 +954,23 @@ func (m Model) refreshStatus(msg refreshDoneMsg) string {
 	}
 	switch {
 	case failed > 0 && len(msg.results) == 1:
-		return m.fetchErrStatus(msg.results[0])
+		r := msg.results[0] // failed ⇒ r.Err != nil here
+		return m.fetchErrText(r.Label, r.Err)
 	case failed > 0:
 		return m.cat.Get("rss.summary", len(msg.results), len(msg.results)-failed, failed)
 	}
 	return m.cat.Get("status.refresh_done", newSum)
 }
 
-// fetchErrStatus renders one feed's fetch failure. Zhihu session
-// errors map to login guidance (the spec's 失效语义: detail-family
-// 401/403 → "re-login", no cookie → "log in"), everything else is the
-// label plus the raw error.
-func (m Model) fetchErrStatus(r refresh.Result) string {
-	if r.Err != nil {
-		if s := m.zhihuSessionStatus(r.Err); s != "" {
-			return s
-		}
-		return m.cat.Get("rss.feed_error", r.Label, r.Err)
+// fetchErrText renders one fetch failure: zhihu session errors become
+// login guidance (the spec's 失效语义: detail-family 401/403 →
+// "re-login", no cookie → "log in"), everything else is the label
+// plus the raw error.
+func (m Model) fetchErrText(label string, err error) string {
+	if s := m.zhihuSessionStatus(err); s != "" {
+		return s
 	}
-	return m.cat.Get("status.refresh_done", r.New)
+	return m.cat.Get("rss.feed_error", label, err)
 }
 
 // zhihuSessionStatus maps a zhihu session error to its guidance line;

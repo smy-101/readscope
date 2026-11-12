@@ -22,3 +22,22 @@
 - doctor 的 check 结构体加 note 字段(成功态带注释:匿名模式说明/键数普查),未配置=通过 —— 匿名是合法形态不是故障;存在但坏(0644/缺 z_c0/不可读)=失败。
 - GLOSSARY 增 登录仪式/失效语义 两词条;F1 帮助加 Ctrl+U;usage 更新 zhihu <probe|login>。
 - 遗留给 05:关注 feed 边栏行、无 cookie 时列表层的具体引导呈现(机制与文案键均已就位:zhihu.login_required)。留给 07:README cookie 获取步骤/风险提示。
+
+## Review (2026-11-29)
+
+两轴评审(Standards/Spec)并行子代理,各读全量 diff(2547 行)落盘证据。均判 OK-with-notes,无阻断项。
+
+采纳(已修):
+- zhihu.go DesktopUA 注释残行(编辑事故)删除——两轴同抓。
+- 矩阵自检腿 Referer 丢 qid(实 bug):noZse/withZse 克隆后未拼 qid,负例相对主行走同时变了 zse93 与 Referer 两个头,403/GATE-MOVED 结论不可归因;现已与主走同 Referer。
+- probe outcome() 判定改 errors.Is(原 strings.Contains 撞错误文本);报告行去中英混排。
+- app.go 两处"session 引导否则原文"合并为 fetchErrText,顺带删 fetchErrStatus 不可达分支。
+- login_test.go 哨兵 var 与无用 import 删除。
+
+记录(不修):
+- refreshStatus 单 feed 失败改显错误原文:全源生效的行为变化,票内是失效语义的必要件(否则引导被 1-of-1 汇总吞掉),已披露;多 feed 汇总形态有测试钉住。
+- 清单第 4 项为机制落地(ErrLoginRequired→UI 引导链有合成消息测试),关注 feed 真实边栏/列表呈现随 05 落地——转交 05 收口。
+- list_test.go import 重排为 gofmt 顺带,保留。
+
+转交:
+- 05 号票:关注 feed 上线时,用真实 refresh.Feed 走一遍 无 cookie → 状态栏引导 的端到端(补齐 TestRefreshDoneLoginGuidanceLandsInStatusBar 的合成链)。

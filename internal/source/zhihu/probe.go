@@ -3,6 +3,7 @@ package zhihu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -106,8 +107,8 @@ func (p *Probe) outcome(name string, f Response, parse func(body []byte) (note s
 		return EndpointResult{name, "ERR", verdictBlocked, f.Err.Error()}
 	case f.Err != nil:
 		note := "blocked" + errCode(f.Body)
-		if strings.Contains(f.Err.Error(), ErrSessionExpired.Error()) {
-			note = "blocked: session expired (401/403 on a cookie'd call) — Ctrl+U 重登" + errCode(f.Body)
+		if errors.Is(f.Err, ErrSessionExpired) {
+			note = "blocked: session expired (401/403 on a cookie'd call) — re-login (Ctrl+U)" + errCode(f.Body)
 		}
 		return EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictBlocked, note}
 	}
@@ -496,9 +497,9 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 			}
 		}
 		noZse := epQuestionMeta // questions WITHOUT the version header → 403
-		noZse.Name, noZse.ZSE93 = "matrix-questions-nozse", false
+		noZse.Name, noZse.ZSE93, noZse.Referer = "matrix-questions-nozse", false, referer
 		withZse := epAnswersFeeds // cursorless feeds WITH the version header → 403
-		withZse.Name, withZse.ZSE93 = "matrix-feeds-withzse", true
+		withZse.Name, withZse.ZSE93, withZse.Referer = "matrix-feeds-withzse", true, referer
 		matrixLeg(noZse, metaURL, http.StatusForbidden,
 			"GATE MOVED: question meta answers without x-zse-93")
 		matrixLeg(withZse, feedsURL, http.StatusForbidden,
