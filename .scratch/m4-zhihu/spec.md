@@ -26,6 +26,8 @@ Status: ready-for-agent
 
 公共请求形态:桌面 Chrome UA;`x-requested-with: fetch`;Referer 按端点;`x-zse-93: 101_3_3.0`(静态常量,按上表矩阵)。**x-zse-96 签名一律不需要**(2026-11 FeedScope 实测,本源不实现签名器);zse-ck JS 挑战只挂 HTML 页,JSON API 不经过(01 号票复核)。
 
+> **2026-11-12 `zhihu probe` 真网判定:全端点 GREEN,免签直连成立。**x-zse-93 两处门禁均已放宽(questions 不带也 200、feeds 带也 200),按旧矩阵形态请求仍全 200,常量保留;热榜 www 门(`api/v3/feed/topstory/hot-lists/total`)为会话门(匿名 401 code=101),probe 里作备份门;「非浏览器指纹被风控」证伪。详见 01 号票 Comments。
+
 会话语义(FeedScope 用户实测):z_c0 服务端过期后 v3 列表照常、v4 详情一律 403 → v4 详情 401/403 转登录引导;v3 列表 403 视为纯风控,原样报错、不清 cookie(403 无法与风控区分,清了等于强制重登)。
 
 ## User Stories
@@ -84,9 +86,9 @@ Status: ready-for-agent
 
 | 风险 | 对策 |
 |---|---|
-| 非浏览器 TLS/头序指纹被 JSON API 风控(头号未知) | 01 tracer 全端点实测;止损阶梯:头序/UA 微调重试 → chromedp 一次性登录通道(仅仪式) → 缩回免登录数据面(热榜+日报,关注流 wontfix) |
+| 非浏览器 TLS/头序指纹被 JSON API 风控(头号未知) | ✅ 01 已判定(2026-11-12 真网全绿):未被拦,阶梯未动用;后续间歇 403 再上阶梯(头序/UA 微调 → chromedp 一次性登录通道 → 缩回免登录数据面) |
 | cookie 数日~数周失效 | 手动贴税已知并接受;Ctrl+U 一键重登;chromedp 增强留缝 |
-| x-zse-93 版本号 bump(v4 报 10003) | 常量单点维护;probe 报告现值,替换即愈 |
+| x-zse-93 版本号 bump(v4 报 10003) | 常量单点维护;probe 报告现值,替换即愈;01 实测两处门禁已放宽(缺 93 的 questions 与带 93 的 feeds 均 200),常量按旧矩阵保留 |
 | 站点改版碎(字段/端点) | `readscope zhihu probe` 落盘原始样本;0 条解析即报"站点可能改版"(FeedScope 同款自检) |
 | 账号风控 | 验证期小号;手动 F5 无自动轮询;评论补全并发上限 |
 

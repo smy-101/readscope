@@ -1,0 +1,44 @@
+// Package zhihu implements the zhihu source on its cookie-gated JSON
+// APIs (M4): the hot list and the daily digest anonymously, the
+// follow feed and question details behind a pasted browser cookie —
+// no signature, no resident browser (ADR #14). Ticket 01 lands the
+// data-plane tracer (`readscope zhihu probe`) and the shared
+// primitives; the Source registration and feeds follow in ticket 02.
+//
+// The request shape mirrors FeedScope's 2026-11 measured matrix: a
+// desktop Chrome UA on every call, x-requested-with: fetch, a
+// per-endpoint Referer, and x-zse-93 (a static client-version
+// declaration) only where the endpoint demands it.
+package zhihu
+
+// DesktopUA is the browser identity every zhihu request wears. Zhihu's
+// JSON APIs risk-control non-browser fingerprints, so this package
+// deliberately does NOT use source.UserAgent (rss/hn hosts don't
+// care; zhihu's might). Single point of maintenance — the stop-loss
+// ladder's first rung swaps this string.
+const DesktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+// XZse93 is the client-version declaration the v4/questions meta
+// endpoint gates on: missing → HTTP 403 with error code 10003. A
+// static constant the page sends on every API request (FeedScope
+// 2026-11); when zhihu bumps it, this is the one line to change.
+const XZse93 = "101_3_3.0"
+
+// Hosts bundles zhihu's three API roots: the app-domain twin of the
+// hot list, the daily digest service, and the www gateway everything
+// else rides on. READSCOPE_ZHIHU_BASE overrides all three in the cmd
+// wiring (tests point them at one httptest server; debugging a proxy
+// can too).
+type Hosts struct {
+	API   string // https://api.zhihu.com
+	Daily string // https://news-at.zhihu.com
+	Web   string // https://www.zhihu.com
+}
+
+// ProdHosts are the real-world roots.
+var ProdHosts = Hosts{
+	API:   "https://api.zhihu.com",
+	Daily: "https://news-at.zhihu.com",
+	Web:   "https://www.zhihu.com",
+}

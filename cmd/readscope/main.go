@@ -31,6 +31,7 @@ Usage:
   readscope rss import F  Merge OPML subscriptions into sources.toml
   readscope rss export F  Write subscriptions as OPML for other readers
   readscope render     Render a local HTML file or URL to terminal text
+  readscope zhihu probe  Probe zhihu API endpoints and save raw samples (M4 tracer)
   readscope version    Print version
 
 Environment:
@@ -65,6 +66,8 @@ func main() {
 		os.Exit(runRender(args[1:]))
 	case "rss":
 		os.Exit(runRss(args[1:]))
+	case "zhihu":
+		os.Exit(runZhihu(args[1:]))
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:

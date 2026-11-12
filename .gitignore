@@ -21,3 +21,6 @@ go.work.sum
 .vscode/
 *.swp
 .DS_Store
+
+# M4 probe samples (raw zhihu responses; moments data is personal)
+/.scratch/m4-zhihu/samples/
