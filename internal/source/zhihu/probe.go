@@ -175,6 +175,12 @@ type momentsCard struct {
 	Target momentsTarget `json:"target"`
 }
 
+// momentsTarget is the card's payload half. Ids are json.Number —
+// question ids run past 2^53, and any float64 path (the default
+// unmarshal) mangles the low digits into an id that 404s on open;
+// the number's exact string is the only trustworthy spelling. The
+// dual clock (updated/created) is cardTime's input: the follow list
+// orders by the card's own clock, not the fetch's.
 type momentsTarget struct {
 	Type        string      `json:"type"`
 	ID          json.Number `json:"id"`

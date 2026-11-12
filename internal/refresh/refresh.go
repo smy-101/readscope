@@ -141,12 +141,15 @@ func bumpPagingFloor(ctx context.Context, st *store.Store, src source.Source, f 
 
 // refreshCursorFeed is the F5 path of a cursor-paged feed: the first
 // page in, and the walk re-anchored to it. The stored cursor becomes
-// the fresh first page's paging.next whenever the server serves one —
-// an opaque cursor cannot be reconciled with a stream that shifted
-// under it (unlike a page number), so after F5 the walk continues
-// right after what's on screen; a served next of "" (the stream's
-// end) keeps the old position, never regressing to "re-fetch page 1
-// forever".
+// the fresh first page's paging.next whenever the server serves one
+// — the walk continues right after the page on screen (freshness
+// first: deep-kept cursors would resume a stale window), and the
+// re-anchor self-heals a cursor the server expired under us. A served
+// next of "" (the stream's end) keeps the old position, never
+// regressing to "re-fetch page 1 forever". If 07's real-net smoke
+// shows cursors are long-lived and deep reading matters more than
+// freshness, flipping this write to a floor (only-if-empty) is the
+// one-line rollback.
 func refreshCursorFeed(ctx context.Context, st *store.Store, cps source.CursorPagedSource, f core.Feed) Result {
 	res := Result{Source: cps.ID(), Feed: f.Key, Label: f.Label}
 	items, next, err := cps.FetchCursorPage(ctx, f, "")

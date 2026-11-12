@@ -19,12 +19,27 @@
 - 存量:migration 008 给 `feed_fetch_state` 加 `cursor` 列(下一页的 paging.next,""=冷启动);`LoadCursor/SaveCursor` 与 validators/pages_fetched 同行三列互不干扰(TestCursorRoundtrip)。zhihu 不实现 PagedSource,关注 feed 的 pages_fetched 恒 0,游标即位置。
 - 刷新链:refreshOneFeed 对游标 feed 先叉到 `refreshCursorFeed`(F5 = 首页入库 + 游标重锚);`More` 叉到 `moreCursor`(Ctrl+N = 拉存储游标页)。UI 零改动——moreDoneMsg/refreshStatus/引导映射链全是既有管线。
 - **到底信号取服务端,不取条目数**(对票据"空页=到底"的细化):到底 = 响应不再带 `paging.next`(is_end)。被过滤空页(整页 pin/article)不算到底、游标照常前进——否则一次想法连载就永久卡死 Ctrl+N 在那页;该页报"没有新条目"(more_none)。到后续 Ctrl+N 重发同一游标、重报到底,不回卷到首页。
-- **F5 重锚游标**(与页深"F5 只保底不抬高"的有意差异,GLOSSARY 页深已记):不透明游标无法与位移后的流对齐,故每次 F5 把游标重写为首页 next(next 为空则保留旧位,避免"永远重拉首页"循环);顺带自愈过期游标。真网若证实游标会过期且需要保留深读位置,再翻回"只保底"即可,单点在 refreshCursorFeed。
+- **F5 重锚游标**(与页深"F5 只保底不抬高"的有意差异,GLOSSARY 页深已记):每次 F5 把游标重写为首页 next(next 为空则保留旧位,避免"永远重拉首页"循环)——重锚让 Ctrl+N 继续在屏幕所见之后(新鲜度优先,而非深位旧游标的陈旧窗口),顺带自愈过期游标。真网若证实游标长命且深读位置更重要,再翻回"只保底"即可,单点在 refreshCursorFeed。
 - 问题卡映射:answer 卡 → 所属问题(qid 取 `target.question.id`,json.Number 大整数精确;作者列=回答者),question 卡直入(作者列=提问者,无则空),其余卡型丢弃;同页同题首批保留。时间戳取 updated_time,缺则 created_time,再缺则 PublishedAt 置空——关注流按卡片自身时钟排序,否则深页(更晚拉取)会浮到浅页之上;真网字段名由 07 号票 smoke 复核。
 - 04 号票转交收口:TestFollowFeedF5WithoutCookieShowsLoginGuidance 用真 refresh.Feed 走 无 cookie → 状态栏引导 全链(假后端对任何拨号回 500,顺带钉住 preflight 零拨号)。
 - 集成测试 TestFollowFeedCursorWalk:四页游标走查(首页/重复行页/pin 空页/到底页)+ 到底重报 + F5 重锚,并以拨号序列断言"重启续翻不重拉已知页"(每次调用都重建 source,即重启语义)。
 - 边栏/标签/元信息:zhihu.follow 双语标签;列表元信息列关注行=作者名(热榜行仍为热度,无热度无作者则空,见 ui.zhihuMeta)。
 
-## Review
+## Review (2026-11-12)
 
-(pending — 两轴评审随收口提交)
+两轴评审(Standards/Spec)并行子代理,各读全量 diff(1399 行)+现树文件。均判 OK-with-notes,无阻断项。
+
+采纳(已修):
+- probe.go momentsTarget 补 WHY 注释(json.Number 大整数精度 + 双时钟字段的服务点)——Standards 轴唯一 touch-worthy 项。
+- followCardsJSON 补 ad 卡型(spec Testing Decisions 点名 answer/question/article/pin/ad 混排,fixture 原用 feed_group 替位)。
+- F5 重锚的理据措辞校准(Spec 轴 nit):原"不透明游标无法与位移后的流对齐"过断——after_id 型游标其实可靠去重对齐;真实理据是新鲜度对齐+自愈过期游标,已在 refreshCursorFeed/GLOSSARY/本票同步改写,并保留 07 号票真网复核后的翻回开关。
+
+记录(不修):
+- refreshCursorFeed/moreCursor 的 save-items→save-cursor 同形(Standards 轴 Duplicated Code 判断项):两处语义刻意分叉(F5 重锚 vs Ctrl+N 前进),各有 WHY 注释;第三个游标 feed 出现时再提共享 helper。
+- followSrcAt/zhihuSrcAt 测试 helper 近重:测试内规模,不动。
+
+澄谓(评审误读):
+- Spec 轴称 More 重排后 hn+未知 key 会报 ErrNotPaged:实测与 TestMoreUnknownFeedKeyIsError 钉住的事实是——非游标源才先判 ErrNotPaged,hn 未知 key 仍报 `no feed "best"`,与 05 之前行为一致;唯一变化是游标源的非游标 feed(热榜)从源级 probe 落到 ErrNotPaged,即预期行为(TestCtrlNOnZhihuHotBoardSaysNoMore)。
+
+转交:
+- 07 号票:真网 smoke 复核 moments 卡片时钟字段名(updated_time/created_time 是否存在、是否会长期为空),以及游标寿命(决定 F5 重锚 vs 只保底的最终取舍)。

@@ -37,7 +37,8 @@ const followCardsJSON = `{"data":[
  {"target":{"type":"article","id":200002,"title":"被丢弃的文章","author":{"name":"作者"}}},
  {"target":{"type":"pin","id":300003}},
  {"target":{"type":"zvideo","id":400004,"title":"被丢弃的视频"}},
- {"target":{"type":"feed_group","id":500005}}
+ {"target":{"type":"feed_group","id":500005}},
+ {"target":{"type":"ad","id":600006,"title":"被丢弃的广告卡"}}
 ],"paging":{"next":"https://www.zhihu.com/api/v3/moments?after_id=1912345678901234567","is_end":false}}`
 
 // followSrcAt lands a logged-in Source against the fake zhihu; the
