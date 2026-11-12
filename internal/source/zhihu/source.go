@@ -152,6 +152,11 @@ var wanHeatRE = regexp.MustCompile(`^([0-9]+)\s*万热度$`)
 // → 20450000. Anything else — a pinned card's empty column, a format
 // zhihu invents later — is nil: the row lists without a heat segment
 // rather than claiming a wrong number.
+//
+// The unfold (÷10000) lives in ui.zhihuMeta — the pair is the hn.pts
+// shape (folding is the source's semantics, formatting the UI's),
+// and each side is pinned against the literal "2045 万热度" ↔
+// 20450000 by its own test, so a drifted constant fails one of them.
 func heatPoints(detailText string) *int {
 	m := wanHeatRE.FindStringSubmatch(strings.TrimSpace(detailText))
 	if m == nil {

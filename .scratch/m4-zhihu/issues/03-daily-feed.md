@@ -12,3 +12,6 @@
 - [ ] 元信息列 = hint;缺 hint/图片的条目不崩
 - [ ] httptest 假日报端点(列表 + story fixture)集成测试,离线可跑
 - [ ] 清洗 golden 样例过 M1 管线快照测试(日报 HTML 子集)
+
+## Comments
+- 02 评审转交:rowMeta 的 per-source if 级联到第二臂(hn/zhihu);日报 hint 元信息是首例源内按 feed 分流 —— 落地时考虑表驱动/per-feed 格式化,别加第三臂 if。

@@ -19,4 +19,9 @@
 - 2026-11-12 实现完成。真网 smoke(生产路径 refresh.Feed→Fetch→入库):30 行入缓存,qid/热度折算全对;一次性 smoke 测试已删,CI 恒离线。
 - 热度折算:detail_text `^([0-9]+)\s?万热度$` → 万数×10000 存 points;渲染 points/10000 还原("zhihu.heat" 键)。非整万/非热度文案 → nil(行照列,元信息段缺省),无假 0。
 - 行 URL 存规范页 `https://www.zhihu.com/question/<qid>`(Ctrl+O/Y 目标),不用 target.url 的 api 内部拼写。
-- 热榜 feed 声明 ListSortPoints:榜返回序即热度序,UI 按快照重排,nil 热度沉底。
+- 热榜 feed 声明 ListSortPoints:榜返回序即热度序,UI 按快照重排,nil 热度沉底。(评审注:spec 只写了元信息列,未写重排;但入库兜底序是 fetched_at+id,不重排会打乱榜序 —— ListSortPoints 是呈现正确的必要件,hn 先例同形。)
+- en 语言包 heat 键保留 "%d万 heat":万是知乎自星的星示单位,换算成 "20.45M" 反而与用户在站点看到的数字不一致;zh 键与 spec 原文 "2045 万热度" 逐字一致。
+
+## Review (2026-11-12)
+
+两轴评审(Standards/Spec)均无硬违规、无阻断项。采纳:补 F4/Ctrl+A 在知乎行上的验收演示测试;折算/还原两端加交叉引用注释(绊线)。转交:04 号票收编 source.go/probe.go 公共头块合并;03 号票收编 rowMeta 第三臂的表驱动考量(日报 hint 是源内按 feed 分流的首例)。

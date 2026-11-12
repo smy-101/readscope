@@ -117,3 +117,33 @@ func TestCtrlRWorksOnZhihuRows(t *testing.T) {
 		t.Fatalf("after Ctrl+R: unread dots = %d, want 1 (zhihu rows ride the same read state)", n)
 	}
 }
+
+// F4 (unread-only) and Ctrl+A (mark all read) are the same generic
+// machinery as rss/hn — pinned once on zhihu rows so the acceptance
+// row (● / Ctrl+R / F4 / Ctrl+A 行为一致) is demonstrated, not just
+// inferred from the shared code path.
+func TestF4AndCtrlAWorkOnZhihuRows(t *testing.T) {
+	m := zhihuModel(t, []core.Item{
+		zhihuHeatItem("100001", "热榜问题一", 0, ip(20450000)),
+		zhihuHeatItem("100002", "热榜问题二", 0, nil),
+	})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR}) // 第一行已读
+
+	// F4: the read row drops out of the unread-only view.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyF4})
+	view := m.View()
+	if !strings.Contains(view, "热榜问题二") || strings.Contains(view, "热榜问题一") {
+		t.Fatalf("F4 unread-only should hide the read zhihu row:\n%s", view)
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyF4}) // 回到全部
+
+	// Ctrl+A: modal confirm, Enter commits, every zhihu row read.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlA})
+	if !m.confirming {
+		t.Fatal("Ctrl+A should ask for confirmation first")
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if view = m.View(); strings.Contains(view, "●") {
+		t.Fatalf("Ctrl+A should mark every zhihu row read:\n%s", view)
+	}
+}

@@ -7,7 +7,7 @@
 **Status:** ready-for-agent
 
 - [ ] `readscope zhihu login`:粘贴→校验含 z_c0→0600 落盘;Ctrl+U 同款 dialog,保存即用
-- [ ] 共享 transport:公共头 + 按端点的 Referer/x-zse-93 矩阵单点维护(01 号票头矩阵结论固化;含 01 评审转交:x-zse-93 **错版本**腿入测试——01 实测门禁已放宽,错版本行为未知,02–06 的失效语义测试补上)
+- [ ] 共享 transport:公共头 + 按端点的 Referer/x-zse-93 矩阵单点维护(01 号票头矩阵结论固化;含 01 评审转交:x-zse-93 **错版本**腿入测试——01 实测门禁已放宽,错版本行为未知,02–06 的失效语义测试补上;含 02 评审转交:把 source.go 的 get 与 probe.go 的 get 两个公共头块合并进共享 transport,别留第三份)
 - [ ] v4 详情 401/403 → 登录引导提示(不清 cookie);v3 403 → 原样报错;两分支 httptest 各有 fixture
 - [ ] cookie 文件缺失时:关注 feed 边栏/列表显示登录引导(状态栏),热榜/日报正常
 - [ ] doctor:cookie 文件存在/权限/z_c0 有无,输出到自检报告

@@ -194,8 +194,9 @@ func (m Model) rowMeta(row store.ItemRow) string {
 }
 
 // zhihuMeta renders the hot board's heat reading "N 万热度" from the
-// folded heat snapshot ("2045 万热度" stored as 20450000). The fold
-// only ever stores whole 万, so the division restores the exact
+// folded heat snapshot ("2045 万热度" stored as 20450000 — the fold
+// lives in zhihu.heatPoints, each side pinned by its own test). The
+// fold only ever stores whole 万, so the division restores the exact
 // number; a row without a snapshot (a pinned card) keeps the meta
 // blank like the date-less rows always have.
 func (m Model) zhihuMeta(it core.Item) string {
