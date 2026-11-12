@@ -34,7 +34,8 @@ import (
 type aPlane struct {
 	mu     chan struct{}
 	hits   int
-	status int // ≠0: both article doors answer this (404/403 fixtures)
+	status int           // ≠0: both article doors answer this (404/403 fixtures)
+	hold   chan struct{} // ≠nil: the body door blocks until released (load-window fixtures)
 }
 
 func (p *aPlane) count() int {
@@ -56,7 +57,14 @@ func (p *aPlane) hit() {
 // 702; then 末根 on the composite cursor page).
 func articlePlane(t *testing.T) (*httptest.Server, *aPlane) {
 	t.Helper()
-	p := &aPlane{mu: make(chan struct{}, 1)}
+	return articlePlaneWithHold(t, nil)
+}
+
+// articlePlaneWithHold is articlePlane with the body door optionally
+// blocked on a channel — the Enter-during-load fixture: the open's
+// fetch stays in flight until the test releases it.
+func articlePlaneWithHold(t *testing.T, hold chan struct{}) (*httptest.Server, *aPlane) {
+	p := &aPlane{mu: make(chan struct{}, 1), hold: hold}
 	p.mu <- struct{}{}
 	gate := func(w http.ResponseWriter, r *http.Request) bool {
 		if r.Header.Get("Cookie") == "" {
@@ -68,6 +76,9 @@ func articlePlane(t *testing.T) (*httptest.Server, *aPlane) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/articles/2001", func(w http.ResponseWriter, r *http.Request) {
+		if p.hold != nil {
+			<-p.hold // the load-window fixture: block the body fetch
+		}
 		p.hit()
 		if !gate(w, r) || p.status != 0 {
 			if p.status != 0 {
@@ -337,6 +348,68 @@ func TestZhihuArticleReopenRendersCacheOffline(t *testing.T) {
 	m = pump(t, m, cmd)
 	if m.reader.layer != layerReplies || !strings.Contains(m.View(), "文根一内容") {
 		t.Fatalf("comments should replay offline:\n%s", m.View())
+	}
+}
+
+// The load-window P1 (review finding): Enter pressed while the
+// body still loads lands the comment layer on the pending screen
+// with nothing to fetch YET — when the open's tree then lands, the
+// layer must kick its own comment walk (a commented article must
+// not dead-end on a「no comments」screen with zero requests).
+func TestZhihuArticleEnterDuringLoadKicksComments(t *testing.T) {
+	hold := make(chan struct{})
+	srv, _ := articlePlaneWithHold(t, hold)
+
+	// openArticle's preamble, but the open's command chain is HELD —
+	// the body fetch blocks inside the fake's door.
+	m := seededModel(t, nil, nil)
+	if err := os.WriteFile(filepath.Join(os.Getenv("READSCOPE_CONFIG"), "zhihu.cookies"),
+		[]byte("z_c0=live; d_c0=dev"), 0o600); err != nil {
+		t.Fatalf("write cookie: %v", err)
+	}
+	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
+	if _, _, err := m.st.SaveFeedItems(context.Background(), "zhihu", "recommend", []core.Item{{
+		ID: "zh:article/2001", Source: "zhihu", Feed: "recommend",
+		Title: "专栏文章", URL: "https://zhuanlan.zhihu.com/p/2001", Author: "作者甲",
+		FetchedAt: time.Now().UTC(),
+	}}); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+	m = size(m, 120, 40)
+	for range 3 { // books → rss → hn → zhihu
+		var cmd tea.Cmd
+		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+		m = pump(t, m, cmd)
+	}
+	var cmd tea.Cmd
+	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = pump(t, m, cmd)
+	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter}) // sidebar → list
+	m = pump(t, m, cmd)
+	m, openCmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter}) // open the article — do NOT pump
+	if m.reader == nil || !m.reader.loading {
+		t.Fatal("setup: the open must be in flight (reader open, loading)")
+	}
+
+	// Enter inside the load window: the comment layer's pending screen.
+	m2, pendingCmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+	_ = pendingCmd
+	if m2.reader.layer != layerReplies {
+		t.Fatalf("setup: Enter should land the comment layer's pending screen, got %v", m2.reader.layer)
+	}
+
+	close(hold)              // the body fetch completes
+	m = pump(t, m2, openCmd) // the open chain lands — the kick must follow
+
+	if m.reader == nil || m.reader.layer != layerReplies {
+		t.Fatalf("the comment layer must survive the landing, got %v", m.reader)
+	}
+	view := m.View()
+	if !strings.Contains(view, "文根一内容") {
+		t.Fatalf("the entered comment layer must kick its comment walk when the tree lands:\n%s", view)
+	}
+	if strings.Contains(view, "no comments") {
+		t.Errorf("a commented article must not read as comment-less:\n%s", view)
 	}
 }
 

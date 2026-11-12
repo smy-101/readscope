@@ -525,7 +525,10 @@ func (m *Model) commentsLanded(msg commentsMsg) tea.Cmd {
 			m.setFloors(msg.comments)
 			m.rebuildBodyDoc() // the question layer's meta line / floor list render from cache
 		}
-		return m.refreshCommentsCmd(d.item.Item) // background refresh either way
+		// An article's comment layer may sit pending on the cached tree
+		// (entered while the open was in flight) — its walk starts now,
+		// alongside the background refresh.
+		return tea.Batch(m.refreshCommentsCmd(d.item.Item), m.maybeKickArticleComments())
 	}
 	d.loading = false
 	if msg.question != nil {
@@ -548,7 +551,37 @@ func (m *Model) commentsLanded(msg commentsMsg) tea.Cmd {
 	d.feedsCursor = msg.next
 	m.setFloors(msg.comments)
 	m.rebuildBodyDoc()
-	return nil
+	return m.maybeKickArticleComments() // an article's pending comment layer starts its walk now
+}
+
+// maybeKickArticleComments starts the article's comment walk when its
+// comment layer sits pending on a freshly landed tree — the Enter
+// that arrived while the open was still in flight
+// (enterArticleComments' pending screen has nothing to fetch YET;
+// this is the "now" it was waiting for, mirroring the queued-entry
+// kick commentsPageLanded runs for answers). The guards mirror
+// enterReplies': replies already aboard (a cache replay), a walk
+// already run or running, or the server's own zero report all stand
+// down — the placeholder is truthful in each.
+func (m *Model) maybeKickArticleComments() tea.Cmd {
+	d := m.reader
+	if !d.article || d.layer != layerReplies || !d.loaded || len(d.floors) == 0 {
+		return nil
+	}
+	f := &d.floors[0]
+	if len(f.replies) > 0 {
+		return nil
+	}
+	if _, queued := d.commentsNext[f.cm.ID]; queued {
+		return nil
+	}
+	if f.cm.NumChildren != nil && *f.cm.NumChildren == 0 {
+		return nil // the server reported zero: the placeholder is truthful
+	}
+	if d.commentsBusy {
+		return nil
+	}
+	return m.commentsPageCmd("")
 }
 
 // detailErrStatus maps one detail-fetch failure to its status line:
@@ -1084,18 +1117,17 @@ func (m *Model) enterReplies() (bool, tea.Cmd) {
 
 // enterArticleComments is the article's body-layer Enter (ticket
 // 09): straight into the comment layer on the article's own pseudo
-// floor — there is no floors layer in the two-layer detail. A
-// still-loading open enters on the pending screen (commentsLanded
-// re-lays the layer when the tree lands); every loaded path mirrors
-// the answer walk's exactly — cached tree replays, unknown-count
-// fetches, a walk that already ended or a server-reported zero
-// refuses (and the caller says why).
+// floor — there is no floors layer in the two-layer detail, so the
+// entry pins floor 0 and reuses the answer walk's entry wholesale
+// (cached replay, unknown-count fetch, the already-walked and
+// server-zero refusals — the same rules, the same code). Only the
+// still-loading open differs: there is no loaded floor to guard on
+// yet, so the entry lands on the pending screen instead of
+// refusing; replyFloor pins floor 0 so the landed tree re-lays THIS
+// layer in place.
 func (m *Model) enterArticleComments() (bool, tea.Cmd) {
 	d := m.reader
 	if !d.loaded || len(d.floors) == 0 {
-		// First open still in flight (or failed with nothing cached):
-		// enter on the state line; replyFloor pins floor 0 so the
-		// landed tree re-lays THIS layer in place.
 		d.replyTop = 0
 		d.replyFloor = 0
 		d.replies, d.replyStarts = nil, nil
@@ -1103,29 +1135,8 @@ func (m *Model) enterArticleComments() (bool, tea.Cmd) {
 		d.layer = layerReplies
 		return true, nil
 	}
-	f := &d.floors[0]
-	if len(f.replies) > 0 {
-		if d.replyFloor != 0 || d.replyLines == nil {
-			d.replyTop = 0
-			m.layoutReplies()
-		}
-		d.layer = layerReplies
-		return true, nil
-	}
-	if _, loaded := d.commentsNext[f.cm.ID]; loaded {
-		return false, nil // fetched already: the article genuinely has none
-	}
-	if f.cm.NumChildren != nil && *f.cm.NumChildren == 0 {
-		return false, nil // the server itself reported zero
-	}
-	var cmd tea.Cmd
-	if !d.commentsBusy {
-		cmd = m.commentsPageCmd("")
-	}
-	d.replyTop = 0
-	m.layoutReplies() // the pending screen (loading or none)
-	d.layer = layerReplies
-	return true, cmd
+	d.floorIdx = 0 // the pseudo floor is floor 0 and the only floor
+	return m.enterReplies()
 }
 
 // --- the paging detail's loads (zhihu, ticket 06) ------------------------

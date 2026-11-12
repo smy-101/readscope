@@ -130,9 +130,8 @@ type fakeZhihu struct {
 	extraPages           map[string]string // "path?query" (exact) or path → body, for cursor-addressed pages (paging.next targets)
 
 	// ticket 09 fixtures: the article family's overrides.
-	articleMetaOverride  string // serve this body for /api/v4/articles/*
-	articleRootOverride  string // serve this body for comment_v5/articles/*/root_comment
-	blockArticleComments bool   // serve 403 on the article comments door (stale-session fixture)
+	articleMetaOverride string // serve this body for /api/v4/articles/*
+	articleRootOverride string // serve this body for comment_v5/articles/*/root_comment
 }
 
 // offsetParamRe picks the offset parameter's value out of a raw
@@ -281,10 +280,6 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// its own override/stale arms live here, before the answer
 			// door's defaults.
 			if strings.Contains(req.path, "/comment_v5/articles/") {
-				if f.blockArticleComments {
-					write(403, v4ErrJSON) // stale z_c0 on the v4 family
-					return
-				}
 				if f.articleRootOverride != "" {
 					write(200, f.articleRootOverride)
 					return
