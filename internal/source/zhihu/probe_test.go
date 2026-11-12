@@ -84,8 +84,9 @@ type fakeZhihu struct {
 	t            *testing.T
 	mu           sync.Mutex
 	hits         []request
-	blockMoments bool // simulate risk control (403 even with cookie)
-	emptyHot     bool // serve {"data":[]} — redesign tripwire fixture
+	blockMoments bool   // simulate risk control (403 even with cookie)
+	emptyHot     bool   // serve {"data":[]} — redesign tripwire fixture
+	hotOverride  string // serve this body for /topstory/hot-list (source-test fixtures)
 }
 
 func (f *fakeZhihu) record(r *http.Request) request {
@@ -113,6 +114,10 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case req.path == "/topstory/hot-list":
+		if f.hotOverride != "" {
+			write(200, f.hotOverride)
+			return
+		}
 		if f.emptyHot {
 			write(200, `{"data":[]}`)
 			return

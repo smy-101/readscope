@@ -96,9 +96,9 @@ func TestFeedLabelResolvesLabelKeyOverRawLabel(t *testing.T) {
 
 func TestTabToUnimplementedSourceHintsLater(t *testing.T) {
 	m := size(newTestModel(t), 100, 30)
-	// books → rss → hn → books: landing back on the unimplemented
-	// source, the status bar explains itself.
-	for i := 0; i < 3; i++ {
+	// books → rss → hn → zhihu → books: landing back on the
+	// unimplemented source, the status bar explains itself.
+	for i := 0; i < 4; i++ {
 		var cmd tea.Cmd
 		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
 		m = pump(t, m, cmd)

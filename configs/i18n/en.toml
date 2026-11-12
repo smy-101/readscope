@@ -17,6 +17,7 @@ none = "none"
 books = "Bookshelf"
 rss = "RSS"
 hn = "Hacker News"
+zhihu = "Zhihu"
 
 [hn]
 front = "Front"
@@ -25,6 +26,10 @@ ask = "Ask HN"
 show = "Show HN"
 pts = "%d pts"
 comments = "%d comments"
+
+[zhihu]
+hot = "Hot List"
+heat = "%d万 heat"
 
 [sidebar]
 no_feeds = "no feeds yet"

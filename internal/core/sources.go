@@ -40,12 +40,14 @@ func SourcesPath() (string, error) {
 }
 
 // DefaultSources is the subscription state when no file exists yet:
-// both feeds sources enabled, in rail order — rss starts with no
-// feeds (add some), hn needs none (its four feeds are fixed). A fresh
-// install therefore renders the TUI happily, reads HN after one F5,
-// and `rss refresh` says "no feeds" instead of erroring.
+// every list source enabled, in rail order — rss starts with no
+// feeds (add some), hn and zhihu need none (their feeds are fixed;
+// zhihu's hot board and digest are anonymous). A fresh install
+// therefore renders the TUI happily, reads HN and the zhihu hot
+// board after one F5, and `rss refresh` says "no feeds" instead of
+// erroring.
 func DefaultSources() *Sources {
-	return &Sources{Enabled: []string{"rss", "hn"}}
+	return &Sources{Enabled: []string{"rss", "hn", "zhihu"}}
 }
 
 // LoadSources reads sources.toml; a missing file yields the default.

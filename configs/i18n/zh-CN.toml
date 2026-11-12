@@ -17,6 +17,7 @@ none = "无"
 books = "书架"
 rss = "RSS"
 hn = "Hacker News"
+zhihu = "知乎"
 
 [hn]
 front = "热门"
@@ -25,6 +26,10 @@ ask = "Ask HN"
 show = "Show HN"
 pts = "%d 分"
 comments = "%d 条评论"
+
+[zhihu]
+hot = "热榜"
+heat = "%d 万热度"
 
 [sidebar]
 no_feeds = "暂无订阅"

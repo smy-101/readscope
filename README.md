@@ -48,7 +48,7 @@ readscope version         # print version
 Subscriptions live in `sources.toml`, next to `config.toml` (`readscope doctor` prints both paths):
 
 ```toml
-enabled = ["rss", "hn"]
+enabled = ["rss", "hn", "zhihu"]
 
 [rss.feeds]
 ruanyifeng = { label = "阮一峰周刊", url = "https://www.ruanyifeng.com/blog/atom.xml" }
@@ -62,7 +62,7 @@ paint from cache and full text stays readable offline. In the TUI, `F5` refreshe
 background.
 
 > Upgrading from an older install? `sources.toml` is never rewritten automatically —
-> add `"hn"` to your `enabled` list by hand to turn on the Hacker News source below.
+> add `"hn"` and `"zhihu"` to your `enabled` list by hand to turn on the sources below.
 
 ### Hacker News
 
@@ -80,6 +80,17 @@ article link as their body (open it with `Ctrl+O`); text posts (Ask/Show) carry 
 HTML through the same render pipeline as RSS bodies. Note the Algolia index lags the site by a few minutes and ranks
 by points/date, not by HN's official ordering — readscope does not promise official
 ranking.
+
+### Zhihu
+
+Tab over to Zhihu for the hot board — 热榜 — the whole-site trending list,
+served anonymously by `api.zhihu.com` (no account, no cookie). `F5` snapshots the
+board into the same offline cache as RSS and HN: question cards list with their
+heat reading ("2045 万热度") in the meta column, ranked by that heat, and the
+unread dot / read / star mechanics work identically. The board is a fixed ~30
+rows with no pages behind it — `Ctrl+N` reports the end. Question details
+(three layers: question / answer / comments), the follow feed (needs a pasted
+browser cookie) and the daily digest land with the rest of M4.
 
 Moving in or out of another reader is OPML all the way: `readscope rss import subs.opml`
 merges (existing subscriptions untouched), `readscope rss export subs.opml` writes a

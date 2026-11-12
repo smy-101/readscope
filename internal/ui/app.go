@@ -27,7 +27,7 @@ import (
 )
 
 // sourceIDs doubles as the source bar order (plan decision #11).
-var sourceIDs = []string{"books", "rss", "hn"}
+var sourceIDs = []string{"books", "rss", "hn", "zhihu"}
 
 type region int
 

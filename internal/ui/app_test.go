@@ -40,8 +40,12 @@ func TestTabRotatesSources(t *testing.T) {
 	if m.active != 1 || m.focus != regionSidebar {
 		t.Fatalf("after Tab: active=%d focus=%v", m.active, m.focus)
 	}
-	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab})
-	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab})
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // rss → hn
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // hn → zhihu
+	if m.active != len(sourceIDs)-1 {
+		t.Fatalf("Tab should reach the last source, active=%d", m.active)
+	}
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // zhihu → books wraps
 	if m.active != 0 {
 		t.Fatalf("Tab should wrap to first source, active=%d", m.active)
 	}

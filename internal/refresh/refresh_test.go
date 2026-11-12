@@ -15,8 +15,9 @@ import (
 	"github.com/smy-101/readscope/internal/i18n"
 	"github.com/smy-101/readscope/internal/store"
 
-	_ "github.com/smy-101/readscope/internal/source/hn"  // registry: hn
-	_ "github.com/smy-101/readscope/internal/source/rss" // registry: rss
+	_ "github.com/smy-101/readscope/internal/source/hn"    // registry: hn
+	_ "github.com/smy-101/readscope/internal/source/rss"   // registry: rss
+	_ "github.com/smy-101/readscope/internal/source/zhihu" // registry: zhihu
 )
 
 // The M2 tracer bullet, end to end against httptest servers on
@@ -693,5 +694,84 @@ func TestRefreshHNTracerBullet(t *testing.T) {
 	if rows[0].Item.Points == nil || *rows[0].Item.Points != 25 ||
 		rows[0].Item.NumComments == nil || *rows[0].Item.NumComments != 3 {
 		t.Fatalf("heat snapshot not refreshed: %+v", rows[0].Item)
+	}
+}
+
+// The M4 ticket-02 tracer bullet: zhihu registration → anonymous hot
+// fetch → snapshot upsert → cached list, against one fake zhihu on
+// loopback. A second refresh with the heat having moved: no new rows,
+// read state untouched, the heat snapshot refreshed in place.
+func TestRefreshZhihuTracerBullet(t *testing.T) {
+	heat := 2045 // 万, mutated between cycles
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/topstory/hot-list" {
+			http.Error(w, "no fixture", http.StatusNotFound)
+			return
+		}
+		fmt.Fprintf(w, `{"data":[
+		 {"detail_text":"%d 万热度","target":{"id":18984420158198241699,"type":"question",
+		  "title":"为什么终端阅读器又火了？","url":"https://api.zhihu.com/questions/18984420158198241699"}},
+		 {"detail_text":"","target":{"id":100001,"type":"question","title":"置顶卡没有热度列",
+		  "url":"https://api.zhihu.com/questions/100001"}}]}`, heat)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "zhihu.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	srcs := core.DefaultSources()
+	results, err := Source(context.Background(), st, srcs, "zhihu")
+	if err != nil {
+		t.Fatalf("Source: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1 (the hot feed)", len(results))
+	}
+	r := results[0]
+	if r.Err != nil || r.New != 2 || r.Total != 2 || r.Feed != "hot" {
+		t.Fatalf("hot result = %+v", r)
+	}
+
+	// Reading the top question, then refreshing with its heat moved:
+	// same ids → no new rows, the read dot survives, the heat snapshot
+	// picks up the new value.
+	if err := st.SetRead(context.Background(), "zh:question/18984420158198241699", true); err != nil {
+		t.Fatalf("SetRead: %v", err)
+	}
+	heat = 3000
+	results2, err := Source(context.Background(), st, srcs, "zhihu")
+	if err != nil {
+		t.Fatalf("second Source: %v", err)
+	}
+	if r := results2[0]; r.Err != nil || r.New != 0 || r.Total != 2 {
+		t.Fatalf("second refresh should add nothing: %+v", r)
+	}
+	rows, err := st.FeedItems(context.Background(), "zhihu", "hot", false)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("FeedItems(hot) = %d rows, %v", len(rows), err)
+	}
+	// The store's fallback order is fetch-time then id — the UI re-ranks
+	// by the points snapshot (ListSortPoints), so find the row by id.
+	var top store.ItemRow
+	for _, row := range rows {
+		if row.Item.ID == "zh:question/18984420158198241699" {
+			top = row
+		}
+	}
+	if top.Item.ID == "" {
+		t.Fatalf("top question missing from cache: %+v", rows)
+	}
+	if !top.Read {
+		t.Fatal("read state must survive a refresh")
+	}
+	if top.Item.Points == nil || *top.Item.Points != 30000000 {
+		t.Fatalf("heat snapshot not refreshed: %+v", top.Item)
 	}
 }

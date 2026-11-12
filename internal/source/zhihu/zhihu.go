@@ -2,9 +2,10 @@
 // APIs (M4): the hot list and the daily digest anonymously, the
 // follow feed and question details behind a pasted browser cookie —
 // 免签 (GLOSSARY: 免签) direct requests, no resident browser (ADR
-// #14). Ticket 01 lands the data-plane tracer (`readscope zhihu
-// probe`) and the shared primitives; the Source registration and
-// feeds follow in ticket 02.
+// #14). Ticket 01 landed the data-plane tracer (`readscope zhihu
+// probe`) and the shared primitives; ticket 02 the Source
+// registration and the hot feed. The daily feed, cookie login,
+// follow feed and question details follow in tickets 03–06.
 //
 // The request shape mirrors FeedScope's 2026-11 measured matrix: a
 // desktop Chrome UA on every call, x-requested-with: fetch, a

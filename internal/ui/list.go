@@ -180,13 +180,29 @@ const (
 )
 
 // rowMeta formats the meta column by source: hn rows carry the heat
-// radar, every other source keeps the relative age. The favorites list
-// mixes sources row by row, so the choice is per row, not per feed.
+// radar, zhihu rows the hot board's heat reading, every other source
+// keeps the relative age. The favorites list mixes sources row by
+// row, so the choice is per row, not per feed.
 func (m Model) rowMeta(row store.ItemRow) string {
 	if row.Item.Source == "hn" {
 		return m.hnMeta(row.Item)
 	}
+	if row.Item.Source == "zhihu" {
+		return m.zhihuMeta(row.Item)
+	}
 	return m.relTime(row.Item.PublishedAt)
+}
+
+// zhihuMeta renders the hot board's heat reading "N 万热度" from the
+// folded heat snapshot ("2045 万热度" stored as 20450000). The fold
+// only ever stores whole 万, so the division restores the exact
+// number; a row without a snapshot (a pinned card) keeps the meta
+// blank like the date-less rows always have.
+func (m Model) zhihuMeta(it core.Item) string {
+	if it.Points == nil {
+		return ""
+	}
+	return m.cat.Get("zhihu.heat", *it.Points/10000)
 }
 
 // hnMeta renders the heat radar "N pts · N comments · author" from the
