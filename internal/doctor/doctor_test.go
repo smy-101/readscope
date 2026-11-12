@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/smy-101/readscope/internal/core"
+	"github.com/smy-101/readscope/internal/source/zhihu"
 )
 
 func runDoctor(t *testing.T) (string, bool) {
@@ -26,6 +27,66 @@ func runDoctor(t *testing.T) (string, bool) {
 	return buf.String(), ok
 }
 
+// TestZhihuCookieStates pins the doctor's cookie reporting: loaded
+// session → census note; existing-but-broken (loose perms, no z_c0)
+// → failure naming the fix. The missing-file pass lives in
+// TestRunAllPass.
+func TestZhihuCookieStates(t *testing.T) {
+	cookieDir := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		t.Setenv("READSCOPE_CONFIG", dir)
+		t.Setenv("READSCOPE_STATE", filepath.Join(t.TempDir(), "state"))
+		return dir
+	}
+	newOut := func(t *testing.T) (string, bool) {
+		t.Helper()
+		cfg := core.Defaults()
+		var buf bytes.Buffer
+		ok := Run(&buf, cfg, "test")
+		return buf.String(), ok
+	}
+
+	t.Run("loaded session reports census", func(t *testing.T) {
+		dir := cookieDir(t)
+		if _, err := zhihu.SaveCookie(filepath.Join(dir, "zhihu.cookies"),
+			"z_c0=2+1.0x/secret; d_c0=2+1.0x/dev"); err != nil {
+			t.Fatalf("SaveCookie: %v", err)
+		}
+		out, ok := newOut(t)
+		if !ok {
+			t.Fatalf("a healthy cookie must not fail doctor:\n%s", out)
+		}
+		if !strings.Contains(out, "2 keys · z_c0 ✓") {
+			t.Errorf("census note missing:\n%s", out)
+		}
+	})
+
+	t.Run("loose perms fail", func(t *testing.T) {
+		dir := cookieDir(t)
+		os.WriteFile(filepath.Join(dir, "zhihu.cookies"), []byte("z_c0=abc"), 0o644)
+		out, ok := newOut(t)
+		if ok {
+			t.Fatalf("a 0644 cookie file must fail doctor:\n%s", out)
+		}
+		if !strings.Contains(out, "0600") {
+			t.Errorf("perm failure should name the wanted mode:\n%s", out)
+		}
+	})
+
+	t.Run("missing z_c0 fails", func(t *testing.T) {
+		dir := cookieDir(t)
+		os.WriteFile(filepath.Join(dir, "zhihu.cookies"), []byte("d_c0=only"), 0o600)
+		out, ok := newOut(t)
+		if ok {
+			t.Fatalf("a z_c0-less cookie must fail doctor:\n%s", out)
+		}
+		if !strings.Contains(out, "z_c0 missing") {
+			t.Errorf("failure should name z_c0:\n%s", out)
+		}
+	})
+}
+
 func TestRunAllPass(t *testing.T) {
 	out, ok := runDoctor(t)
 	if !ok {
@@ -33,14 +94,19 @@ func TestRunAllPass(t *testing.T) {
 	}
 	for _, label := range []string{
 		"config directory", "state directory", "open database",
-		"database schema", "language packs", "themes",
+		"database schema", "language packs", "themes", "zhihu cookie",
 	} {
 		if !strings.Contains(out, label) {
 			t.Errorf("report missing check %q:\n%s", label, out)
 		}
 	}
-	if !strings.Contains(out, "6 checks: 6 ok, 0 failed") {
+	if !strings.Contains(out, "7 checks: 7 ok, 0 failed") {
 		t.Errorf("summary line wrong:\n%s", out)
+	}
+	// No cookie file is the anonymous mode: a pass with a note, not a
+	// failure — hot/daily work without a session.
+	if !strings.Contains(out, "not configured") {
+		t.Errorf("anonymous cookie state should carry its note:\n%s", out)
 	}
 }
 

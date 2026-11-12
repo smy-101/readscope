@@ -3,15 +3,16 @@ package zhihu
 // source.go — the Source registration and the hot feed (ticket 02):
 // one anonymous GET, rows mapped to question-card snapshots with
 // url-extracted ids (GLOSSARY: 问题卡) and the folded heat snapshot
-// (GLOSSARY: 热度快照). The cookie-gated feeds and the detail layers
-// arrive with their tickets; until then zhihu is list-only.
+// (GLOSSARY: 热度快照). Since ticket 04 every fetch rides the shared
+// transport (transport.go) — the request matrix and the session-loss
+// semantics live there, single-point. The cookie-gated feeds and the
+// detail layers arrive with their tickets; until then zhihu is
+// list-only.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -32,9 +33,6 @@ const HotFeedKey = "hot"
 // hotLabelKey is the hot feed's i18n key; the UI resolves the label.
 const hotLabelKey = "zhihu.hot"
 
-// fetchTimeout bounds one feed's HTTP round trip; parsing is local.
-const fetchTimeout = 30 * time.Second
-
 func init() { source.Register(ID, New) }
 
 // Source is the zhihu implementation of source.Source: the anonymous
@@ -44,8 +42,8 @@ func init() { source.Register(ID, New) }
 // with type assertions, so their absence is a non-feature, not an
 // error (Ctrl+N says "no more items", Enter reads the empty body).
 type Source struct {
-	hosts  Hosts // the three API roots; ProdHosts in production
-	client *http.Client
+	hosts Hosts      // the three API roots; ProdHosts in production
+	tr    *Transport // every request rides the shared matrix (transport.go)
 }
 
 // New builds the zhihu source. The subscription config goes unused
@@ -53,16 +51,30 @@ type Source struct {
 // host root with one base — the same override `zhihu probe` honors,
 // so tests point one fake server at all three doors and a proxy debug
 // run can too.
+//
+// 保存即用 (the Ctrl+U contract): the cookie loads per construction —
+// every refresh builds a fresh source (refresh → source.New), so a
+// re-login takes effect on the next F5 without a restart. A missing
+// file is the anonymous mode, not an error; a broken or z_c0-less
+// file degrades to anonymous too, so gated calls answer
+// ErrLoginRequired (pointing at Ctrl+U) instead of a confusing 403 —
+// doctor names the file's real state.
 func New(*core.Sources) (source.Source, error) {
 	hosts := ProdHosts
 	if v := os.Getenv("READSCOPE_ZHIHU_BASE"); v != "" {
 		hosts = Hosts{API: v, Daily: v, Web: v}
 	}
-	return newSource(hosts), nil
+	cookie := ""
+	if path, err := CookiePath(); err == nil {
+		if header, info, err := LoadCookie(path); err == nil && info.HasZC0 {
+			cookie = header
+		}
+	}
+	return newSource(hosts, cookie), nil
 }
 
-func newSource(hosts Hosts) *Source {
-	return &Source{hosts: hosts, client: &http.Client{Timeout: fetchTimeout}}
+func newSource(hosts Hosts, cookie string) *Source {
+	return &Source{hosts: hosts, tr: NewTransport(hosts, cookie, nil)}
 }
 
 // ID implements source.Source.
@@ -110,17 +122,17 @@ func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 	if f.Key != HotFeedKey {
 		return nil, fmt.Errorf("fetch %s: unknown zhihu feed", f.Key)
 	}
-	raw, err := s.get(ctx, s.hotURL(), hotReferer, "fetch "+f.Key)
-	if err != nil {
-		return nil, err
+	res := s.tr.Get(ctx, epHotList, s.hotURL())
+	if res.Err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", f.Key, res.Err)
 	}
-	var res hotList // the shape both hot doors serve (probe.go)
-	if err := json.Unmarshal(raw, &res); err != nil {
+	var list hotList // the shape both hot doors serve (probe.go)
+	if err := json.Unmarshal(res.Body, &list); err != nil {
 		return nil, fmt.Errorf("parse %s: not zhihu JSON: %w", f.Key, err)
 	}
 	now := time.Now().UTC()
-	items := make([]core.Item, 0, len(res.Data))
-	for _, row := range res.Data {
+	items := make([]core.Item, 0, len(list.Data))
+	for _, row := range list.Data {
 		if row.Target.Type != "question" {
 			continue // not a question card: not a row, not an error
 		}
@@ -168,39 +180,4 @@ func heatPoints(detailText string) *int {
 	}
 	n := wan * 10000
 	return &n
-}
-
-// hotReferer is the hot door's Referer, matching the measured request
-// shape (the probe sends the same).
-const hotReferer = "https://www.zhihu.com/hot"
-
-// get performs the shared HTTP skeleton of the source's fetches — the
-// measured fingerprint (desktop UA, x-requested-with, a real fetch's
-// Accept headers, the per-endpoint Referer) on one GET with a hard
-// body cap, errors naming the operation (op, e.g. "fetch hot"). The
-// hot door needs neither cookie nor x-zse-93; ticket 04 grows this
-// into the shared transport the cookie-gated endpoints ride.
-func (s *Source) get(ctx context.Context, url, referer, op string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
-	}
-	req.Header.Set("User-Agent", DesktopUA)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("x-requested-with", "fetch")
-	req.Header.Set("Referer", referer)
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: HTTP %s", op, resp.Status)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
-	}
-	return raw, nil
 }

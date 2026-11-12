@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,6 +23,7 @@ import (
 	"github.com/smy-101/readscope/internal/i18n"
 	"github.com/smy-101/readscope/internal/refresh"
 	"github.com/smy-101/readscope/internal/source"
+	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 	"github.com/smy-101/readscope/internal/theme"
 )
@@ -69,6 +71,9 @@ type Model struct {
 	unreadOnly bool // F4 filter: list shows unread items only
 	favorites  bool // F3 mode: list shows starred items across feeds
 	confirming bool // Ctrl+A asked for confirmation (Enter yes / Esc no)
+
+	loginOpen bool   // Ctrl+U zhihu login dialog open (modal)
+	loginBuf  string // the pasted Cookie header; masked in the view, never echoed
 
 	reader *detail // open item's overlay reader; nil = list mode
 }
@@ -127,6 +132,14 @@ type moreDoneMsg struct {
 type stateSavedMsg struct {
 	status string // localized feedback; "" = silent
 	err    error
+}
+
+// loginSavedMsg lands when the Ctrl+U dialog's save finished: the
+// login ceremony's outcome — a ErrNoZC0 keeps the dialog open for a
+// re-paste, anything else closes it, success reports the census.
+type loginSavedMsg struct {
+	info zhihu.CookieInfo
+	err  error
 }
 
 // favoritesFeedKey is the pseudo feed key the items list is bound to
@@ -270,6 +283,21 @@ func (m Model) moreCmd() tea.Cmd {
 	}
 }
 
+// saveCookieCmd runs the login ceremony's write half off the UI
+// thread: validate (z_c0 aboard) and persist 0600 through the same
+// SaveCookie seam `readscope zhihu login` rides. The cookie loads per
+// source construction, so the next F5 picks it up — 保存即用.
+func (m Model) saveCookieCmd(raw string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := zhihu.CookiePath()
+		if err != nil {
+			return loginSavedMsg{err: err}
+		}
+		info, err := zhihu.SaveCookie(path, raw)
+		return loginSavedMsg{info: info, err: err}
+	}
+}
+
 // --- update --------------------------------------------------------------
 
 // currentFeedKey is the feed key the items list is bound to right
@@ -362,7 +390,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case errors.Is(msg.err, refresh.ErrNotPaged):
 			m.status = m.cat.Get("status.more_end")
 		case msg.err != nil:
-			m.status = m.cat.Get("rss.feed_error", m.feedLabel(m.selectedFeed()), msg.err)
+			if s := m.zhihuSessionStatus(msg.err); s != "" {
+				m.status = s
+			} else {
+				m.status = m.cat.Get("rss.feed_error", m.feedLabel(m.selectedFeed()), msg.err)
+			}
 		case msg.end:
 			m.status = m.cat.Get("status.more_end")
 		case msg.res.New == 0:
@@ -382,6 +414,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.status
 		}
 		return m, m.loadFeedsCmd() // list rows, dots and counts re-render
+
+	case loginSavedMsg:
+		// The ceremony's verdict: a refusal (no z_c0) keeps the dialog
+		// open for an immediate re-paste; a filesystem failure closes
+		// it (retry via Ctrl+U); success closes it and the next F5
+		// rides the new session — 保存即用.
+		if msg.err != nil {
+			if errors.Is(msg.err, zhihu.ErrNoZC0) {
+				m.status = m.cat.Get("zhihu.login_invalid", msg.err)
+				m.loginBuf = "" // re-paste starts clean; the garbage must not prefix the next try
+			} else {
+				m.status = m.cat.Get("zhihu.login_save_error", msg.err)
+				m.loginOpen, m.loginBuf = false, ""
+			}
+			return m, nil
+		}
+		m.loginOpen, m.loginBuf = false, ""
+		m.status = m.cat.Get("zhihu.login_saved", msg.info.KeyCount)
+		return m, nil
 
 	case browserDoneMsg:
 		if msg.err != nil {
@@ -416,6 +467,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "ctrl+q", "ctrl+c":
 				return m, tea.Quit
+			}
+			return m, nil
+		}
+		// The zhihu login dialog is modal too (the Ctrl+U ceremony):
+		// runes accumulate into the buffer — typed or pasted, the
+		// bracketed-paste shape is one big KeyRunes — Enter saves, Esc
+		// cancels, backspace edits. The raw header never renders.
+		if m.loginOpen {
+			switch msg.String() {
+			case "enter":
+				if m.loginBuf == "" {
+					return m, nil // nothing pasted: Enter is a no-op, not a save
+				}
+				return m, m.saveCookieCmd(m.loginBuf)
+			case "esc":
+				m.loginOpen, m.loginBuf = false, ""
+				return m, nil
+			case "backspace":
+				if rs := []rune(m.loginBuf); len(rs) > 0 {
+					m.loginBuf = string(rs[:len(rs)-1])
+				}
+				return m, nil
+			case "ctrl+q", "ctrl+c":
+				return m, tea.Quit
+			}
+			if msg.Type == tea.KeyRunes {
+				m.loginBuf += string(msg.Runes)
+				return m, nil
 			}
 			return m, nil
 		}
@@ -548,6 +627,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "ctrl+u":
+			// The zhihu login ceremony (ticket 04): paste a browser
+			// Cookie header, validate, save 0600 — effective on the next
+			// F5 without a restart. Global key: the session is a
+			// credential, not a per-feed view state.
+			m.loginOpen, m.loginBuf = true, ""
+			return m, nil
+
 		case "f3":
 			m.favorites = !m.favorites
 			m.focus = regionList
@@ -622,6 +709,9 @@ func (m Model) View() string {
 	}
 	if m.confirming {
 		return m.confirmView()
+	}
+	if m.loginOpen {
+		return m.loginView()
 	}
 	pane := m.listView()
 	if m.reader != nil {
@@ -848,7 +938,9 @@ func (m Model) statusBarView() string {
 // refreshStatus localizes a finished refresh: per-feed failures surface
 // the summary line, otherwise the new-item count. The source is taken
 // from the message, not the model — the user may have Tabbed away while
-// the fetch ran.
+// the fetch ran. A feed-level F5 that failed one feed shows that feed's
+// error itself (zhihu session failures become login guidance) instead
+// of a 1-of-1 summary that hides the reason.
 func (m Model) refreshStatus(msg refreshDoneMsg) string {
 	switch {
 	case msg.err != nil:
@@ -864,10 +956,61 @@ func (m Model) refreshStatus(msg refreshDoneMsg) string {
 		}
 		newSum += r.New
 	}
-	if failed > 0 {
+	switch {
+	case failed > 0 && len(msg.results) == 1:
+		return m.fetchErrStatus(msg.results[0])
+	case failed > 0:
 		return m.cat.Get("rss.summary", len(msg.results), len(msg.results)-failed, failed)
 	}
 	return m.cat.Get("status.refresh_done", newSum)
+}
+
+// fetchErrStatus renders one feed's fetch failure. Zhihu session
+// errors map to login guidance (the spec's 失效语义: detail-family
+// 401/403 → "re-login", no cookie → "log in"), everything else is the
+// label plus the raw error.
+func (m Model) fetchErrStatus(r refresh.Result) string {
+	if r.Err != nil {
+		if s := m.zhihuSessionStatus(r.Err); s != "" {
+			return s
+		}
+		return m.cat.Get("rss.feed_error", r.Label, r.Err)
+	}
+	return m.cat.Get("status.refresh_done", r.New)
+}
+
+// zhihuSessionStatus maps a zhihu session error to its guidance line;
+// "" = not a session error.
+func (m Model) zhihuSessionStatus(err error) string {
+	switch {
+	case errors.Is(err, zhihu.ErrSessionExpired):
+		return m.cat.Get("zhihu.login_expired")
+	case errors.Is(err, zhihu.ErrLoginRequired):
+		return m.cat.Get("zhihu.login_required")
+	}
+	return ""
+}
+
+// loginView is the Ctrl+U dialog: the DevTools hint, the masked
+// buffer (dots, never the header itself — the terminal's scrollback
+// must not keep a live session), and the save/cancel keys. The same
+// SaveCookie seam `readscope zhihu login` rides handles the write.
+func (m Model) loginView() string {
+	n := utf8.RuneCountInString(m.loginBuf)
+	if n > 48 {
+		n = 48 // one dialog width of dots; the count is what matters
+	}
+	mask := m.th.Dim.Render("…")
+	if n > 0 {
+		mask = strings.Repeat("•", n)
+	}
+	box := m.th.HelpOverlay.Render(
+		m.th.HelpTitle.Render(m.cat.Get("zhihu.login_title")) + "\n\n" +
+			m.th.Dim.Render(m.cat.Get("zhihu.login_hint")) + "\n\n" +
+			mask + "\n\n" +
+			m.th.Dim.Render(m.cat.Get("zhihu.login_paste_hint")),
+	)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 // confirmView is the Ctrl+A confirmation: a centered dialog naming the

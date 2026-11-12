@@ -38,7 +38,7 @@ func zhihuSrcAt(t *testing.T, fake *fakeZhihu) *Source {
 	t.Helper()
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
-	return newSource(Hosts{API: srv.URL, Daily: srv.URL, Web: srv.URL})
+	return newSource(Hosts{API: srv.URL, Daily: srv.URL, Web: srv.URL}, "")
 }
 
 func TestRegisteredUnderZhihuID(t *testing.T) {
@@ -173,7 +173,7 @@ func TestFetchHTTPFailureNamesFeed(t *testing.T) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	src := newSource(Hosts{API: srv.URL})
+	src := newSource(Hosts{API: srv.URL}, "")
 	_, err := src.Fetch(t.Context(), core.Feed{Key: HotFeedKey})
 	if err == nil || !strings.Contains(err.Error(), "hot") || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("want error naming feed and status, got: %v", err)

@@ -26,6 +26,7 @@ var helpBindings = []binding{
 	{"Ctrl+A", "mark_all_read"},
 	{"Ctrl+O", "browser"},
 	{"Ctrl+Y", "copy_link"},
+	{"Ctrl+U", "zhihu_login"},
 	{"Ctrl+T", "theme"},
 	{"Ctrl+Q", "quit"},
 }

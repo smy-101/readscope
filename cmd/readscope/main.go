@@ -32,6 +32,7 @@ Usage:
   readscope rss export F  Write subscriptions as OPML for other readers
   readscope render     Render a local HTML file or URL to terminal text
   readscope zhihu probe  Probe zhihu API endpoints and save raw samples (M4 tracer)
+  readscope zhihu login  Paste a browser Cookie header (zhihu login ceremony)
   readscope version    Print version
 
 Environment:

@@ -19,6 +19,7 @@ import (
 	"github.com/smy-101/readscope/internal/i18n"
 	"github.com/smy-101/readscope/internal/refresh"
 	"github.com/smy-101/readscope/internal/source/rss"
+	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 	"github.com/smy-101/readscope/internal/theme"
 )
@@ -26,6 +27,7 @@ import (
 type check struct {
 	label string
 	err   error
+	note  string // success detail, e.g. the cookie census / anonymous note
 }
 
 // Probe measures one feed's reachability: it fetches url and reports
@@ -60,6 +62,7 @@ func run(w io.Writer, cfg *core.Config, version string, probe Probe) bool {
 		named(cat, "doctor.db_migrate", func() error { return checkDB("db_migrate") }),
 		named(cat, "doctor.i18n_load", checkI18n),
 		named(cat, "doctor.theme_load", checkThemes),
+		zhihuCookieCheck(cat),
 	}
 	okCount := 0
 	for _, c := range checks {
@@ -68,7 +71,11 @@ func run(w io.Writer, cfg *core.Config, version string, probe Probe) bool {
 			continue
 		}
 		okCount++
-		fmt.Fprintf(w, "%s %s\n", th.Success.Render("✓"), c.label)
+		if c.note != "" {
+			fmt.Fprintf(w, "%s %s: %s\n", th.Success.Render("✓"), c.label, c.note)
+		} else {
+			fmt.Fprintf(w, "%s %s\n", th.Success.Render("✓"), c.label)
+		}
 	}
 
 	// Terminal size: informational, never a failure (piped output is fine).
@@ -227,4 +234,35 @@ func checkThemes() error {
 		}
 	}
 	return nil
+}
+
+// zhihuCookieCheck reports the zhihu cookie file's state. 未配置 is
+// the anonymous mode — a PASS with a note (hot/daily work without a
+// session); a loaded session reports its census; a file that exists
+// but can't serve (looser perms, no z_c0, unreadable) fails the run —
+// someone tried to log in and it's broken. Values never print.
+func zhihuCookieCheck(cat *i18n.Catalog) check {
+	label := cat.Get("doctor.cookie")
+	path, err := zhihu.CookiePath()
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	fi, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return check{label: label, note: cat.Get("doctor.cookie_none")}
+	}
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		return check{label: label, err: fmt.Errorf("%s", cat.Get("doctor.cookie_perms", fmt.Sprintf("%#o", perm)))}
+	}
+	_, info, err := zhihu.LoadCookie(path)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	if !info.HasZC0 {
+		return check{label: label, err: fmt.Errorf("%s", cat.Get("doctor.cookie_no_zc0"))}
+	}
+	return check{label: label, note: cat.Get("doctor.cookie_ok", info.KeyCount)}
 }

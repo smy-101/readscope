@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 )
 
 // ProbeArgs overrides the ids the walk would otherwise chain from
@@ -45,8 +44,10 @@ const (
 // Probe is the M4 data-plane tracer: walk the spec's endpoint contract
 // (hot list, daily list + story, follow feed, question meta, answer
 // feeds, comment root), print one line per endpoint, save every raw
-// body under OutDir, and self-check the x-zse-93 header matrix. It
-// never prints cookie values.
+// body under OutDir, and self-check the x-zse-93 header matrix.
+// It never prints cookie values. Since ticket 04 the walk rides the
+// shared transport (transport.go) — the same matrix the source
+// fetches wear, one header block for the whole package.
 type Probe struct {
 	Hosts        Hosts
 	CookieHeader string // "" = walk the anonymous endpoints only
@@ -56,9 +57,6 @@ type Probe struct {
 }
 
 const (
-	maxBodyBytes = 10 << 20
-	probeTimeout = 30 * time.Second
-
 	metaInclude = "detail%2Cexcerpt%2Canswer_count%2Cfollower_count%2Cvisit_count%2Cauthor%2Ccreated"
 	// Feeds include is the page request's own string (FeedScope
 	// 2026-11, "勿手改"): the cursorless entry accepts exactly this
@@ -79,70 +77,45 @@ func Blocked(rs []EndpointResult) bool {
 	return false
 }
 
-// fetch is one raw outcome; body rides along even on non-200 so the
-// sample file keeps the error document (zhihu's error JSON carries
-// the code — 10003 and friends).
-type fetch struct {
-	status int
-	body   []byte
-	err    error
-}
-
-// get performs one probe GET with the shared request shape: desktop
-// Chrome UA, x-requested-with: fetch, Accept headers a real fetch
-// sends, per-endpoint Referer, optional x-zse-93 and Cookie. The body
-// is capped and saved under <OutDir>/<name>.json.
-func (p *Probe) get(ctx context.Context, name, url, referer string, zse93, cookie bool) fetch {
-	f := fetch{}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		f.err = err
-		return f
-	}
-	req.Header.Set("User-Agent", DesktopUA)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("x-requested-with", "fetch")
-	if referer != "" {
-		req.Header.Set("Referer", referer)
-	}
-	if zse93 {
-		req.Header.Set("x-zse-93", XZse93)
-	}
-	if cookie && p.CookieHeader != "" {
-		req.Header.Set("Cookie", p.CookieHeader)
-	}
-	client := p.Client
-	if client == nil {
-		client = &http.Client{Timeout: probeTimeout}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		f.err = err
-		return f
-	}
-	defer resp.Body.Close()
-	f.status = resp.StatusCode
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
-	if err != nil {
-		f.err = err
-		return f
-	}
-	f.body = body
-	p.save(name, f)
-	return f
-}
-
 // save writes one raw sample (best effort — a read-only dir must not
 // kill the walk; the report line notes where samples were heading).
-func (p *Probe) save(name string, f fetch) {
-	if p.OutDir == "" || f.err != nil {
+// Only real exchanges land on disk: a transport-level ERR has no body
+// worth keeping, but an HTTP error document does (zhihu's error JSON
+// carries the code — 10003 and friends).
+func (p *Probe) save(name string, f Response) {
+	if p.OutDir == "" || f.Status == 0 {
 		return
 	}
 	if err := os.MkdirAll(p.OutDir, 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(p.OutDir, name+".json"), f.body, 0o644)
+	_ = os.WriteFile(filepath.Join(p.OutDir, name+".json"), f.Body, 0o644)
+}
+
+// outcome folds one transport response into a walk result: ERR (no
+// answer at all), HTTP n + BLOCKED (an answer that said no — the note
+// says which reading: session-expired endpoints name the Ctrl+U
+// path, everything else reports raw with the error code), or the
+// parse's verdict on the 200 body. parse returns the note and whether
+// the shape held (0-row parses stay GREEN with the redesign alarm in
+// the note — reachability is real).
+func (p *Probe) outcome(name string, f Response, parse func(body []byte) (note string, ok bool)) EndpointResult {
+	p.save(name, f)
+	switch {
+	case f.Status == 0:
+		return EndpointResult{name, "ERR", verdictBlocked, f.Err.Error()}
+	case f.Err != nil:
+		note := "blocked" + errCode(f.Body)
+		if strings.Contains(f.Err.Error(), ErrSessionExpired.Error()) {
+			note = "blocked: session expired (401/403 on a cookie'd call) — Ctrl+U 重登" + errCode(f.Body)
+		}
+		return EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictBlocked, note}
+	}
+	note, ok := parse(f.Body)
+	if !ok {
+		return EndpointResult{name, "HTTP 200", verdictBlocked, note}
+	}
+	return EndpointResult{name, "HTTP 200", verdictGreen, note}
 }
 
 // errCode digs zhihu's error document {"error":{"code":…}} out of a
@@ -275,6 +248,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	}
 
 	h := p.Hosts
+	tr := NewTransport(h, p.CookieHeader, p.Client)
 	fmt.Fprintln(w, "zhihu probe — M4 data plane tracer (ticket 01)")
 	fmt.Fprintf(w, "hosts: api=%s daily=%s web=%s\n", h.API, h.Daily, h.Web)
 	if p.CookieHeader != "" {
@@ -286,7 +260,9 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 
 	// login gates one endpoint on the cookie: without it the endpoint
 	// reports SKIPPED-NO-COOKIE (the anonymous walk is an outcome, not
-	// an error). Defined once, used by every session-gated endpoint.
+	// an error). The same gate lives in the transport's Endpoint rows
+	// (Gated); the probe keeps its own pre-check because SKIPPED is a
+	// walk verdict, not an error.
 	login := func(name string) bool {
 		if p.CookieHeader == "" {
 			res(EndpointResult{name, "SKIPPED", verdictSkipped, "SKIPPED-NO-COOKIE"})
@@ -303,18 +279,13 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	// backs up the api door's data.
 	var qid string
 	{
-		f := p.get(ctx, "hot-list", h.API+"/topstory/hot-list?limit=10", "https://www.zhihu.com/hot", false, true)
-		switch {
-		case f.err != nil:
-			res(EndpointResult{"hot-list", "ERR", verdictBlocked, f.err.Error()})
-		case f.status != http.StatusOK:
-			res(EndpointResult{"hot-list", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-				fmt.Sprintf("blocked%s", errCode(f.body))})
-		default:
-			var hot hotList
-			verdict, note := verdictBlocked, "unparseable"
-			if err := json.Unmarshal(f.body, &hot); err == nil {
-				note = fmt.Sprintf("rows=%d", len(hot.Data)) + redesignNote(len(hot.Data))
+		r := p.outcome("hot-list", tr.Get(ctx, epHotList, h.API+"/topstory/hot-list?limit=10"),
+			func(b []byte) (string, bool) {
+				var hot hotList
+				if err := json.Unmarshal(b, &hot); err != nil {
+					return "unparseable: " + err.Error(), false
+				}
+				note := fmt.Sprintf("rows=%d", len(hot.Data)) + redesignNote(len(hot.Data))
 				if len(hot.Data) > 0 {
 					q := QIDFromURL(hot.Data[0].Target.URL)
 					note += fmt.Sprintf(" qid1=%s heat[0]=%q", flag53(q), hot.Data[0].DetailText)
@@ -322,36 +293,25 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 						qid = q
 					}
 				}
-				verdict = verdictGreen
-			} else {
-				note += ": " + err.Error()
-			}
-			res(EndpointResult{"hot-list", "HTTP 200", verdict, note})
-		}
+				return note, true
+			})
+		res(r)
 	}
 	if login("hot-www-door") {
-		f := p.get(ctx, "hot-www-door", h.Web+"/api/v3/feed/topstory/hot-lists/total?limit=50",
-			"https://www.zhihu.com/hot", false, true)
-		switch {
-		case f.err != nil:
-			res(EndpointResult{"hot-www-door", "ERR", verdictBlocked, f.err.Error()})
-		case f.status != http.StatusOK:
-			res(EndpointResult{"hot-www-door", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-				fmt.Sprintf("blocked%s", errCode(f.body))})
-		default:
-			var hot hotList
-			verdict, note := verdictBlocked, "unparseable"
-			if err := json.Unmarshal(f.body, &hot); err == nil {
-				note = fmt.Sprintf("rows=%d", len(hot.Data)) + redesignNote(len(hot.Data))
+		r := p.outcome("hot-www-door",
+			tr.Get(ctx, epHotWWW, h.Web+"/api/v3/feed/topstory/hot-lists/total?limit=50"),
+			func(b []byte) (string, bool) {
+				var hot hotList
+				if err := json.Unmarshal(b, &hot); err != nil {
+					return "unparseable: " + err.Error(), false
+				}
+				note := fmt.Sprintf("rows=%d", len(hot.Data)) + redesignNote(len(hot.Data))
 				if len(hot.Data) > 0 {
 					note += fmt.Sprintf(" qid1=%s", flag53(QIDFromURL(hot.Data[0].Target.URL)))
 				}
-				verdict = verdictGreen
-			} else {
-				note += ": " + err.Error()
-			}
-			res(EndpointResult{"hot-www-door", "HTTP 200", verdict, note})
-		}
+				return note, true
+			})
+		res(r)
 	}
 	if p.Args.QID != "" {
 		qid = p.Args.QID
@@ -360,28 +320,20 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	// 3. Daily list (anonymous); story id chains from here.
 	var storyID string
 	{
-		f := p.get(ctx, "daily-latest", h.Daily+"/api/4/news/latest", "https://daily.zhihu.com/", false, false)
-		if f.err != nil {
-			res(EndpointResult{"daily-latest", "ERR", verdictBlocked, f.err.Error()})
-		} else if f.status != http.StatusOK {
-			res(EndpointResult{"daily-latest", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-				"blocked" + errCode(f.body)})
-		} else {
-			var latest dailyLatest
-			note := "unparseable"
-			verdict := verdictBlocked
-			if err := json.Unmarshal(f.body, &latest); err == nil {
-				note = fmt.Sprintf("stories=%d", len(latest.Stories)) + redesignNote(len(latest.Stories))
+		r := p.outcome("daily-latest", tr.Get(ctx, epDailyLatest, h.Daily+"/api/4/news/latest"),
+			func(b []byte) (string, bool) {
+				var latest dailyLatest
+				if err := json.Unmarshal(b, &latest); err != nil {
+					return "unparseable: " + err.Error(), false
+				}
+				note := fmt.Sprintf("stories=%d", len(latest.Stories)) + redesignNote(len(latest.Stories))
 				if len(latest.Stories) > 0 {
 					storyID = string(latest.Stories[0].ID)
 					note += fmt.Sprintf(" first=%q hint=%q", latest.Stories[0].Title, latest.Stories[0].Hint)
 				}
-				verdict = verdictGreen
-			} else {
-				note += ": " + err.Error()
-			}
-			res(EndpointResult{"daily-latest", "HTTP 200", verdict, note})
-		}
+				return note, true
+			})
+		res(r)
 	}
 	if p.Args.StoryID != "" {
 		storyID = p.Args.StoryID
@@ -391,74 +343,56 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	if storyID == "" {
 		res(EndpointResult{"daily-story", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(daily-latest)"})
 	} else {
-		f := p.get(ctx, "daily-story", h.Daily+"/api/4/story/"+storyID, "https://daily.zhihu.com/", false, false)
-		switch {
-		case f.err != nil:
-			res(EndpointResult{"daily-story", "ERR", verdictBlocked, f.err.Error()})
-		case f.status != http.StatusOK:
-			res(EndpointResult{"daily-story", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-				"blocked" + errCode(f.body)})
-		default:
-			var story dailyStory
-			verdict := verdictBlocked
-			note := "unparseable"
-			if err := json.Unmarshal(f.body, &story); err == nil {
-				note = fmt.Sprintf("body=%dB html=%v", len(story.Body), strings.Contains(story.Body, "<"))
-				if story.Body != "" {
-					verdict = verdictGreen
+		r := p.outcome("daily-story", tr.Get(ctx, epDailyStory, h.Daily+"/api/4/story/"+storyID),
+			func(b []byte) (string, bool) {
+				var story dailyStory
+				if err := json.Unmarshal(b, &story); err != nil {
+					return "unparseable: " + err.Error(), false
 				}
-			} else {
-				note += ": " + err.Error()
-			}
-			res(EndpointResult{"daily-story", "HTTP 200", verdict, note})
-		}
+				note := fmt.Sprintf("body=%dB html=%v", len(story.Body), strings.Contains(story.Body, "<"))
+				if story.Body == "" {
+					return note, false
+				}
+				return note, true
+			})
+		res(r)
 	}
 
 	// 5. Follow feed: card census — question cards kept, the rest
 	// counted by type and dropped.
-	{
-		if login("moments") {
-			f := p.get(ctx, "moments", h.Web+"/api/v3/moments?limit=10&desktop=true",
-				"https://www.zhihu.com/follow", false, true)
-			switch {
-			case f.err != nil:
-				res(EndpointResult{"moments", "ERR", verdictBlocked, f.err.Error()})
-			case f.status == http.StatusUnauthorized || f.status == http.StatusForbidden:
-				res(EndpointResult{"moments", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-					fmt.Sprintf("blocked (403 = risk control or stale cookie; 401 = stale)%s", errCode(f.body))})
-			case f.status != http.StatusOK:
-				res(EndpointResult{"moments", fmt.Sprintf("HTTP %d", f.status), verdictBlocked, "blocked" + errCode(f.body)})
-			default:
+	if login("moments") {
+		r := p.outcome("moments",
+			tr.Get(ctx, epMoments, h.Web+"/api/v3/moments?limit=10&desktop=true"),
+			func(b []byte) (string, bool) {
 				var ms moments
-				verdict := verdictBlocked
-				note := "unparseable"
-				if err := json.Unmarshal(f.body, &ms); err == nil {
-					keptA, keptQ, dropped := 0, 0, map[string]int{}
-					for _, m := range ms.Data {
-						switch m.Target.Type {
-						case "answer":
-							keptA++
-						case "question":
-							keptQ++
-						default:
-							dropped[m.Target.Type]++
-						}
-					}
-					note = fmt.Sprintf("cards=%d kept=%d(answer=%d question=%d) dropped=%d%s cursor=%v",
-						len(ms.Data), keptA+keptQ, keptA, keptQ, len(ms.Data)-keptA-keptQ, census(dropped), ms.Paging.Next != "") + redesignNote(len(ms.Data))
-					verdict = verdictGreen
-				} else {
-					note += ": " + err.Error()
+				if err := json.Unmarshal(b, &ms); err != nil {
+					return "unparseable: " + err.Error(), false
 				}
-				res(EndpointResult{"moments", "HTTP 200", verdict, note})
-			}
-		}
+				keptA, keptQ, dropped := 0, 0, map[string]int{}
+				for _, m := range ms.Data {
+					switch m.Target.Type {
+					case "answer":
+						keptA++
+					case "question":
+						keptQ++
+					default:
+						dropped[m.Target.Type]++
+					}
+				}
+				note := fmt.Sprintf("cards=%d kept=%d(answer=%d question=%d) dropped=%d%s cursor=%v",
+					len(ms.Data), keptA+keptQ, keptA, keptQ, len(ms.Data)-keptA-keptQ, census(dropped), ms.Paging.Next != "") + redesignNote(len(ms.Data))
+				return note, true
+			})
+		res(r)
 	}
 
 	// The v4 pair, built once — the walk and the header-matrix legs hit
-	// the same two addresses.
+	// the same two addresses. Referer carries the qid; the matrix rows
+	// hold everything else.
 	var metaURL, feedsURL string
+	referer := ""
 	if qid != "" {
+		referer = "https://www.zhihu.com/question/" + qid
 		metaURL = fmt.Sprintf("%s/api/v4/questions/%s?include=%s", h.Web, qid, metaInclude)
 		feedsURL = fmt.Sprintf("%s/api/v4/questions/%s/feeds?include=%s&limit=5&order=default&platform=desktop",
 			h.Web, qid, feedsInclude)
@@ -470,47 +404,32 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 		res(EndpointResult{"question-meta", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(hot-list) — or pass -qid"})
 		res(EndpointResult{"answers-feeds", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(hot-list) — or pass -qid"})
 	} else {
-		referer := "https://www.zhihu.com/question/" + qid
+		metaEp, feedsEp := epQuestionMeta, epAnswersFeeds
+		metaEp.Referer, feedsEp.Referer = referer, referer
 
 		if login("question-meta") {
 			// x-zse-93 REQUIRED here: missing = 403 code 10003.
-			f := p.get(ctx, "question-meta", metaURL, referer, true, true)
-			switch {
-			case f.err != nil:
-				res(EndpointResult{"question-meta", "ERR", verdictBlocked, f.err.Error()})
-			case f.status != http.StatusOK:
-				res(EndpointResult{"question-meta", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-					fmt.Sprintf("blocked%s (403 = gate or stale cookie)", errCode(f.body))})
-			default:
-				var q questionMeta
-				verdict := verdictBlocked
-				note := "unparseable"
-				if err := json.Unmarshal(f.body, &q); err == nil {
-					note = fmt.Sprintf("title=%q answers=%d author=%s detail=%dB",
-						q.Title, q.AnswerCount, q.Author.Name, len(q.Detail))
-					verdict = verdictGreen
-				} else {
-					note += ": " + err.Error()
-				}
-				res(EndpointResult{"question-meta", "HTTP 200", verdict, note})
-			}
+			r := p.outcome("question-meta", tr.Get(ctx, metaEp, metaURL),
+				func(b []byte) (string, bool) {
+					var q questionMeta
+					if err := json.Unmarshal(b, &q); err != nil {
+						return "unparseable: " + err.Error(), false
+					}
+					return fmt.Sprintf("title=%q answers=%d author=%s detail=%dB",
+						q.Title, q.AnswerCount, q.Author.Name, len(q.Detail)), true
+				})
+			res(r)
 		}
 
 		if login("answers-feeds") {
 			// x-zse-93 FORBIDDEN here: the cursorless entry rejects it.
-			f := p.get(ctx, "answers-feeds", feedsURL, referer, false, true)
-			switch {
-			case f.err != nil:
-				res(EndpointResult{"answers-feeds", "ERR", verdictBlocked, f.err.Error()})
-			case f.status != http.StatusOK:
-				res(EndpointResult{"answers-feeds", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-					fmt.Sprintf("blocked%s", errCode(f.body))})
-			default:
-				var fp feedsPage
-				verdict := verdictBlocked
-				note := "unparseable"
-				if err := json.Unmarshal(f.body, &fp); err == nil {
-					note = fmt.Sprintf("answers=%d", len(fp.Data)) + redesignNote(len(fp.Data))
+			r := p.outcome("answers-feeds", tr.Get(ctx, feedsEp, feedsURL),
+				func(b []byte) (string, bool) {
+					var fp feedsPage
+					if err := json.Unmarshal(b, &fp); err != nil {
+						return "unparseable: " + err.Error(), false
+					}
+					note := fmt.Sprintf("answers=%d", len(fp.Data)) + redesignNote(len(fp.Data))
 					for _, a := range fp.Data {
 						if a.Target.Type == "answer" && a.Target.ID != "" {
 							if aid == "" {
@@ -522,12 +441,9 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 						}
 					}
 					note += fmt.Sprintf(" cursor=%v", fp.Paging.Next != "")
-					verdict = verdictGreen
-				} else {
-					note += ": " + err.Error()
-				}
-				res(EndpointResult{"answers-feeds", "HTTP 200", verdict, note})
-			}
+					return note, true
+				})
+			res(r)
 		}
 	}
 	if p.Args.Aid != "" {
@@ -538,32 +454,23 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	if aid == "" {
 		res(EndpointResult{"comments-root", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(answers-feeds) — or pass -aid"})
 	} else if login("comments-root") {
-		f := p.get(ctx, "comments-root",
-			h.Web+"/api/v4/comment_v5/answers/"+aid+"/root_comment?order_by=score&limit=20&offset=",
-			"https://www.zhihu.com/", false, true)
-		switch {
-		case f.err != nil:
-			res(EndpointResult{"comments-root", "ERR", verdictBlocked, f.err.Error()})
-		case f.status != http.StatusOK:
-			res(EndpointResult{"comments-root", fmt.Sprintf("HTTP %d", f.status), verdictBlocked,
-				fmt.Sprintf("blocked%s", errCode(f.body))})
-		default:
-			var cs commentsRoot
-			verdict := verdictBlocked
-			note := "unparseable"
-			if err := json.Unmarshal(f.body, &cs); err == nil {
-				note = fmt.Sprintf("roots=%d", len(cs.Data)) + redesignNote(len(cs.Data))
+		r := p.outcome("comments-root",
+			tr.Get(ctx, epCommentsRoot,
+				h.Web+"/api/v4/comment_v5/answers/"+aid+"/root_comment?order_by=score&limit=20&offset="),
+			func(b []byte) (string, bool) {
+				var cs commentsRoot
+				if err := json.Unmarshal(b, &cs); err != nil {
+					return "unparseable: " + err.Error(), false
+				}
+				note := fmt.Sprintf("roots=%d", len(cs.Data)) + redesignNote(len(cs.Data))
 				if len(cs.Data) > 0 {
 					r0 := cs.Data[0]
 					note += fmt.Sprintf(" first=%q like=%d child_gap=%d",
 						r0.Author.Name, r0.LikeCount, r0.ChildCommentCount-int64(len(r0.ChildComments)))
 				}
-				verdict = verdictGreen
-			} else {
-				note += ": " + err.Error()
-			}
-			res(EndpointResult{"comments-root", "HTTP 200", verdict, note})
-		}
+				return note, true
+			})
+		res(r)
 	}
 
 	// 9. Header-matrix self-check: the two negative expectations that
@@ -572,35 +479,30 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	if p.CookieHeader == "" || qid == "" {
 		res(EndpointResult{"header-matrix", "SKIPPED", verdictSkipped, "needs cookie + qid"})
 	} else {
-		f1 := p.get(ctx, "matrix-questions-nozse", metaURL, "https://www.zhihu.com/question/"+qid, false, true)
-		switch {
-		case f1.err != nil:
-			res(EndpointResult{"matrix-questions-nozse", "ERR", verdictMismatch, f1.err.Error()})
-		case f1.status == http.StatusForbidden:
-			res(EndpointResult{"matrix-questions-nozse", "HTTP 403", verdictMatch,
-				"version gate enforced as documented" + errCode(f1.body)})
-		case f1.status == http.StatusOK:
-			res(EndpointResult{"matrix-questions-nozse", "HTTP 200", verdictMismatch,
-				"GATE MOVED: question meta answers without x-zse-93"})
-		default:
-			res(EndpointResult{"matrix-questions-nozse", fmt.Sprintf("HTTP %d", f1.status), verdictMismatch,
-				"unexpected status"})
+		matrixLeg := func(base Endpoint, url string, wantStatus int, gateMoved string) {
+			name := base.Name
+			f := tr.Get(ctx, base, url)
+			p.save(name, f)
+			switch {
+			case f.Status == 0:
+				res(EndpointResult{name, "ERR", verdictMismatch, f.Err.Error()})
+			case f.Status == wantStatus:
+				res(EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictMatch,
+					"gate enforced as documented" + errCode(f.Body)})
+			case f.Status == http.StatusOK:
+				res(EndpointResult{name, "HTTP 200", verdictMismatch, gateMoved})
+			default:
+				res(EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictMismatch, "unexpected status"})
+			}
 		}
-
-		f2 := p.get(ctx, "matrix-feeds-withzse", feedsURL, "https://www.zhihu.com/question/"+qid, true, true)
-		switch {
-		case f2.err != nil:
-			res(EndpointResult{"matrix-feeds-withzse", "ERR", verdictMismatch, f2.err.Error()})
-		case f2.status == http.StatusForbidden:
-			res(EndpointResult{"matrix-feeds-withzse", "HTTP 403", verdictMatch,
-				"cursorless feeds entry rejects x-zse-93 as documented"})
-		case f2.status == http.StatusOK:
-			res(EndpointResult{"matrix-feeds-withzse", "HTTP 200", verdictMismatch,
-				"GATE MOVED: feeds entry tolerates x-zse-93 now"})
-		default:
-			res(EndpointResult{"matrix-feeds-withzse", fmt.Sprintf("HTTP %d", f2.status), verdictMismatch,
-				"unexpected status"})
-		}
+		noZse := epQuestionMeta // questions WITHOUT the version header → 403
+		noZse.Name, noZse.ZSE93 = "matrix-questions-nozse", false
+		withZse := epAnswersFeeds // cursorless feeds WITH the version header → 403
+		withZse.Name, withZse.ZSE93 = "matrix-feeds-withzse", true
+		matrixLeg(noZse, metaURL, http.StatusForbidden,
+			"GATE MOVED: question meta answers without x-zse-93")
+		matrixLeg(withZse, feedsURL, http.StatusForbidden,
+			"GATE MOVED: feeds entry tolerates x-zse-93 now")
 	}
 
 	// Verdict recap + the ladder, so the report closes itself.

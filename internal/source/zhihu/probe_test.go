@@ -68,6 +68,7 @@ type request struct {
 	ua         string
 	xrw        string // x-requested-with
 	zse93      bool
+	zse93Val   string // the version value when present (wrong-version legs)
 	cookie     bool
 	referer    string
 	accept     string
@@ -87,6 +88,8 @@ type fakeZhihu struct {
 	blockMoments bool   // simulate risk control (403 even with cookie)
 	emptyHot     bool   // serve {"data":[]} — redesign tripwire fixture
 	hotOverride  string // serve this body for /topstory/hot-list (source-test fixtures)
+	staleStatus  int    // ≠0: v4/comment_v5 answer this status despite a cookie (stale z_c0)
+	wrongVersion string // ≠"": question-meta demands exactly this x-zse-93 value (zhihu bumped it)
 }
 
 func (f *fakeZhihu) record(r *http.Request) request {
@@ -95,6 +98,7 @@ func (f *fakeZhihu) record(r *http.Request) request {
 		ua:         r.Header.Get("User-Agent"),
 		xrw:        r.Header.Get("x-requested-with"),
 		zse93:      r.Header.Get("x-zse-93") != "",
+		zse93Val:   r.Header.Get("x-zse-93"),
 		cookie:     r.Header.Get("Cookie") != "",
 		referer:    r.Header.Get("Referer"),
 		accept:     r.Header.Get("Accept"),
@@ -140,15 +144,19 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		write(200, momentsJSON)
 	case strings.HasPrefix(req.path, "/api/v4/comment_v5/"):
-		if !req.cookie {
-			write(401, v4ErrJSON)
+		if !req.cookie || f.staleStatus != 0 {
+			write(f.staleStatusOr(401), v4ErrJSON)
 			return
 		}
 		write(200, commentsJSON)
 	case strings.HasPrefix(req.path, "/api/v4/questions/"):
 		feeds := strings.HasSuffix(req.path, "/feeds")
-		if !req.cookie {
-			write(401, v4ErrJSON)
+		if !req.cookie || f.staleStatus != 0 {
+			write(f.staleStatusOr(401), v4ErrJSON)
+			return
+		}
+		if f.wrongVersion != "" && !feeds && req.zse93Val != f.wrongVersion {
+			write(403, v4ErrJSON) // zhihu bumped the constant: ours is now the wrong version
 			return
 		}
 		if feeds && req.zse93 {
@@ -178,6 +186,29 @@ func (f *fakeZhihu) hit(pathPrefix string) *request {
 		}
 	}
 	return nil
+}
+
+// staleStatusOr returns the stale-session status when armed, else the
+// given default.
+func (f *fakeZhihu) staleStatusOr(def int) int {
+	if f.staleStatus != 0 {
+		return f.staleStatus
+	}
+	return def
+}
+
+// hitCount counts recorded hits with the given path prefix (the
+// gated-preflight tests assert the transport never dialed).
+func (f *fakeZhihu) hitCount(pathPrefix string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for i := range f.hits {
+		if strings.HasPrefix(f.hits[i].path, pathPrefix) {
+			n++
+		}
+	}
+	return n
 }
 
 func newTestProbe(t *testing.T, fake *fakeZhihu, cookie string) (*Probe, *strings.Builder, string) {
