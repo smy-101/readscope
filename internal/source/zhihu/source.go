@@ -1,15 +1,18 @@
 package zhihu
 
-// source.go — the Source registration, the hot feed (ticket 02) and
-// the follow feed (ticket 05): the hot board is one anonymous GET
-// mapped to question-card snapshots with url-extracted ids (GLOSSARY:
-// 问题卡) and the folded heat snapshot (GLOSSARY: 热度快照); the follow
-// feed is the cursor variant of source.PagedSource — heterogeneous
-// moments cards filtered down to the same question-card rows, walked
-// forward by zhihu's opaque paging.next cursor. Since ticket 04 every
-// fetch rides the shared transport (transport.go) — the request
-// matrix and the session-loss semantics live there, single-point.
-// The daily feed and the detail layers arrive with their tickets.
+// source.go — the Source registration and the three fixed feeds: the
+// hot board (ticket 02) mapped to question-card snapshots with
+// url-extracted ids (GLOSSARY: 问题卡) and the folded heat snapshot
+// (GLOSSARY: 热度快照); the follow feed (ticket 05), the cursor
+// variant of source.PagedSource — heterogeneous moments cards
+// filtered down to the same question-card rows, walked forward by
+// zhihu's opaque paging.next cursor; and the daily digest (ticket
+// 03), an anonymous day snapshot whose full texts arrive lazily:
+// the zhihu half of source.BodySource, the story body fetched on
+// first open through CleanHTML into the body snapshot. Since ticket
+// 04 every fetch rides the shared transport (transport.go) — the
+// request matrix and the session-loss semantics live there,
+// single-point. The detail layers arrive with ticket 06.
 
 import (
 	"context"
@@ -36,11 +39,18 @@ const HotFeedKey = "hot"
 // cookie-gated, cursor-paged.
 const FollowFeedKey = "follow"
 
+// DailyFeedKey is the daily digest's stable key (GLOSSARY: 知乎日报)
+// — anonymous, a day's snapshot, lazy bodies.
+const DailyFeedKey = "daily"
+
 // hotLabelKey is the hot feed's i18n key; the UI resolves the label.
 const hotLabelKey = "zhihu.hot"
 
 // followLabelKey is the follow feed's i18n key.
 const followLabelKey = "zhihu.follow"
+
+// dailyLabelKey is the daily feed's i18n key.
+const dailyLabelKey = "zhihu.daily"
 
 func init() { source.Register(ID, New) }
 
@@ -56,7 +66,10 @@ type Source struct {
 }
 
 // The optional extensions zhihu carries, pinned at compile time.
-var _ source.CursorPagedSource = (*Source)(nil)
+var (
+	_ source.CursorPagedSource = (*Source)(nil)
+	_ source.BodySource        = (*Source)(nil)
+)
 
 // New builds the zhihu source. The subscription config goes unused
 // today (the hot feed is fixed); READSCOPE_ZHIHU_BASE overrides every
@@ -103,8 +116,19 @@ func (s *Source) momentsURL() string {
 	return s.hosts.Web + "/api/v3/moments?limit=10&desktop=true"
 }
 
-// Feeds implements source.Source: the hot board then the follow feed
-// in sidebar order — 日报 joins between them in ticket 03.
+// dailyLatestURL is the daily digest's anonymous list door: one
+// GET, the current issue whole (no paging — a day is the full
+// snapshot).
+func (s *Source) dailyLatestURL() string { return s.hosts.Daily + "/api/4/news/latest" }
+
+// storyURL is one story's API door (the body behind FetchBody).
+func (s *Source) storyURL(storyID string) string {
+	return s.hosts.Daily + "/api/4/story/" + storyID
+}
+
+// Feeds implements source.Source: the hot board, the follow feed and
+// the daily digest in sidebar order (spec §Solution: 热榜 / 关注 /
+// 知乎日报).
 func (s *Source) Feeds() []core.Feed {
 	return []core.Feed{
 		{
@@ -123,6 +147,13 @@ func (s *Source) Feeds() []core.Feed {
 			// The moments stream is chronological: ListSortTime (the
 			// zero value), newest first by the card's own clock.
 		},
+		{
+			Key:      DailyFeedKey,
+			LabelKey: dailyLabelKey,
+			URL:      s.dailyLatestURL(),
+			// A day's digest is one snapshot: chronological order (the
+			// zero value), no pages behind it.
+		},
 	}
 }
 
@@ -135,28 +166,51 @@ func ItemID(qid string) string { return itemIDPrefix + qid }
 // itemIDPrefix is the single source of the id shape.
 const itemIDPrefix = "zh:question/"
 
+// dailyIDPrefix is the daily story id shape's single source; daily
+// ids share no namespace with question ids — a story is never a
+// question row (GLOSSARY: 问题卡 vs 知乎日报).
+const dailyIDPrefix = "zh:daily/"
+
+// DailyItemID builds the deterministic row id "zh:daily/<storyID>".
+func DailyItemID(storyID string) string { return dailyIDPrefix + storyID }
+
+// dailyStoryPage renders the human-openable story page — Ctrl+O and
+// Ctrl+Y's target. The API door the fetch rides is not a page.
+func dailyStoryPage(storyID string) string { return "https://daily.zhihu.com/story/" + storyID }
+
 // questionURL renders the canonical www question page — the
 // Ctrl+O/Ctrl+Y target. target.url's internal spelling
 // (api…/questions/<id>) is not a page a human can open.
 func questionURL(qid string) string { return "https://www.zhihu.com/question/" + qid }
 
-// Fetch implements source.Source: the whole board in one anonymous
-// GET. Only question cards become rows — non-question cards
-// (video/pin/…) skip, as do rows without an extractable qid or a
-// title; skips are never errors, fetch and parse errors name the
-// feed. The heat column folds into the points snapshot.
+// Fetch implements source.Source: dispatches one fixed feed. Skips
+// are never errors, fetch and parse errors name the feed. The follow
+// feed is NOT here — its pages carry the cursor the caller must
+// persist, which Fetch's items-only shape cannot (see the refusal
+// below); the refresh layer routes it to FetchCursorPage first.
 func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
-	if f.Key != HotFeedKey {
-		if f.Key == FollowFeedKey {
-			// A loud refusal, not a half-fetch: the follow feed's pages
-			// carry the cursor the caller must persist, which Fetch's
-			// items-only shape cannot — the refresh layer routes it to
-			// FetchCursorPage before probing Fetch, so landing here is a
-			// wiring bug, and it should say so.
-			return nil, fmt.Errorf("fetch follow: cursor-paged feed — walk it via FetchCursorPage")
-		}
+	switch f.Key {
+	case HotFeedKey:
+		return s.fetchHot(ctx, f)
+	case DailyFeedKey:
+		return s.fetchDaily(ctx, f)
+	case FollowFeedKey:
+		// A loud refusal, not a half-fetch: the follow feed's pages
+		// carry the cursor the caller must persist, which Fetch's
+		// items-only shape cannot — the refresh layer routes it to
+		// FetchCursorPage before probing Fetch, so landing here is a
+		// wiring bug, and it should say so.
+		return nil, fmt.Errorf("fetch follow: cursor-paged feed — walk it via FetchCursorPage")
+	default:
 		return nil, fmt.Errorf("fetch %s: unknown zhihu feed", f.Key)
 	}
+}
+
+// fetchHot pulls the whole board in one anonymous GET. Only question
+// cards become rows — non-question cards (video/pin/…) skip, as do
+// rows without an extractable qid or a title; the heat column folds
+// into the points snapshot.
+func (s *Source) fetchHot(ctx context.Context, f core.Feed) ([]core.Item, error) {
 	res := s.tr.Get(ctx, epHotList, s.hotURL())
 	if res.Err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", f.Key, res.Err)
@@ -186,6 +240,44 @@ func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 			// and FetchedAt is the snapshot clock.
 			FetchedAt: now,
 			Points:    heatPoints(row.DetailText),
+		})
+	}
+	return items, nil
+}
+
+// fetchDaily pulls the current issue in one anonymous GET. The story
+// list carries no body and no per-story clock — the full text is a
+// first-open fetch (FetchBody below), and the row's meta is the
+// issue's own hint string ("作者 · 2 分钟阅读"), served atomic and
+// stored verbatim in the meta column. Rows without an id or a title
+// skip like the board's degenerate cards.
+func (s *Source) fetchDaily(ctx context.Context, f core.Feed) ([]core.Item, error) {
+	res := s.tr.Get(ctx, epDailyLatest, s.dailyLatestURL())
+	if res.Err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", f.Key, res.Err)
+	}
+	var list dailyLatest // the shape the probe walks too (probe.go)
+	if err := json.Unmarshal(res.Body, &list); err != nil {
+		return nil, fmt.Errorf("parse %s: not zhihu JSON: %w", f.Key, err)
+	}
+	now := time.Now().UTC()
+	items := make([]core.Item, 0, len(list.Stories))
+	for _, st := range list.Stories {
+		sid := st.ID.String()
+		if sid == "" || sid == "0" || st.Title == "" {
+			continue // nothing renderable; skip, never crash
+		}
+		items = append(items, core.Item{
+			ID:     DailyItemID(sid),
+			Source: ID,
+			Feed:   DailyFeedKey,
+			Title:  st.Title,
+			URL:    dailyStoryPage(sid),
+			Meta:   st.Hint,
+			// The digest declares no per-story timestamps: PublishedAt
+			// stays nil and FetchedAt is the snapshot clock — a fresh
+			// issue tops the list over older cached ones.
+			FetchedAt: now,
 		})
 	}
 	return items, nil
@@ -310,4 +402,38 @@ func cardTime(t momentsTarget) int64 {
 		return t.UpdatedTime
 	}
 	return t.CreatedTime
+}
+
+// --- the daily digest's lazy body (ticket 03) -----------------------------
+
+// BodyOnDemand implements source.BodySource: daily stories alone —
+// their full text is a first-open fetch, while question cards are
+// detail-layer items (ticket 06) whose bodies never ride this path.
+func (s *Source) BodyOnDemand(it core.Item) bool {
+	return strings.HasPrefix(it.ID, dailyIDPrefix)
+}
+
+// FetchBody implements source.BodySource: one anonymous GET to the
+// story door, the body HTML preprocessed through CleanHTML for the
+// render pipeline. The caller persists the return into the body
+// snapshot; re-opens never dial again (二次打开渲染缓存零请求).
+// An empty body errors like the probe's BLOCKED verdict — a well
+// 200 that serves nothing is a shape moved, not a story.
+func (s *Source) FetchBody(ctx context.Context, it core.Item) (string, error) {
+	storyID, ok := strings.CutPrefix(it.ID, dailyIDPrefix)
+	if !ok {
+		return "", fmt.Errorf("fetch body: %q is not a daily story id", it.ID)
+	}
+	res := s.tr.Get(ctx, epDailyStory, s.storyURL(storyID))
+	if res.Err != nil {
+		return "", fmt.Errorf("fetch body %s: %w", it.ID, res.Err)
+	}
+	var story dailyStory // the shape the probe walks too (probe.go)
+	if err := json.Unmarshal(res.Body, &story); err != nil {
+		return "", fmt.Errorf("parse story %s: not zhihu JSON: %w", storyID, err)
+	}
+	if strings.TrimSpace(story.Body) == "" {
+		return "", fmt.Errorf("parse story %s: empty body — 站点可能改版?", storyID)
+	}
+	return CleanHTML(story.Body), nil
 }

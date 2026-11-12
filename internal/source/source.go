@@ -55,6 +55,28 @@ type DetailSource interface {
 	CommentURL(id string) string
 }
 
+// BodySource is the optional lazy-body extension, the same
+// probe-don't-register pattern as DetailSource: a source whose items'
+// full texts do NOT ride the list snapshot but are fetched on first
+// open and cached into the body column, from where re-opens render
+// offline with zero requests (zhihu's daily digest: the list
+// endpoint serves no body). Sources whose bodies ride the list
+// snapshot (rss, hn's selftexts) don't implement it — opening them
+// is always offline. BodyOnDemand is the per-item probe: one source
+// may carry both shapes (zhihu's question cards are detail-layer
+// items, its daily stories lazy-body items).
+type BodySource interface {
+	Source
+	// BodyOnDemand reports whether it's full text is fetched on first
+	// open rather than riding the list snapshot.
+	BodyOnDemand(it core.Item) bool
+	// FetchBody fetches one item's full text, preprocessed for the
+	// render pipeline. First open only — the caller persists the
+	// return through the store's body write and re-opens read the
+	// snapshot instead of calling this again.
+	FetchBody(ctx context.Context, it core.Item) (string, error)
+}
+
 // PagedSource is the optional list-paging extension, the same
 // probe-don't-register pattern as ConditionalSource and DetailSource:
 // a source whose list feeds can be walked forward page by page. hn

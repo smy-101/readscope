@@ -13,13 +13,17 @@ import (
 // unseen items insert, known items update their content in place
 // (ids are deterministic), and the FTS index rows for those items are
 // rebuilt. read_state rows are never touched here — read/star survive
-// every refresh by construction. Ids are unique per source, so a
-// known-item check scans the whole source, and an id arriving under a
-// different feed re-homes its single row to that feed (HN story ids
-// roam between Front and New; rss ids embed the feed key, making
-// this exactly equivalent for them). It returns how many items were
-// new and the feed's total item count after the save. A feed serving
-// the same id twice in one response keeps the first occurrence.
+// every refresh by construction. So does a cached full text: an item
+// served WITHOUT a body keeps its stored one (the lazy-body pattern,
+// where list endpoints carry no full text and a refresh would
+// otherwise wipe what a first open fetched). Ids are unique per
+// source, so a known-item check scans the whole source, and an id
+// arriving under a different feed re-homes its single row to that
+// feed (HN story ids roam between Front and New; rss ids embed the
+// feed key, making this exactly equivalent for them). It returns how
+// many items were new and the feed's total item count after the
+// save. A feed serving the same id twice in one response keeps the
+// first occurrence.
 func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, items []core.Item) (newCount, total int, err error) {
 	for _, it := range items {
 		if it.Source != sourceID || it.Feed != feedKey {
@@ -32,18 +36,23 @@ func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, ite
 	}
 	defer tx.Rollback() // no-op after Commit
 
-	existing := map[string]bool{}
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM items WHERE source = ?`, sourceID)
+	// existing maps every stored id of the source to its cached body:
+	// the keep-rule below needs the old text when a refresh serves an
+	// item without one (the daily-digest pattern — list endpoints carry
+	// no body, and a refresh must never erase the full text a first
+	// open fetched into the snapshot).
+	existing := map[string]string{}
+	rows, err := tx.QueryContext(ctx, `SELECT id, body FROM items WHERE source = ?`, sourceID)
 	if err != nil {
 		return 0, 0, err
 	}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
 			rows.Close()
 			return 0, 0, err
 		}
-		existing[id] = true
+		existing[id] = body
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -57,31 +66,41 @@ func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, ite
 		}
 		inBatch[it.ID] = true
 
-		if existing[it.ID] {
+		// The keep rule: a snapshot without a body never erases the
+		// cached full text — 缓存先行, offline reading outranks snapshot
+		// freshness. A served body replaces in full (a real re-edit).
+		body := it.Body
+		_, known := existing[it.ID]
+		if body == "" && known {
+			body = existing[it.ID]
+		}
+		if known {
 			_, err = tx.ExecContext(ctx, `UPDATE items
 				SET feed = ?, title = ?, url = ?, author = ?, published_at = ?, fetched_at = ?, body = ?,
-				    points = ?, num_comments = ?
+				    points = ?, num_comments = ?, meta = ?
 				WHERE id = ?`,
-				feedKey, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body,
-				it.Points, it.NumComments, it.ID)
+				feedKey, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, body,
+				it.Points, it.NumComments, it.Meta, it.ID)
 		} else {
 			_, err = tx.ExecContext(ctx, `INSERT INTO items
-				(id, source, feed, title, url, author, published_at, fetched_at, body, points, num_comments)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				it.ID, it.Source, it.Feed, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, it.Body,
-				it.Points, it.NumComments)
+				(id, source, feed, title, url, author, published_at, fetched_at, body, points, num_comments, meta)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				it.ID, it.Source, it.Feed, it.Title, it.URL, it.Author, it.PublishedAt, it.FetchedAt, body,
+				it.Points, it.NumComments, it.Meta)
 			newCount++
 		}
 		if err != nil {
 			return 0, 0, fmt.Errorf("store item %s: %w", it.ID, err)
 		}
 		// Rebuild the FTS row even when the items row only updated: the
-		// snapshot text may have changed.
+		// snapshot text may have changed. It indexes the effective body
+		// (the kept one on a bodyless refresh), so a surviving full text
+		// stays searchable.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM fts WHERE item_id = ?`, it.ID); err != nil {
 			return 0, 0, fmt.Errorf("clear fts %s: %w", it.ID, err)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO fts (title, body, item_id) VALUES (?, ?, ?)`,
-			ftsText(it.Title), ftsText(it.Body), it.ID); err != nil {
+			ftsText(it.Title), ftsText(body), it.ID); err != nil {
 			return 0, 0, fmt.Errorf("index fts %s: %w", it.ID, err)
 		}
 	}
@@ -94,6 +113,32 @@ func (s *Store) SaveFeedItems(ctx context.Context, sourceID, feedKey string, ite
 		return 0, 0, err
 	}
 	return newCount, total, nil
+}
+
+// SaveBody caches one item's full text after a lazy-body fetch
+// (BodySource, ticket 03): the body lands in the snapshot column and
+// the FTS index, from where re-opens render offline with zero
+// requests. fetched_at is deliberately untouched — a body fetch is
+// not a snapshot refresh. An id with no row is a caller bug and
+// errors (the FTS rebuild would orphan).
+func (s *Store) SaveBody(ctx context.Context, id, body string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE items SET body = ? WHERE id = ?`, body, id)
+	if err != nil {
+		return fmt.Errorf("save body %s: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("save body %s: %w", id, err)
+	} else if n == 0 {
+		return fmt.Errorf("save body %s: no such item", id)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM fts WHERE item_id = ?`, id); err != nil {
+		return fmt.Errorf("clear fts %s: %w", id, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO fts (title, body, item_id)
+		SELECT title, ?, id FROM items WHERE id = ?`, ftsText(body), id); err != nil {
+		return fmt.Errorf("index fts %s: %w", id, err)
+	}
+	return nil
 }
 
 // SearchFTS runs a full-text query over the unified index and returns
@@ -133,7 +178,7 @@ type ItemRow struct {
 // this: cache first, no network anywhere.
 func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string, unreadOnly bool) ([]ItemRow, error) {
 	q := `SELECT i.id, i.source, i.feed, i.title, i.url, i.author,
-		i.published_at, i.fetched_at, i.body, i.points, i.num_comments,
+		i.published_at, i.fetched_at, i.body, i.points, i.num_comments, i.meta,
 		r.read_at IS NOT NULL, r.starred_at IS NOT NULL
 		FROM items i LEFT JOIN read_state r ON r.item_id = i.id
 		WHERE i.source = ? AND i.feed = ?`
@@ -153,7 +198,7 @@ func (s *Store) FeedItems(ctx context.Context, sourceID, feedKey string, unreadO
 		var points, comments sql.NullInt64
 		if err := rows.Scan(&r.Item.ID, &r.Item.Source, &r.Item.Feed, &r.Item.Title,
 			&r.Item.URL, &r.Item.Author, &published, &r.Item.FetchedAt, &r.Item.Body,
-			&points, &comments, &r.Read, &r.Starred); err != nil {
+			&points, &comments, &r.Item.Meta, &r.Read, &r.Starred); err != nil {
 			return nil, err
 		}
 		if published.Valid {

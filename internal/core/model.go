@@ -49,6 +49,14 @@ type Item struct {
 	// without heat semantics (rss).
 	Points      *int
 	NumComments *int
+
+	// Meta is the source's own preformatted line for the list's meta
+	// column, carried verbatim (zhihu daily's hint "作者 · 2 分钟阅读"
+	// mixes author and reading time in one string the source will not
+	// decompose). Sources that compose meta from semantic fields (hn,
+	// the hot board, the follow feed) leave it empty; the UI routes
+	// per feed, so this is only for atoms the source serves whole.
+	Meta string
 }
 
 // Comment is one node of an item's comment tree (columns map 1:1

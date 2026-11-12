@@ -83,15 +83,17 @@ type request struct {
 //   - v3 moments    : cookie required (403 without)
 //   - hot/daily     : anonymous ok
 type fakeZhihu struct {
-	t               *testing.T
-	mu              sync.Mutex
-	hits            []request
-	blockMoments    bool   // simulate risk control (403 even with cookie)
-	emptyHot        bool   // serve {"data":[]} — redesign tripwire fixture
-	hotOverride     string // serve this body for /topstory/hot-list (source-test fixtures)
-	momentsOverride string // serve this body for /api/v3/moments (follow-feed fixtures)
-	staleStatus     int    // ≠0: v4/comment_v5 answer this status despite a cookie (stale z_c0)
-	wrongVersion    string // ≠"": question-meta demands exactly this x-zse-93 value (zhihu bumped it)
+	t                   *testing.T
+	mu                  sync.Mutex
+	hits                []request
+	blockMoments        bool   // simulate risk control (403 even with cookie)
+	emptyHot            bool   // serve {"data":[]} — redesign tripwire fixture
+	hotOverride         string // serve this body for /topstory/hot-list (source-test fixtures)
+	momentsOverride     string // serve this body for /api/v3/moments (follow-feed fixtures)
+	dailyLatestOverride string // serve this body for /api/4/news/latest (ticket 03 fixtures)
+	dailyStoryOverride  string // serve this body for /api/4/story/* (ticket 03 fixtures)
+	staleStatus         int    // ≠0: v4/comment_v5 answer this status despite a cookie (stale z_c0)
+	wrongVersion        string // ≠"": question-meta demands exactly this x-zse-93 value (zhihu bumped it)
 }
 
 func (f *fakeZhihu) record(r *http.Request) request {
@@ -133,8 +135,16 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case req.path == "/api/v3/feed/topstory/hot-lists/total":
 		write(200, hotJSON)
 	case req.path == "/api/4/news/latest":
+		if f.dailyLatestOverride != "" {
+			write(200, f.dailyLatestOverride)
+			return
+		}
 		write(200, dailyLatestJSON)
 	case strings.HasPrefix(req.path, "/api/4/story/"):
+		if f.dailyStoryOverride != "" {
+			write(200, f.dailyStoryOverride)
+			return
+		}
 		write(200, dailyStoryJSON)
 	case req.path == "/api/v3/moments":
 		if !req.cookie {

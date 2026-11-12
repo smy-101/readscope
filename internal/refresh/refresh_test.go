@@ -709,15 +709,20 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	// would depend on this machine's login state.
 	t.Setenv("READSCOPE_CONFIG", t.TempDir())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/topstory/hot-list" {
-			http.Error(w, "no fixture", http.StatusNotFound)
-			return
-		}
-		fmt.Fprintf(w, `{"data":[
+		switch r.URL.Path {
+		case "/topstory/hot-list":
+			fmt.Fprintf(w, `{"data":[
 		 {"detail_text":"%d 万热度","target":{"id":18984420158198241699,"type":"question",
 		  "title":"为什么终端阅读器又火了？","url":"https://api.zhihu.com/questions/18984420158198241699"}},
 		 {"detail_text":"","target":{"id":100001,"type":"question","title":"置顶卡没有热度列",
 		  "url":"https://api.zhihu.com/questions/100001"}}]}`, heat)
+		case "/api/4/news/latest":
+			// Ticket 03: the daily digest rides the same source refresh.
+			fmt.Fprint(w, `{"date":"20261208","stories":[{"id":9792937,`+
+				`"title":"机器知道它在读什么吗","hint":"AI 新榜单 · 12 分钟阅读"}]}`)
+		default:
+			http.Error(w, "no fixture", http.StatusNotFound)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
@@ -736,8 +741,8 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Source: %v", err)
 	}
-	if len(results) != 2 {
-		t.Fatalf("got %d results, want 2 (hot ok, follow gated — ticket 05)", len(results))
+	if len(results) != 3 {
+		t.Fatalf("got %d results, want 3 (hot ok, follow gated, daily ok — tickets 03/05)", len(results))
 	}
 	r := results[0]
 	if r.Err != nil || r.New != 2 || r.Total != 2 || r.Feed != "hot" {
@@ -748,6 +753,20 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	// it is unaffected (the spec's per-feed isolation).
 	if f := results[1]; f.Feed != "follow" || !errors.Is(f.Err, zhihu.ErrLoginRequired) {
 		t.Fatalf("follow result = %+v, want ErrLoginRequired (Ctrl+U guidance)", f)
+	}
+	// The daily digest lands its row with the hint riding the meta
+	// column and no body — the full text is a first-open fetch
+	// (BodySource, ticket 03).
+	if f := results[2]; f.Err != nil || f.New != 1 || f.Total != 1 || f.Feed != "daily" {
+		t.Fatalf("daily result = %+v", f)
+	}
+	dailyRows, err := st.FeedItems(context.Background(), "zhihu", "daily", false)
+	if err != nil || len(dailyRows) != 1 {
+		t.Fatalf("FeedItems(daily) = %d rows, %v", len(dailyRows), err)
+	}
+	if dailyRows[0].Item.ID != "zh:daily/9792937" || dailyRows[0].Item.Body != "" ||
+		dailyRows[0].Item.Meta != "AI 新榜单 · 12 分钟阅读" {
+		t.Fatalf("daily row = %+v", dailyRows[0].Item)
 	}
 
 	// Reading the top question, then refreshing with its heat moved:
@@ -763,6 +782,9 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	}
 	if r := results2[0]; r.Err != nil || r.New != 0 || r.Total != 2 {
 		t.Fatalf("second refresh should add nothing: %+v", r)
+	}
+	if f := results2[2]; f.Err != nil || f.New != 0 || f.Total != 1 {
+		t.Fatalf("second daily refresh should add nothing: %+v", f)
 	}
 	rows, err := st.FeedItems(context.Background(), "zhihu", "hot", false)
 	if err != nil || len(rows) != 2 {

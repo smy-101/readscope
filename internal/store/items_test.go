@@ -344,6 +344,102 @@ func TestFeedItemsEmptyFeedIsEmpty(t *testing.T) {
 	}
 }
 
+// The daily-digest pattern (ticket 03): the list endpoint carries no
+// body, so every refresh saves rows with an empty Body — the full
+// text a first open fetched into the snapshot must survive those
+// refreshes, or offline reading dies on the next F5. The FTS row
+// must keep indexing the surviving text too.
+func TestSaveFeedItemsKeepsCachedBodyWhenRefreshServesNone(t *testing.T) {
+	s := migrated(t)
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex",
+		[]core.Item{item("rss:ex:1", "One", "offline snapshot text")}); err != nil {
+		t.Fatalf("save with body: %v", err)
+	}
+	// Refresh serving the same id with no body: keep the cached text.
+	bare := item("rss:ex:1", "One edited", "")
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex", []core.Item{bare}); err != nil {
+		t.Fatalf("refresh without body: %v", err)
+	}
+	rows, err := s.FeedItems(t.Context(), "rss", "ex", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems = %d rows, %v", len(rows), err)
+	}
+	if rows[0].Item.Body != "offline snapshot text" {
+		t.Fatalf("bodyless refresh erased the cached body: %q", rows[0].Item.Body)
+	}
+	if rows[0].Item.Title != "One edited" {
+		t.Fatalf("other snapshot columns must still update: %q", rows[0].Item.Title)
+	}
+	if ids, _ := s.SearchFTS(t.Context(), "snapshot"); len(ids) != 1 || ids[0] != "rss:ex:1" {
+		t.Fatalf("fts must keep indexing the surviving body: %v", ids)
+	}
+	// A refresh serving a NEW body still replaces it in full.
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex",
+		[]core.Item{item("rss:ex:1", "One edited", "rewritten body")}); err != nil {
+		t.Fatalf("refresh with body: %v", err)
+	}
+	if rows, _ = s.FeedItems(t.Context(), "rss", "ex", false); rows[0].Item.Body != "rewritten body" {
+		t.Fatalf("non-empty body must overwrite: %q", rows[0].Item.Body)
+	}
+}
+
+// SaveBody is the open-time body write behind the lazy-body flow
+// (ticket 03): the full text fetched on first open lands in the
+// snapshot and the FTS index, from where re-opens read offline.
+func TestSaveBodyCachesAndIndexes(t *testing.T) {
+	s := migrated(t)
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex",
+		[]core.Item{item("rss:ex:1", "One", "")}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := s.SaveBody(t.Context(), "rss:ex:1", "<p>full story body words</p>"); err != nil {
+		t.Fatalf("SaveBody: %v", err)
+	}
+	rows, err := s.FeedItems(t.Context(), "rss", "ex", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems = %d rows, %v", len(rows), err)
+	}
+	if rows[0].Item.Body != "<p>full story body words</p>" {
+		t.Fatalf("body not cached: %q", rows[0].Item.Body)
+	}
+	if ids, _ := s.SearchFTS(t.Context(), "story"); len(ids) != 1 || ids[0] != "rss:ex:1" {
+		t.Fatalf("fetched body not searchable: %v", ids)
+	}
+	// An id with no row behind it is a caller bug: name it, don't
+	// silently write into the void (the FTS rebuild would orphan).
+	if err := s.SaveBody(t.Context(), "rss:ex:none", "x"); err == nil {
+		t.Fatal("SaveBody on unknown id should error")
+	}
+}
+
+// The meta column carries a source's own preformatted meta line
+// (zhihu daily's hint "作者 · 2 分钟阅读"): round-trips through the
+// snapshot like any other column, NULL-less and defaulting empty.
+func TestSaveFeedItemsRoundTripsMeta(t *testing.T) {
+	s := migrated(t)
+	withHint := item("rss:ex:1", "One", "b")
+	withHint.Meta = "作者 · 2 分钟阅读"
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex", []core.Item{withHint}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	rows, err := s.FeedItems(t.Context(), "rss", "ex", false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("FeedItems = %d rows, %v", len(rows), err)
+	}
+	if rows[0].Item.Meta != "作者 · 2 分钟阅读" {
+		t.Fatalf("meta lost: %q", rows[0].Item.Meta)
+	}
+	// A refresh without the field keeps the row working; sources
+	// without meta semantics (rss) simply leave it empty.
+	if _, _, err := s.SaveFeedItems(t.Context(), "rss", "ex",
+		[]core.Item{item("rss:ex:1", "One", "b")}); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if rows, _ = s.FeedItems(t.Context(), "rss", "ex", false); rows[0].Item.Meta != "" {
+		t.Fatalf("meta should follow the snapshot (empty served → empty): %q", rows[0].Item.Meta)
+	}
+}
+
 func TestFeedCountsTotalsAndUnread(t *testing.T) {
 	s := migrated(t)
 	mk := func(feed, id string) core.Item {

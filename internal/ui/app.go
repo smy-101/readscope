@@ -449,6 +449,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commentsMsg:
 		return m, m.commentsLanded(msg)
 
+	case bodyMsg:
+		return m, m.bodyLanded(msg)
+
 	case tea.KeyMsg:
 		// Ctrl+A's confirmation is modal: only Enter commits, Esc (or
 		// quit) leaves; every other key waits. No printable key can

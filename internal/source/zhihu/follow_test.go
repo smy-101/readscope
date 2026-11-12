@@ -64,8 +64,8 @@ func TestFeedsAreHotThenFollow(t *testing.T) {
 	fake := &fakeZhihu{}
 	src, _ := followSrcAt(t, fake) // server unused: Feeds dials nothing
 	feeds := src.Feeds()
-	if len(feeds) != 2 {
-		t.Fatalf("got %d feeds, want 2 (hot, follow; daily lands in ticket 03)", len(feeds))
+	if len(feeds) != 3 {
+		t.Fatalf("got %d feeds, want 3 (hot, follow, daily — ticket 03)", len(feeds))
 	}
 	hot, follow := feeds[0], feeds[1]
 	if hot.Key != HotFeedKey || hot.ListSort != core.ListSortPoints {

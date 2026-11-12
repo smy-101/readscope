@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/smy-101/readscope/internal/core"
+	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 )
 
@@ -193,19 +194,29 @@ func (m Model) rowMeta(row store.ItemRow) string {
 	return m.relTime(row.Item.PublishedAt)
 }
 
-// zhihuMeta renders the row's zhihu meta column: hot-board rows the
-// heat reading "N 万热度" from the folded heat snapshot (the fold
-// lives in zhihu.heatPoints, each side pinned by its own test); the
-// fold only ever stores whole 万, so the division restores the exact
-// number. Follow-feed rows carry no heat — their meta is the card's
-// author (the answerer on an answer card, the asker on a question
-// card); a row without either keeps the meta blank like the date-less
-// rows always have.
+// zhihuMeta renders the row's zhihu meta column, routed per feed
+// (the 02 review's transfer: the daily hint was the first
+// source-internal per-feed case — route the feed, don't pile field
+// ifs): the hot board's heat reading "N 万热度" from the folded heat
+// snapshot (the fold lives in zhihu.heatPoints, each side pinned by
+// its own test; the fold only ever stores whole 万, so the division
+// restores the exact number); the follow feed's card author (the
+// answerer on an answer card, the asker on a question card); the
+// daily digest's hint, carried verbatim in the meta column — the
+// source serves it as one atomic string. A row without its feed's
+// segment keeps the meta blank like the date-less rows always have.
 func (m Model) zhihuMeta(it core.Item) string {
-	if it.Points != nil {
-		return m.cat.Get("zhihu.heat", *it.Points/10000)
+	switch it.Feed {
+	case zhihu.HotFeedKey:
+		if it.Points != nil {
+			return m.cat.Get("zhihu.heat", *it.Points/10000)
+		}
+		return "" // pinned card, or a heat format zhihu invented later
+	case zhihu.DailyFeedKey:
+		return it.Meta // the hint, verbatim
+	default: // follow
+		return it.Author
 	}
-	return it.Author
 }
 
 // hnMeta renders the heat radar "N pts · N comments · author" from the

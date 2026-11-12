@@ -65,6 +65,12 @@ type detail struct {
 	loadErr    error                  // fetch failure while nothing is loaded
 	floors     []floor
 
+	// The lazy-body half (source.BodySource, ticket 03): a first open
+	// of a body-less row whose full text is fetched now — daily
+	// digest stories. The snapshot is the cache: a row with a body
+	// (every later open) never dials.
+	bodyLoading bool
+
 	layer      detailLayer
 	floorIdx   int // which floor the floor layer shows
 	floorLines []render.Line
@@ -125,6 +131,7 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 		return false, nil
 	}
 	d := &detail{item: m.items[m.listSel], replyFloor: -1}
+	var bodyCmd tea.Cmd
 	if m.srcs != nil {
 		if src, err := source.New(d.item.Item.Source, m.srcs); err == nil {
 			if ds, ok := src.(source.DetailSource); ok {
@@ -132,14 +139,23 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 				d.commentURL = ds.CommentURL
 				d.loading = true // until the cache probe says otherwise
 			}
+			// The lazy body: only a body-less row qualifies, and only
+			// when the source fetches this item's body on demand — a
+			// cached snapshot renders offline, zero requests.
+			if strings.TrimSpace(d.item.Item.Body) == "" {
+				if bs, ok := src.(source.BodySource); ok && bs.BodyOnDemand(d.item.Item) {
+					d.bodyLoading = true
+					bodyCmd = m.fetchBodyCmd(d.item.Item)
+				}
+			}
 		}
 	}
 	m.reader = d
 	m.rebuildBodyDoc()
 	if d.hasDetail {
-		return true, m.readCommentsCmd(d.item.Item)
+		return true, tea.Batch(m.readCommentsCmd(d.item.Item), bodyCmd)
 	}
-	return true, nil
+	return true, bodyCmd
 }
 
 // detailWidth is the reading column: the list pane minus its left
@@ -218,8 +234,15 @@ func (m Model) detailDoc(it core.Item) *render.Document {
 	var doc *render.Document
 	switch {
 	case strings.TrimSpace(it.Body) == "":
+		// A body-less row: the lazy-body placeholder while the fetch is
+		// in flight, the standing no-body line otherwise (offline and
+		// never opened — the status bar carries the named failure).
+		text := m.cat.Get("detail.no_body")
+		if d := m.reader; d != nil && d.bodyLoading && d.item.Item.ID == it.ID {
+			text = m.cat.Get("detail.body_loading")
+		}
 		doc = &render.Document{Blocks: []render.Block{
-			render.Para{Spans: []render.Span{{Text: m.cat.Get("detail.no_body"), Style: render.SpanDim}}},
+			render.Para{Spans: []render.Span{{Text: text, Style: render.SpanDim}}},
 		}}
 	case strings.Contains(it.Body, "<"):
 		if parsed, err := render.ParseHTML(it.Body); err == nil {
@@ -378,6 +401,57 @@ func (m *Model) setFloors(comments []core.Comment) {
 		d.floorLines, d.replyLines = nil, nil
 	}
 	m.rebuildBodyDoc()
+}
+
+// --- lazy body (ticket 03) -----------------------------------------------
+
+// bodyMsg lands when a lazy-body fetch finished (refresh.Body — the
+// fetch-and-cache in one command).
+type bodyMsg struct {
+	itemID string
+	body   string
+	err     error
+}
+
+// fetchBodyCmd is the network half of the lazy body: fetch the full
+// text and persist it into the snapshot. The reader shows the
+// loading placeholder until it lands.
+func (m Model) fetchBodyCmd(it core.Item) tea.Cmd {
+	st, srcs := m.st, m.srcs
+	return func() tea.Msg {
+		body, err := refresh.Body(context.Background(), st, srcs, it)
+		return bodyMsg{itemID: it.ID, body: body, err: err}
+	}
+}
+
+// bodyLanded folds a bodyMsg in. The list row's copy gets the text
+// FIRST — the row is what the next open reads, so without this a
+// re-open would re-dial a story the store already holds; it also
+// covers the reader having closed before the fetch landed. Then the
+// open reader (if it is still this item) renders the text in place.
+// A failure is loud in the status bar — the ticket's 未开条目离线时
+// 明确提示 — and leaves every cached byte untouched.
+func (m *Model) bodyLanded(msg bodyMsg) tea.Cmd {
+	if msg.err == nil {
+		for i := range m.items {
+			if m.items[i].Item.ID == msg.itemID {
+				m.items[i].Item.Body = msg.body
+				break
+			}
+		}
+	}
+	d := m.reader
+	if d == nil || d.item.Item.ID != msg.itemID {
+		return nil // closed or another item open; the row update above still counts
+	}
+	d.bodyLoading = false
+	if msg.err != nil {
+		m.status = m.cat.Get("errors.body_fetch", msg.err)
+		return nil
+	}
+	d.item.Item.Body = msg.body
+	m.rebuildBodyDoc()
+	return nil
 }
 
 // --- floor / reply layer rendering ---------------------------------------
