@@ -11,7 +11,7 @@ package zhihu
 import (
 	"errors"
 	"net/http/httptest"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,7 +29,7 @@ func TestFeedsOrderHotRecommendFollowDaily(t *testing.T) {
 	for _, f := range src.Feeds() {
 		keys = append(keys, f.Key)
 	}
-	if want := []string{"hot", "recommend", "follow", "daily"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"hot", "recommend", "follow", "daily"}; !slices.Equal(keys, want) {
 		t.Fatalf("feed order = %v, want %v", keys, want)
 	}
 	for _, f := range src.Feeds() {
@@ -74,7 +74,8 @@ func TestRecommendCursorPageFiltersToQuestionCards(t *testing.T) {
 	 {"target":{"type":"question","id":18984420158198241698,"title":"同题重复卡","author":{"name":"重复"}}},
 	 {"target":{"type":"article","id":200009,"title":"09 号票之前的文章卡"}},
 	 {"target":{"type":"pin","id":300010}},
-	 {"target":{"type":"video","id":400011}}
+	 {"target":{"type":"video","id":400011}},
+	 {"target":{"type":"ad","id":500012,"title":"广告卡不进列表"}}
 	],"paging":{"next":"https://www.zhihu.com/api/v3/feed/topstory/recommend?after_id=5&desktop=true","is_end":false}}`
 	src, f, _ := recommendSrcAt(t, &fakeZhihu{t: t, recommendOverride: body})
 

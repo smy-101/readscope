@@ -38,8 +38,8 @@ func dailyItem(id, title, hint, body string) core.Item {
 }
 
 // dailyModel seeds the daily feed's rows and lands the model on the
-// zhihu source with the daily feed selected (sidebar slot 3:
-// hot → follow → daily).
+// zhihu source with the daily feed selected (sidebar slot 4:
+// hot → recommend → follow → daily).
 func dailyModel(t *testing.T, items []core.Item) Model {
 	t.Helper()
 	m := seededModel(t, nil, nil)

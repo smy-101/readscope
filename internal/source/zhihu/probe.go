@@ -166,21 +166,25 @@ type dailyStory struct {
 	Body  string `json:"body"`
 }
 
-// momentsCard is one heterogeneous card of the follow feed
-// (GLOSSARY: 关注流): only answer and question cards ever reach a list
+// momentsCard is one heterogeneous card of the moments-family feeds
+// (follow and recommend serve field-compatible cards, probe
+// 2026-11-12): only answer and question cards ever reach a list
 // as question cards (GLOSSARY: 问题卡); everything else the probe
 // censuses as dropped. updated_time/created_time are the card's own
-// clock — the follow list orders by them, not by fetch time.
+// clock — the follow and recommend lists order by them, not by
+// fetch time.
 type momentsCard struct {
 	Target momentsTarget `json:"target"`
 }
 
-// momentsTarget is the card's payload half. Ids are json.Number —
-// question ids run past 2^53, and any float64 path (the default
-// unmarshal) mangles the low digits into an id that 404s on open;
-// the number's exact string is the only trustworthy spelling. The
-// dual clock (updated/created) is cardTime's input: the follow list
-// orders by the card's own clock, not the fetch's.
+// momentsTarget is the card's payload half (both cursor feeds —
+// follow and recommend — deserialize this same shape). Ids are
+// json.Number — question ids run past 2^53, and any float64 path
+// (the default unmarshal) mangles the low digits into an id that
+// 404s on open; the number's exact string is the only trustworthy
+// spelling. The dual clock (updated/created) is cardTime's input:
+// the cursor-feed lists order by the card's own clock, not the
+// fetch's.
 type momentsTarget struct {
 	Type        string      `json:"type"`
 	ID          json.Number `json:"id"`

@@ -49,13 +49,14 @@ const (
 
 	// recommend (ticket 08) mixes the algorithmic feed's card kinds:
 	// answer/question kept as question cards, article censused apart
-	// (ticket 09 will keep it), pin/video dropped.
+	// (ticket 09 will keep it), pin/video/ad dropped.
 	recommendJSON = `{"data":[
 	 {"target":{"type":"answer","id":1912345678901234568,"author":{"name":"赵六"},
 	  "question":{"id":18984420158198241698,"title":"推荐的问题"}}},
 	 {"target":{"type":"article","id":200009,"title":"推荐的文章"}},
 	 {"target":{"type":"pin","id":300010}},
-	 {"target":{"type":"video","id":400011}}
+	 {"target":{"type":"video","id":400011}},
+	 {"target":{"type":"ad","id":500012,"title":"被丢弃的广告卡"}}
 	],"paging":{"next":"https://www.zhihu.com/api/v3/feed/topstory/recommend?cursor=xyz","is_end":false}}`
 
 	questionMetaJSON = `{"title":"为什么终端阅读器又火了？","author":{"name":"张三"},

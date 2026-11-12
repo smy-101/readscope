@@ -55,9 +55,9 @@ func TestRecommendFeedSidebarLabelOrderAndAuthorMeta(t *testing.T) {
 	}
 	// The spec's sidebar order: recommend sits between the hot board
 	// and the follow feed.
-	ih, ir, if_ := strings.Index(view, "Hot List"), strings.Index(view, "Recommend"), strings.Index(view, "Following")
-	if ih < 0 || ir < 0 || if_ < 0 || !(ih < ir && ir < if_) {
-		t.Errorf("sidebar order broken: hot@%d recommend@%d follow@%d\n%s", ih, ir, if_, view)
+	ih, ir, ifo := strings.Index(view, "Hot List"), strings.Index(view, "Recommend"), strings.Index(view, "Following")
+	if ih < 0 || ir < 0 || ifo < 0 || !(ih < ir && ir < ifo) {
+		t.Errorf("sidebar order broken: hot@%d recommend@%d follow@%d\n%s", ih, ir, ifo, view)
 	}
 	if !strings.Contains(view, "推荐的问题") {
 		t.Errorf("list missing the recommend row:\n%s", view)
