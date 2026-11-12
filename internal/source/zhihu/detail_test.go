@@ -458,3 +458,193 @@ func TestAnswerAndCommentURL(t *testing.T) {
 		t.Errorf("CommentURL(bare id) = %q, want \"\"", got)
 	}
 }
+
+// --- the article's two-layer detail (ticket 09) --------------------------
+
+// fakeArticleID mirrors the real network's shape: past 2^53, served
+// as a string by the zhuanlan door (json.Number digests both).
+const fakeArticleID = "2098551208264914833"
+
+func articleItem() core.Item {
+	return core.Item{ID: ArticleItemID(fakeArticleID), Source: ID, Feed: RecommendFeedKey,
+		Title: "《HelloGitHub》第 127 期", Author: "HelloGitHub"}
+}
+
+// articleDetailJSON is the zhuanlan door's payload: content through
+// the HTML gauntlet (noscript copy, /80/ proxy, lazy placeholder),
+// the counts, both clocks.
+const articleDetailJSON = `{"title":"《HelloGitHub》第 127 期","author":{"name":"HelloGitHub"},
+ "content":"<p>正文<b>加粗</b></p><noscript><img src=\"https://pic.zhimg.com/80/x.jpg\"></noscript><img data-original=\"https://pic.zhimg.com/50/a.jpg\" src=\"data:image/svg+xml,e\">",
+ "comment_count":88,"voteup_count":1024,"created":1710000000,"updated":1710000100}`
+
+// articleRootsJSON: two roots under the article, one hot child on
+// the first — the same comment_v5 shape the answers door serves.
+const articleRootsJSON = `{"data":[
+ {"id":701,"author":{"name":"评论甲"},"like_count":3,"content":"文章根评论",
+  "child_comment_count":1,"child_comments":[
+   {"id":801,"author":{"name":"子乙"},"like_count":0,"content":"<p>子回复</p>"}]},
+ {"id":702,"author":{"name":"评论丙"},"like_count":0,"content":"根二","child_comment_count":0}
+],"paging":{"next":"","is_end":true}}`
+
+// articleFake lands a cookie'd source with the article family's
+// fixtures; its own server so the zhuanlan root is wired without
+// touching the question fixtures' helper.
+func articleFake(t *testing.T) (*Source, *fakeZhihu) {
+	t.Helper()
+	fake := &fakeZhihu{
+		articleMetaOverride: articleDetailJSON,
+		articleRootOverride: articleRootsJSON,
+	}
+	srv := httptest.NewServer(fake)
+	t.Cleanup(srv.Close)
+	return newSource(Hosts{API: srv.URL, Daily: srv.URL, Web: srv.URL, Zhuanlan: srv.URL}, cookieText), fake
+}
+
+// The article open: one GET on the zhuanlan door (cookie + the
+// article page Referer, NO version header), the body cleaned through
+// the same gauntlet, and the tree exactly one pseudo floor — the
+// article itself — carrying the server's comment count (the comment
+// layer's zero-request fast path) and the voteup/author data every
+// floor head reads.
+func TestArticleDetailMapsBodyAndPseudoFloor(t *testing.T) {
+	src, fake := articleFake(t)
+	it := articleItem()
+
+	if !src.DetailOnDemand(it) {
+		t.Fatal("DetailOnDemand(article) = false, want the two-layer detail")
+	}
+	c, err := src.Detail(t.Context(), it)
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	h := fake.hitExact("/api/articles/" + fakeArticleID)
+	if h == nil {
+		t.Fatal("the zhuanlan article door never dialed")
+	}
+	if !h.cookie || h.zse93 || h.referer != "https://zhuanlan.zhihu.com/p/"+fakeArticleID {
+		t.Errorf("article door fingerprint: cookie/no-zse93/referer contract broken: %+v", h)
+	}
+	if strings.Contains(c.Body, "noscript") || strings.Contains(c.Body, "/80/") || strings.Contains(c.Body, "data:image") {
+		t.Errorf("body not cleaned: %q", c.Body)
+	}
+	if !strings.Contains(c.Body, "加粗") {
+		t.Errorf("body lost real content: %q", c.Body)
+	}
+	if len(c.Comments) != 1 {
+		t.Fatalf("tree = %d floors, want exactly the one pseudo floor", len(c.Comments))
+	}
+	f := c.Comments[0]
+	if f.ID != fakeArticleID || f.Author != "HelloGitHub" {
+		t.Errorf("pseudo floor = {%s %s}, want the article's own id/author", f.ID, f.Author)
+	}
+	if f.NumChildren == nil || *f.NumChildren != 88 {
+		t.Errorf("pseudo floor NumChildren = %v, want the server's comment_count (88)", f.NumChildren)
+	}
+	if f.Score == nil || *f.Score != 1024 {
+		t.Errorf("pseudo floor Score = %v, want the voteup (1024)", f.Score)
+	}
+	if c.Next != "" {
+		t.Errorf("article detail pages nothing, Next = %q", c.Next)
+	}
+}
+
+// The article failure semantics ride the detail family's: stale
+// z_c0 → re-login guidance, 404 → gone, a well-200 empty content →
+// the redesign alarm, anonymous → ErrLoginRequired without dialing.
+func TestArticleDetailFailureSemantics(t *testing.T) {
+	it := articleItem()
+
+	src, fake := articleFake(t)
+	fake.staleStatus = 403
+	if _, err := src.Detail(t.Context(), it); !errors.Is(err, ErrSessionExpired) {
+		t.Errorf("403 = %v, want ErrSessionExpired", err)
+	}
+
+	src, fake = articleFake(t)
+	fake.goneStatus = 404
+	if _, err := src.Detail(t.Context(), it); !errors.Is(err, ErrContentGone) {
+		t.Errorf("404 = %v, want ErrContentGone", err)
+	}
+
+	src, fake = articleFake(t)
+	fake.articleMetaOverride = `{"title":"空","content":""}`
+	_, err := src.Detail(t.Context(), it)
+	if err == nil || !strings.Contains(err.Error(), "站点可能改版") {
+		t.Errorf("empty content = %v, want the redesign alarm", err)
+	}
+
+	anonFake := &fakeZhihu{}
+	srv := httptest.NewServer(anonFake)
+	t.Cleanup(srv.Close)
+	anon := newSource(Hosts{Zhuanlan: srv.URL}, "")
+	if _, err := anon.Detail(t.Context(), it); !errors.Is(err, ErrLoginRequired) {
+		t.Errorf("no cookie = %v, want ErrLoginRequired", err)
+	}
+	if n := anonFake.hitCount("/api/articles/"); n != 0 {
+		t.Errorf("gated preflight must refuse before dialing, dialed %d times", n)
+	}
+}
+
+// The article's comment layer rides the same walk as the answers':
+// the articles root_comment door, the first page WITHOUT an offset
+// parameter (the zombie-page contract), roots parented to the
+// article's pseudo floor, and a floor id that is not the article's
+// own refused loudly (a wiring bug must not silently fetch).
+func TestArticleCommentsRideTheAnswerWalk(t *testing.T) {
+	src, fake := articleFake(t)
+	it := articleItem()
+
+	comments, next, err := src.FetchAnswerComments(t.Context(), it, fakeArticleID, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	h := fake.hitExact("/api/v4/comment_v5/articles/" + fakeArticleID + "/root_comment")
+	if h == nil {
+		t.Fatal("the articles comment door never dialed")
+	}
+	if m := offsetParamRe.FindStringSubmatch(h.query); m != nil && m[1] != "" {
+		t.Errorf("first page carried offset=%q — the zombie-page contract", m[1])
+	}
+	if next != "" {
+		t.Errorf("fixture page is the end, next = %q", next)
+	}
+	// Tree shape: both roots parented to the article's pseudo floor,
+	// the hot child parented to its root — tree order.
+	if len(comments) != 3 {
+		t.Fatalf("tree = %d nodes, want 2 roots + 1 child", len(comments))
+	}
+	if comments[0].ID != "701" || comments[0].ParentID != fakeArticleID {
+		t.Errorf("root 701 = {%s parent=%s}, want parented to the article floor", comments[0].ID, comments[0].ParentID)
+	}
+	if comments[1].ID != "801" || comments[1].ParentID != "701" {
+		t.Errorf("child 801 = {%s parent=%s}, want parented to its root", comments[1].ID, comments[1].ParentID)
+	}
+	if comments[2].ID != "702" || comments[2].ParentID != fakeArticleID {
+		t.Errorf("root 702 = {%s parent=%s}, want parented to the article floor", comments[2].ID, comments[2].ParentID)
+	}
+
+	// A floor id that is not the article's own: a wiring bug, refused
+	// by name, nothing dialed.
+	before := fake.hitCount("/api/v4/comment_v5/articles/")
+	if _, _, err := src.FetchAnswerComments(t.Context(), it, "999", ""); err == nil {
+		t.Error("mismatched floor id accepted — the walk must refuse it by name")
+	}
+	if n := fake.hitCount("/api/v4/comment_v5/articles/"); n != before {
+		t.Errorf("mismatched id dialed anyway: %d → %d hits", before, n)
+	}
+}
+
+// The article's Ctrl+O/Ctrl+Y targets: the column page everywhere
+// (body, comment layers) — a bare comment id addresses no article
+// page on its own.
+func TestArticleURLs(t *testing.T) {
+	src, _ := articleFake(t)
+	it := articleItem()
+	want := "https://zhuanlan.zhihu.com/p/" + fakeArticleID
+	if got := src.AnswerURL(it, fakeArticleID); got != want {
+		t.Errorf("AnswerURL = %q, want the column page", got)
+	}
+	if got := src.CommentURL(it.ID); got != want {
+		t.Errorf("CommentURL = %q, want the column page", got)
+	}
+}

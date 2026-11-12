@@ -84,6 +84,7 @@ type detail struct {
 	commentsNext map[string]string
 	commentsBusy bool
 	floorsBusy   bool
+	article      bool // a zhihu article's open: two-layer detail, no floors layer (ticket 09)
 
 	// The lazy-body half (source.BodySource, ticket 03): a first open
 	// of a body-less row whose full text is fetched now — daily
@@ -158,6 +159,7 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 				d.hasDetail = true
 				d.commentURL = ds.CommentURL
 				d.loading = true // until the cache probe says otherwise
+				d.article = zhihu.IsArticleItem(d.item.Item.ID)
 			}
 			// The paging detail (zhihu questions): its layers load more
 			// on the network — Ctrl+N on the question and comment layers
@@ -235,7 +237,7 @@ func (m *Model) relayoutReader() {
 func (m *Model) rebuildBodyDoc() {
 	d := m.reader
 	doc := m.detailDoc(d.item.Item)
-	if d.pager != nil {
+	if d.pager != nil && !d.article { // an article's body layer has no floor list under it
 		doc.Blocks = append(doc.Blocks, m.questionLayerBlocks()...)
 	} else if d.hasDetail {
 		doc.Blocks = append(doc.Blocks,
@@ -283,8 +285,11 @@ func (m Model) answersFooter() string {
 }
 
 // commentsFooter is the one-line comment state under the article:
-// loading / failed / empty / floor count. (hn's body layer; the zhihu
-// question layer carries answersFooter instead.)
+// loading / failed / empty / floor count. (hn's body layer; a zhihu
+// question layer carries answersFooter instead; a zhihu ARTICLE —
+// ticket 09 — counts to the article's own comment total: the tree's
+// own count once roots are loaded, else the server's comment_count
+// off the pseudo floor.)
 func (m Model) commentsFooter() string {
 	d := m.reader
 	switch {
@@ -292,6 +297,13 @@ func (m Model) commentsFooter() string {
 		return m.cat.Get("detail.loading")
 	case d.loadErr != nil:
 		return m.cat.Get("detail.load_failed")
+	case d.article:
+		if d.loaded && len(d.floors) > 0 {
+			if n := m.floorCommentCount(&d.floors[0]); n != nil && *n > 0 {
+				return m.cat.Get("zhihu.comments_n", m.zhihuCount(int64(*n)))
+			}
+		}
+		return m.cat.Get("detail.no_comments")
 	case len(d.floors) == 0:
 		return m.cat.Get("detail.no_comments")
 	default:
@@ -768,13 +780,19 @@ func (m *Model) layoutReplies() {
 	d.replies = flattenReplies(f)
 	d.replyFloor = d.floorIdx
 	author := m.authorOrDeleted(f.cm.Author)
-	headerKey := "detail.replies_to"
+	headerLine := m.cat.Get("detail.replies_to", author)
 	if d.pager != nil {
-		headerKey = "zhihu.comments_of"
+		// The question's comment layer names its answer; an article's
+		// floor IS the article, so the layer header names itself.
+		if d.article {
+			headerLine = m.cat.Get("zhihu.article_comments")
+		} else {
+			headerLine = m.cat.Get("zhihu.comments_of", author)
+		}
 	}
 	header := &render.Document{Blocks: []render.Block{
 		render.Para{Spans: []render.Span{
-			{Text: m.cat.Get(headerKey, author), Style: render.SpanDim},
+			{Text: headerLine, Style: render.SpanDim},
 		}},
 		render.Rule{},
 	}}
@@ -884,7 +902,11 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case "esc": // one layer back; from the body, back to the list
 		switch d.layer {
 		case layerReplies:
-			d.layer = layerFloors
+			if d.article {
+				d.layer = layerBody // the article has no floors layer to step back to
+			} else {
+				d.layer = layerFloors
+			}
 		case layerFloors:
 			d.layer = layerBody
 		default:
@@ -896,6 +918,15 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		switch d.layer {
 		case layerBody: // into the floors (detail sources only)
 			if d.hasDetail {
+				if d.article {
+					// The article's Enter skips the floors layer: the
+					// comments hang directly under the article itself.
+					if ok, cmd := m.enterArticleComments(); ok {
+						return true, cmd
+					}
+					m.status = m.cat.Get("detail.no_comments")
+					return true, nil
+				}
 				m.enterFloors()
 			}
 			return true, nil // never re-open the body (would reset scroll)
@@ -947,6 +978,9 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		switch d.layer {
 		case layerBody:
 			if d.pager != nil {
+				if d.article {
+					return true, nil // the article pages nothing at the body layer (no floors walk)
+				}
 				return true, m.moreFloorsCmd()
 			}
 			return true, nil
@@ -1034,6 +1068,52 @@ func (m *Model) enterReplies() (bool, tea.Cmd) {
 	}
 	if _, loaded := d.commentsNext[f.cm.ID]; loaded {
 		return false, nil // fetched already: the answer genuinely has none
+	}
+	if f.cm.NumChildren != nil && *f.cm.NumChildren == 0 {
+		return false, nil // the server itself reported zero
+	}
+	var cmd tea.Cmd
+	if !d.commentsBusy {
+		cmd = m.commentsPageCmd("")
+	}
+	d.replyTop = 0
+	m.layoutReplies() // the pending screen (loading or none)
+	d.layer = layerReplies
+	return true, cmd
+}
+
+// enterArticleComments is the article's body-layer Enter (ticket
+// 09): straight into the comment layer on the article's own pseudo
+// floor — there is no floors layer in the two-layer detail. A
+// still-loading open enters on the pending screen (commentsLanded
+// re-lays the layer when the tree lands); every loaded path mirrors
+// the answer walk's exactly — cached tree replays, unknown-count
+// fetches, a walk that already ended or a server-reported zero
+// refuses (and the caller says why).
+func (m *Model) enterArticleComments() (bool, tea.Cmd) {
+	d := m.reader
+	if !d.loaded || len(d.floors) == 0 {
+		// First open still in flight (or failed with nothing cached):
+		// enter on the state line; replyFloor pins floor 0 so the
+		// landed tree re-lays THIS layer in place.
+		d.replyTop = 0
+		d.replyFloor = 0
+		d.replies, d.replyStarts = nil, nil
+		d.replyLines = m.pendingLines()
+		d.layer = layerReplies
+		return true, nil
+	}
+	f := &d.floors[0]
+	if len(f.replies) > 0 {
+		if d.replyFloor != 0 || d.replyLines == nil {
+			d.replyTop = 0
+			m.layoutReplies()
+		}
+		d.layer = layerReplies
+		return true, nil
+	}
+	if _, loaded := d.commentsNext[f.cm.ID]; loaded {
+		return false, nil // fetched already: the article genuinely has none
 	}
 	if f.cm.NumChildren != nil && *f.cm.NumChildren == 0 {
 		return false, nil // the server itself reported zero

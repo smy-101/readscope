@@ -838,7 +838,7 @@ func followMomentsFake(t *testing.T) (*httptest.Server, func() []string) {
 			q("1001", "关注问题一", 1731400400), q("1002", "关注问题二", 1731400300)),
 		"A": fmt.Sprintf(`{"data":[%s,%s],"paging":{"next":"%%NEXT%%B","is_end":false}}`,
 			q("1002", "关注问题二", 1731400300), q("1003", "关注问题三", 1731400200)),
-		"B": `{"data":[{"target":{"type":"pin","id":9}},{"target":{"type":"article","id":8,"title":"文"}}],
+		"B": `{"data":[{"target":{"type":"pin","id":9}},{"target":{"type":"zvideo","id":8,"title":"视"}}],
 			"paging":{"next":"%NEXT%C","is_end":false}}`,
 		"C": fmt.Sprintf(`{"data":[%s],"paging":{"next":"","is_end":true}}`,
 			q("1004", "深处的提问", 1731300000)),

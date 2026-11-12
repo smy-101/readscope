@@ -95,7 +95,7 @@ var (
 func New(*core.Sources) (source.Source, error) {
 	hosts := ProdHosts
 	if v := os.Getenv("READSCOPE_ZHIHU_BASE"); v != "" {
-		hosts = Hosts{API: v, Daily: v, Web: v}
+		hosts = Hosts{API: v, Daily: v, Web: v, Zhuanlan: v}
 	}
 	cookie := ""
 	if path, err := CookiePath(); err == nil {
@@ -189,6 +189,36 @@ func ItemID(qid string) string { return itemIDPrefix + qid }
 
 // itemIDPrefix is the single source of the id shape.
 const itemIDPrefix = "zh:question/"
+
+// articleIDPrefix is the article row id's single source (ticket 09):
+// an article never folds into a question — it is its own row and its
+// own two-layer detail (GLOSSARY: 问题卡 vs 文章卡).
+const articleIDPrefix = "zh:article/"
+
+// ArticleItemID builds the deterministic row id "zh:article/<id>".
+// Both cursor feeds (recommend and follow) mint this same id, so one
+// article is one row however it arrives.
+func ArticleItemID(id string) string { return articleIDPrefix + id }
+
+// IsArticleItem reports whether an item id is an article row's — the
+// UI's dispatch key for the two-layer detail (body → comments, no
+// floors layer in between).
+func IsArticleItem(itemID string) bool {
+	_, ok := articleIDOf(itemID)
+	return ok
+}
+
+// articleIDOf extracts the article id from a "zh:article/<id>" item
+// id — DetailOnDemand's dispatch key (the third id shape after
+// zh:question and zh:daily).
+func articleIDOf(itemID string) (string, bool) {
+	return strings.CutPrefix(itemID, articleIDPrefix)
+}
+
+// articlePage renders the column's human-openable page — Ctrl+O and
+// Ctrl+Y's target for an article row (and its comment layer: a bare
+// comment id addresses no article page on its own).
+func articlePage(articleID string) string { return "https://zhuanlan.zhihu.com/p/" + articleID }
 
 // dailyIDPrefix is the daily story id shape's single source; daily
 // ids share no namespace with question ids — a story is never a
@@ -380,7 +410,7 @@ func (s *Source) FetchCursorPage(ctx context.Context, f core.Feed, cursor string
 	now := time.Now().UTC()
 	items, seen := make([]core.Item, 0, len(page.Data)), map[string]bool{}
 	for _, card := range page.Data {
-		it, ok := questionCard(card, f.Key, now)
+		it, ok := feedCard(card, f.Key, now)
 		if !ok || seen[it.ID] {
 			continue // 同题去重: the page's first card owns the row
 		}
@@ -390,35 +420,47 @@ func (s *Source) FetchCursorPage(ctx context.Context, f core.Feed, cursor string
 	return items, page.Paging.Next, nil
 }
 
-// questionCard maps one moments-family card (moments and recommend
-// serve field-compatible targets, probe 2026-11-12) to its
-// question-card row (GLOSSARY: 问题卡), stamped with the feed it
-// arrived on. Answer cards fold into their question — the answerer's
-// name rides the author column — question cards pass through, and
-// every other card (article/pin/video/advert/…) is not a row and not
-// an error. Cards without a usable qid or title skip the same way the
-// hot board's degenerate rows do.
-func questionCard(c momentsCard, feedKey string, now time.Time) (core.Item, bool) {
-	var qid, title, author string
+// feedCard maps one moments-family card (moments and recommend
+// serve field-compatible targets, probe 2026-11-12) to its row
+// (GLOSSARY: 问题卡 / 文章卡), stamped with the feed it arrived on.
+// Answer cards fold into their question — the answerer's name rides
+// the author column — question cards pass through, and since ticket
+// 09 article cards pass through as their own zh:article rows (the
+// mapping both cursor feeds share). Every other card
+// (pin/video/advert/…) is not a row and not an error. Cards without
+// a usable id or title skip the same way the hot board's degenerate
+// rows do.
+func feedCard(c momentsCard, feedKey string, now time.Time) (core.Item, bool) {
+	var id, title, author string
+	isArticle := c.Target.Type == "article"
 	switch c.Target.Type {
 	case "answer":
 		// The card's own id is the answer's; the row is the question it
 		// answers (json.Number keeps the big id digits exact).
-		qid, title, author = c.Target.Question.ID.String(), c.Target.Question.Title, c.Target.Author.Name
+		id, title, author = c.Target.Question.ID.String(), c.Target.Question.Title, c.Target.Author.Name
 	case "question":
-		qid, title, author = c.Target.ID.String(), c.Target.Title, c.Target.Author.Name
+		id, title, author = c.Target.ID.String(), c.Target.Title, c.Target.Author.Name
+	case "article":
+		// The article's own row: the column page is the Ctrl+O/Ctrl+Y
+		// target (the API door is not a page). json.Number again — the
+		// probe measured article ids past 2^53.
+		id, title, author = c.Target.ID.String(), c.Target.Title, c.Target.Author.Name
 	default:
 		return core.Item{}, false
 	}
-	if qid == "" || qid == "0" || title == "" {
+	if id == "" || id == "0" || title == "" {
 		return core.Item{}, false // nothing renderable; skip, never crash
 	}
+	rowID, url := ItemID(id), questionURL(id) // questions share one namespace across feeds
+	if isArticle {
+		rowID, url = ArticleItemID(id), articlePage(id)
+	}
 	it := core.Item{
-		ID:     ItemID(qid),
+		ID:     rowID,
 		Source: ID,
 		Feed:   feedKey,
 		Title:  title,
-		URL:    questionURL(qid),
+		URL:    url,
 		Author: author,
 		// A follow stream is chronological and pages land at different
 		// moments: the card's own clock — not the fetch's — orders the
@@ -432,14 +474,23 @@ func questionCard(c momentsCard, feedKey string, now time.Time) (core.Item, bool
 	return it, true
 }
 
-// cardTime picks a moments card's clock: updated_time is the stream's
-// own ordering (an edited old answer re-surfaces), created_time the
-// fallback for card kinds that only carry it.
+// cardTime picks a moments-family card's clock: the question/answer
+// cards spell it updated_time/created_time, the article card
+// created/updated (probe 2026-11-12 — no _time suffix on articles).
+// updated wins when present (an edited old answer re-surfaces in the
+// stream), created is the fallback; zero means the card carried no
+// clock at all and the fetch's clock orders the row.
 func cardTime(t momentsTarget) int64 {
 	if t.UpdatedTime != 0 {
 		return t.UpdatedTime
 	}
-	return t.CreatedTime
+	if t.CreatedTime != 0 {
+		return t.CreatedTime
+	}
+	if t.Updated != 0 {
+		return t.Updated
+	}
+	return t.Created
 }
 
 // --- the daily digest's lazy body (ticket 03) -----------------------------

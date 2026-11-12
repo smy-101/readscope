@@ -35,20 +35,25 @@ const DesktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 // the probe's report tells 10003 apart).
 const XZse93 = "101_3_3.0"
 
-// Hosts bundles zhihu's three API roots: the app-domain twin of the
-// hot list, the daily digest service, and the www gateway everything
-// else rides on. READSCOPE_ZHIHU_BASE overrides all three in the cmd
-// wiring (tests point them at one httptest server; debugging a proxy
-// can too).
+// Hosts bundles zhihu's four API roots: the app-domain twin of the
+// hot list, the daily digest service, the www gateway almost
+// everything else rides on, and the zhuanlan (专栏) service — the
+// article body's own door lives there (probe 09: the www
+// /api/v4/articles spelling answers 403 code 10003 cookie or not;
+// zhuanlan /api/articles serves it). READSCOPE_ZHIHU_BASE overrides
+// all four in the cmd wiring (tests point them at one httptest
+// server; debugging a proxy can too).
 type Hosts struct {
-	API   string // https://api.zhihu.com
-	Daily string // https://news-at.zhihu.com
-	Web   string // https://www.zhihu.com
+	API      string // https://api.zhihu.com
+	Daily    string // https://news-at.zhihu.com
+	Web      string // https://www.zhihu.com
+	Zhuanlan string // https://zhuanlan.zhihu.com
 }
 
 // ProdHosts are the real-world roots.
 var ProdHosts = Hosts{
-	API:   "https://api.zhihu.com",
-	Daily: "https://news-at.zhihu.com",
-	Web:   "https://www.zhihu.com",
+	API:      "https://api.zhihu.com",
+	Daily:    "https://news-at.zhihu.com",
+	Web:      "https://www.zhihu.com",
+	Zhuanlan: "https://zhuanlan.zhihu.com",
 }

@@ -129,6 +129,14 @@ var (
 		Name: "child-comments", Referer: "https://www.zhihu.com/",
 		Cookie: true, Gated: true, Family: FamilyDetail, // the root's child-gap completion walk (ticket 06)
 	}
+	epArticle = Endpoint{
+		Name: "article-meta", Referer: "https://zhuanlan.zhihu.com/p/", // + id at the call site
+		Cookie: true, Gated: true, Family: FamilyDetail, // zhuanlan door (probe 09: www /api/v4/articles 403s 10003 cookie or not); anonymous 403, cookie 200, no version header
+	}
+	epArticleComments = Endpoint{
+		Name: "article-comments", Referer: "https://zhuanlan.zhihu.com/p/", // + id at the call site
+		Cookie: true, Gated: true, Family: FamilyDetail, // comment_v5 doesn't gate the version header
+	}
 )
 
 // Transport is one host set + cookie + client behind every zhihu GET.

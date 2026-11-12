@@ -90,12 +90,24 @@ func questionReferer(ep Endpoint, qid string) Endpoint {
 	return ep
 }
 
+// articleReferer clones the article family's matrix row with the
+// article's own column page as Referer — the page a reader would be
+// sitting on when the site's own XHR fires this door.
+func articleReferer(ep Endpoint, articleID string) Endpoint {
+	ep.Referer = "https://zhuanlan.zhihu.com/p/" + articleID
+	return ep
+}
+
 // DetailOnDemand implements source.DetailSource: question cards
-// alone — the three detail layers are a question's (GLOSSARY: 问题卡
-// vs 知乎日报); a daily story is a lazy body, and probing it into the
-// detail machinery would only fetch a named refusal.
+// (the three-layer detail) and — since ticket 09 — article cards
+// (the two-layer detail: body → comments); a daily story stays a
+// lazy body, and probing it into the detail machinery would only
+// fetch a named refusal.
 func (s *Source) DetailOnDemand(it core.Item) bool {
-	_, ok := qidOf(it.ID)
+	if _, ok := qidOf(it.ID); ok {
+		return true
+	}
+	_, ok := articleIDOf(it.ID)
 	return ok
 }
 
@@ -105,6 +117,9 @@ func (s *Source) DetailOnDemand(it core.Item) bool {
 // reports as gone even when the feeds leg also failed. Floors are
 // answer cards only — a stray card is not a floor and not an error.
 func (s *Source) Detail(ctx context.Context, it core.Item) (core.Content, error) {
+	if aid, ok := articleIDOf(it.ID); ok {
+		return s.articleDetail(ctx, aid)
+	}
 	qid, ok := qidOf(it.ID)
 	if !ok {
 		return core.Content{}, fmt.Errorf("detail: %q is not a zhihu question id", it.ID)
@@ -153,6 +168,39 @@ func (s *Source) Detail(ctx context.Context, it core.Item) (core.Content, error)
 		Comments: answerFloors(feeds),
 		Next:     feeds.Paging.Next,
 	}, nil
+}
+
+// articleDetail is the article's open: ONE request on the zhuanlan
+// door (probe 09: the www /api/v4/articles spelling is dead), the
+// content HTML cleaned for the pipeline, and the tree exactly one
+// pseudo floor — the article itself. The comment layer hangs under
+// that floor (the refresh merge requires its floor cached), and its
+// NumChildren carries the server's comment_count verbatim: the
+// zero-request "reported zero" fast path, the same role the answer
+// floors' count plays. A well-200 empty content is the redesign
+// alarm, not a story (the daily body's rule).
+func (s *Source) articleDetail(ctx context.Context, aid string) (core.Content, error) {
+	res := s.tr.Get(ctx, articleReferer(epArticle, aid),
+		fmt.Sprintf("%s/api/articles/%s", s.hosts.Zhuanlan, aid))
+	if res.Err != nil {
+		return core.Content{}, fmt.Errorf("fetch article %s: %w", aid, res.Err)
+	}
+	var a articleMeta
+	if err := json.Unmarshal(res.Body, &a); err != nil {
+		return core.Content{}, fmt.Errorf("parse article %s: not zhihu JSON: %w", aid, err)
+	}
+	if strings.TrimSpace(a.Content) == "" {
+		return core.Content{}, fmt.Errorf("parse article %s: empty content — 站点可能改版?", aid)
+	}
+	floor := core.Comment{ID: aid, Author: a.Author.Name, NumChildren: int64Ptr(a.CommentCount)}
+	if v := a.VoteupCount; v != 0 {
+		floor.Score = nonzeroPtr(v)
+	}
+	if ts := a.Created; ts != 0 {
+		tm := time.Unix(ts, 0).UTC()
+		floor.CreatedAt = &tm
+	}
+	return core.Content{Body: CleanHTML(a.Content), Comments: []core.Comment{floor}}, nil
 }
 
 // answerFloors maps one feeds page onto answer floors: author, the
@@ -212,20 +260,29 @@ func int64Ptr(n int64) *int {
 }
 
 // CommentURL implements source.DetailSource: the question's www page
-// for a question item id. Bare comment ids return "" — an answer or
-// comment id cannot be paired with its question alone, and the
-// reader's floor/reply targets route through AnswerURL instead,
-// which carries the item.
+// for a question item id, the column page for an article item id.
+// Bare comment ids return "" — an answer or comment id cannot be
+// paired with its question alone, and the reader's floor/reply
+// targets route through AnswerURL instead, which carries the item.
 func (s *Source) CommentURL(id string) string {
 	if qid, ok := qidOf(id); ok {
 		return questionURL(qid)
 	}
+	if aid, ok := articleIDOf(id); ok {
+		return articlePage(aid)
+	}
 	return ""
 }
 
-// AnswerURL implements source.DetailPager: the question page anchored
-// at one answer — Ctrl+O/Ctrl+Y's target on the 回答层 and 评论层.
+// AnswerURL implements source.DetailPager: the question page
+// anchored at one answer — Ctrl+O/Ctrl+Y's target on the 回答层 and
+// 评论层. An article's floor and reply layers both sit on the
+// article itself: the column page is the only human-openable target
+// (a bare comment id addresses no page alone).
 func (s *Source) AnswerURL(it core.Item, answerID string) string {
+	if aid, ok := articleIDOf(it.ID); ok {
+		return articlePage(aid)
+	}
 	qid, ok := qidOf(it.ID)
 	if !ok || answerID == "" {
 		return ""
@@ -258,33 +315,48 @@ func (s *Source) FetchFloorsPage(ctx context.Context, it core.Item, cursor strin
 	return answerFloors(page), page.Paging.Next, nil
 }
 
-// FetchAnswerComments implements source.DetailPager: one answer's
+// FetchAnswerComments implements source.DetailPager: one floor's
 // comments at the root walk's cursor — "" the first page (the door
 // is spelled WITHOUT an offset parameter: the real API answers a
 // literal digits-only offset with a 200 zombie empty page, uniformly
 // — 2026-12 smoke measurement), else the previous next (the
 // server's paging.next verbatim: the real cursor is a composite
-// string like "387770585_11616175634_0", never an integer). Each
-// root's child gap is completed by the child_comment walk; tree
-// order with the roots' ParentID set to the answer id (the cache
-// stores the whole question as one tree: floors and their comments
-// together). next is the following page's cursor ("" = exhausted).
+// string like "387770585_11616175634_0", never an integer). The
+// answer and article families ride the same walk (fetchComments):
+// answers under their question's floor, the article under its own
+// pseudo floor — a floor id that is not the item's own is a wiring
+// bug and refused by name. next is the following page's cursor ("" =
+// exhausted).
 func (s *Source) FetchAnswerComments(ctx context.Context, it core.Item, answerID string, cursor string) ([]core.Comment, string, error) {
-	if _, ok := qidOf(it.ID); !ok {
+	ep, family := epCommentsRoot, "answers"
+	if aid, ok := articleIDOf(it.ID); ok {
+		if answerID != aid {
+			return nil, "", fmt.Errorf("fetch comments: article %s has no floor %q (wiring bug?)", aid, answerID)
+		}
+		ep, family = articleReferer(epArticleComments, aid), "articles"
+	} else if _, ok := qidOf(it.ID); !ok {
 		return nil, "", fmt.Errorf("fetch comments: %q is not a zhihu question id", it.ID)
 	}
-	url := fmt.Sprintf("%s/api/v4/comment_v5/answers/%s/root_comment?order_by=score&limit=20",
-		s.hosts.Web, answerID)
+	return s.fetchComments(ctx, ep, family, answerID, cursor)
+}
+
+// fetchComments is the root_comment walk both detail families share:
+// one page (the cursorless first or the server's own next address
+// verbatim), each root's child gap completed, the survivors emitted
+// in tree order parented to the floor the walk was entered through.
+func (s *Source) fetchComments(ctx context.Context, ep Endpoint, family, floorID, cursor string) ([]core.Comment, string, error) {
+	url := fmt.Sprintf("%s/api/v4/comment_v5/%s/%s/root_comment?order_by=score&limit=20",
+		s.hosts.Web, family, floorID)
 	if cursor != "" {
 		url = cursor // verbatim: the server spells its own page addresses
 	}
-	res := s.tr.Get(ctx, epCommentsRoot, url)
+	res := s.tr.Get(ctx, ep, url)
 	if res.Err != nil {
-		return nil, "", fmt.Errorf("fetch comments %s: %w", answerID, res.Err)
+		return nil, "", fmt.Errorf("fetch comments %s: %w", floorID, res.Err)
 	}
 	var page commentsPage
 	if err := json.Unmarshal(res.Body, &page); err != nil {
-		return nil, "", fmt.Errorf("parse comments %s: not zhihu JSON: %w", answerID, err)
+		return nil, "", fmt.Errorf("parse comments %s: not zhihu JSON: %w", floorID, err)
 	}
 
 	// Roots worth keeping, with their gaps completed. The walk is
@@ -302,7 +374,7 @@ func (s *Source) FetchAnswerComments(ctx context.Context, it core.Item, answerID
 
 	out := make([]core.Comment, 0, len(roots))
 	for _, n := range roots {
-		emitComments(n, answerID, &out)
+		emitComments(n, floorID, &out)
 	}
 
 	next := ""

@@ -17,9 +17,10 @@ import (
 // earlier responses — for re-running one deep endpoint against a
 // known qid/aid/story without re-walking the list layer.
 type ProbeArgs struct {
-	QID     string // question id for the v4 family
-	StoryID string // daily story id
-	Aid     string // answer id for comments-root
+	QID       string // question id for the v4 family
+	StoryID   string // daily story id
+	Aid       string // answer id for comments-root
+	ArticleID string // article id for the article family (ticket 09)
 }
 
 // EndpointResult is one walked endpoint's outcome. Verdict is GREEN
@@ -192,7 +193,12 @@ type momentsTarget struct {
 	Author      struct{ Name string }
 	UpdatedTime int64 `json:"updated_time"`
 	CreatedTime int64 `json:"created_time"`
-	Question    struct {
+	// The article card's clock is spelled differently (probe
+	// 2026-11-12): created/updated, no _time suffix. Both spellings
+	// ride the same struct; cardTime sorts out which applies.
+	Created  int64 `json:"created"`
+	Updated  int64 `json:"updated"`
+	Question struct {
 		ID    json.Number `json:"id"`
 		Title string      `json:"title"`
 	} `json:"question"`
@@ -212,6 +218,22 @@ type questionMeta struct {
 	AnswerCount int64                 `json:"answer_count"`
 	VisitCount  int64                 `json:"visit_count"`
 	Detail      string                `json:"detail"`
+}
+
+// articleMeta is the v4 article door's payload (ticket 09): the
+// content HTML for the render pipeline (CleanHTML at the source's
+// edge), the author the pseudo floor's header carries, and
+// comment_count — the floor's NumChildren, the comment layer's
+// zero-request fast path. Ids never decode here: the card's
+// json.Number id is the only spelling that survives 2^53.
+type articleMeta struct {
+	Title        string                `json:"title"`
+	Author       struct{ Name string } `json:"author"`
+	Content      string                `json:"content"`
+	CommentCount int64                 `json:"comment_count"`
+	VoteupCount  int64                 `json:"voteup_count"`
+	Created      int64                 `json:"created"`
+	Updated      int64                 `json:"updated"`
 }
 
 // feedsPage is one page of a question's answers: target carries the
@@ -251,7 +273,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	h := p.Hosts
 	tr := NewTransport(h, p.CookieHeader, p.Client)
 	fmt.Fprintln(w, "zhihu probe — M4 data plane tracer (ticket 01)")
-	fmt.Fprintf(w, "hosts: api=%s daily=%s web=%s\n", h.API, h.Daily, h.Web)
+	fmt.Fprintf(w, "hosts: api=%s daily=%s web=%s zhuanlan=%s\n", h.API, h.Daily, h.Web, h.Zhuanlan)
 	if p.CookieHeader != "" {
 		info := SummarizeCookie(p.CookieHeader)
 		fmt.Fprintf(w, "cookie: loaded keys=%d z_c0=%v d_c0=%v\n", info.KeyCount, info.HasZC0, info.HasDC0)
@@ -359,8 +381,11 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 		res(r)
 	}
 
-	// 5. Follow feed: card census — question cards kept, the rest
-	// counted by type and dropped.
+	// 5. Follow feed: card census — question cards kept, articles
+	// tallied apart (ticket 09 keeps them as their own rows), the
+	// rest counted by type and dropped. The first article card chains
+	// the article family's legs below.
+	var artID string
 	if login("moments") {
 		r := p.outcome("moments",
 			tr.Get(ctx, epMoments, h.Web+"/api/v3/moments?limit=10&desktop=true"),
@@ -369,28 +394,33 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 				if err := json.Unmarshal(b, &ms); err != nil {
 					return "unparseable: " + err.Error(), false
 				}
-				keptA, keptQ, dropped := 0, 0, map[string]int{}
+				keptA, keptQ, articles, dropped := 0, 0, 0, map[string]int{}
 				for _, m := range ms.Data {
 					switch m.Target.Type {
 					case "answer":
 						keptA++
 					case "question":
 						keptQ++
+					case "article":
+						articles++
+						if artID == "" {
+							artID = m.Target.ID.String()
+						}
 					default:
 						dropped[m.Target.Type]++
 					}
 				}
-				note := fmt.Sprintf("cards=%d kept=%d(answer=%d question=%d) dropped=%d%s cursor=%v",
-					len(ms.Data), keptA+keptQ, keptA, keptQ, len(ms.Data)-keptA-keptQ, census(dropped), ms.Paging.Next != "") + redesignNote(len(ms.Data))
+				note := fmt.Sprintf("cards=%d kept=%d(answer=%d question=%d) article=%d dropped=%d%s cursor=%v",
+					len(ms.Data), keptA+keptQ, keptA, keptQ, articles, len(ms.Data)-keptA-keptQ-articles, census(dropped), ms.Paging.Next != "") + redesignNote(len(ms.Data))
 				return note, true
 			})
 		res(r)
 	}
 
 	// 5b. Recommend feed (ticket 08): the home page's algorithmic
-	// feed — same v3 session door as moments, same card census plus
-	// the article tally kept apart (ticket 09 will keep those cards;
-	// the probe already tells them from the true drops).
+	// feed — same v3 session door as moments, same card census; the
+	// article card also chains the article family when moments served
+	// none (recommend is the article card's home turf).
 	if login("recommend") {
 		r := p.outcome("recommend",
 			tr.Get(ctx, epRecommend, h.Web+"/api/v3/feed/topstory/recommend?desktop=true"),
@@ -407,7 +437,10 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 					case "question":
 						keptQ++
 					case "article":
-						articles++ // kept apart: ticket 09's rows, not a drop
+						articles++ // ticket 09's rows, kept apart from the true drops
+						if artID == "" {
+							artID = m.Target.ID.String()
+						}
 					default:
 						dropped[m.Target.Type]++
 					}
@@ -482,6 +515,9 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	if p.Args.Aid != "" {
 		aid = p.Args.Aid
 	}
+	if p.Args.ArticleID != "" {
+		artID = p.Args.ArticleID
+	}
 
 	// 8. Comment root.
 	if aid == "" {
@@ -506,28 +542,79 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 		res(r)
 	}
 
-	// 9. Header-matrix self-check: the two negative expectations that
+	// 8b. The article pair (ticket 09): the article body door and its
+	// comment_v5 twin, chained from whichever census served an
+	// article card — or -article. Probe 09 measured the body door on
+	// the ZHUANLAN service (www /api/v4/articles answers 403 code
+	// 10003 cookie or not; zhuanlan /api/articles serves it — cookie
+	// required, no version header); comments ride the www v4 family.
+	// Both read 401/403 as stale z_c0, 404 as a deleted article.
+	if artID == "" {
+		res(EndpointResult{"article-meta", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(moments/recommend served no article card) — or pass -article"})
+		res(EndpointResult{"article-comments", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(article-meta)"})
+	} else {
+		articleURL := fmt.Sprintf("%s/api/articles/%s", h.Zhuanlan, artID)
+		if login("article-meta") {
+			r := p.outcome("article-meta",
+				tr.Get(ctx, articleReferer(epArticle, artID), articleURL),
+				func(b []byte) (string, bool) {
+					var a articleMeta
+					if err := json.Unmarshal(b, &a); err != nil {
+						return "unparseable: " + err.Error(), false
+					}
+					note := fmt.Sprintf("title=%q author=%s content=%dB html=%v comments=%d voteup=%d",
+						a.Title, a.Author.Name, len(a.Content), strings.Contains(a.Content, "<"), a.CommentCount, a.VoteupCount)
+					if strings.TrimSpace(a.Content) == "" {
+						return note + " — empty content: include 集要复核", false
+					}
+					return note, true
+				})
+			res(r)
+		}
+		if login("article-comments") {
+			r := p.outcome("article-comments",
+				tr.Get(ctx, articleReferer(epArticleComments, artID),
+					fmt.Sprintf("%s/api/v4/comment_v5/articles/%s/root_comment?order_by=score&limit=20&offset=", h.Web, artID)),
+				func(b []byte) (string, bool) {
+					var cs commentsPage
+					if err := json.Unmarshal(b, &cs); err != nil {
+						return "unparseable: " + err.Error(), false
+					}
+					note := fmt.Sprintf("roots=%d", len(cs.Data)) + redesignNote(len(cs.Data))
+					if len(cs.Data) > 0 {
+						r0 := cs.Data[0]
+						note += fmt.Sprintf(" first=%q like=%d child_gap=%d",
+							r0.Author.Name, r0.LikeCount, r0.ChildCommentCount-int64(len(r0.ChildComments)))
+					}
+					return note, true
+				})
+			res(r)
+		}
+	}
+
+	// 9. Header-matrix self-check: the negative expectations that
 	// make the per-endpoint x-zse-93 rule real. Informational — a
 	// MISMATCH is intel (zhihu moved the gate), not a blocked plane.
-	if p.CookieHeader == "" || qid == "" {
-		res(EndpointResult{"header-matrix", "SKIPPED", verdictSkipped, "needs cookie + qid"})
-	} else {
-		matrixLeg := func(base Endpoint, url string, wantStatus int, gateMoved string) {
-			name := base.Name
-			f := tr.Get(ctx, base, url)
-			p.save(name, f)
-			switch {
-			case f.Status == 0:
-				res(EndpointResult{name, "ERR", verdictMismatch, f.Err.Error()})
-			case f.Status == wantStatus:
-				res(EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictMatch,
-					"gate enforced as documented" + errCode(f.Body)})
-			case f.Status == http.StatusOK:
-				res(EndpointResult{name, "HTTP 200", verdictMismatch, gateMoved})
-			default:
-				res(EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictMismatch, "unexpected status"})
-			}
+	matrixLeg := func(base Endpoint, url string, wantStatus int, gateMoved string) {
+		name := base.Name
+		f := tr.Get(ctx, base, url)
+		p.save(name, f)
+		switch {
+		case f.Status == 0:
+			res(EndpointResult{name, "ERR", verdictMismatch, f.Err.Error()})
+		case f.Status == wantStatus:
+			res(EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictMatch,
+				"gate enforced as documented" + errCode(f.Body)})
+		case f.Status == http.StatusOK:
+			res(EndpointResult{name, "HTTP 200", verdictMismatch, gateMoved})
+		default:
+			res(EndpointResult{name, fmt.Sprintf("HTTP %d", f.Status), verdictMismatch, "unexpected status"})
 		}
+	}
+	if p.CookieHeader == "" || qid == "" {
+		res(EndpointResult{"matrix-questions-nozse", "SKIPPED", verdictSkipped, "needs cookie + qid"})
+		res(EndpointResult{"matrix-feeds-withzse", "SKIPPED", verdictSkipped, "needs cookie + qid"})
+	} else {
 		noZse := epQuestionMeta // questions WITHOUT the version header → 403
 		noZse.Name, noZse.ZSE93, noZse.Referer = "matrix-questions-nozse", false, referer
 		withZse := epAnswersFeeds // cursorless feeds WITH the version header → 403

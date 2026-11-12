@@ -408,3 +408,151 @@ func TestPagingCompositionsRefuseNonPagingSources(t *testing.T) {
 		t.Fatal("comments on hn must refuse too")
 	}
 }
+
+// --- the article's detail caching (ticket 09) ------------------------------
+
+// articlePlane serves one article's doors: the zhuanlan body door
+// and the comment_v5 articles door (first page + composite-cursor
+// page two + the child-gap walk) — cookie-gated like the question
+// family.
+func articlePlane(t *testing.T) *httptest.Server {
+	t.Helper()
+	gate := func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Header.Get("Cookie") == "" {
+			w.WriteHeader(403)
+			fmt.Fprint(w, `{"error":{"code":100}}`)
+			return false
+		}
+		return true
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/articles/2001", func(w http.ResponseWriter, r *http.Request) {
+		if !gate(w, r) {
+			return
+		}
+		fmt.Fprint(w, `{"title":"专栏","author":{"name":"作者"},
+		 "content":"<p>正文</p>","comment_count":3,"voteup_count":9,"created":1700000000}`)
+	})
+	mux.HandleFunc("/api/v4/comment_v5/articles/2001/root_comment", func(w http.ResponseWriter, r *http.Request) {
+		if !gate(w, r) {
+			return
+		}
+		const composite = "5_11616058687_0"
+		if r.URL.Query().Get("offset") == composite {
+			fmt.Fprint(w, `{"data":[{"id":703,"author":{"name":"末根"},"like_count":0,"content":"末页"}],
+			 "paging":{"next":"","is_end":true}}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":[
+		 {"id":701,"author":{"name":"根一"},"like_count":3,"content":"根一",
+		  "child_comment_count":1,"child_comments":[]},
+		 {"id":702,"author":{"name":"根二"},"like_count":0,"content":"根二"}],
+		 "paging":{"next":"http://`+r.Host+`/api/v4/comment_v5/articles/2001/root_comment?order_by=score&limit=20&offset=`+composite+`","is_end":false}}`)
+	})
+	mux.HandleFunc("/api/v4/comment_v5/comment/701/child_comment", func(w http.ResponseWriter, r *http.Request) {
+		if !gate(w, r) {
+			return
+		}
+		fmt.Fprint(w, `{"data":[{"id":801,"author":{"name":"子回复"},"like_count":0,"content":"<p>子</p>"}],
+		 "paging":{"next":"","is_end":true}}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// articleStore is questionStore's twin seeding the article's
+// recommend-feed row.
+func articleStore(t *testing.T, srv *httptest.Server) *store.Store {
+	t.Helper()
+	t.Setenv("READSCOPE_CONFIG", t.TempDir())
+	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
+	if err := os.MkdirAll(filepath.Dir(mustCookiePath(t)), 0o755); err != nil {
+		t.Fatalf("cookie dir: %v", err)
+	}
+	if err := os.WriteFile(mustCookiePath(t), []byte("z_c0=live; d_c0=dev"), 0o600); err != nil {
+		t.Fatalf("write cookie: %v", err)
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "a.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	it := core.Item{
+		ID: "zh:article/2001", Source: "zhihu", Feed: "recommend",
+		Title: "专栏", URL: "https://zhuanlan.zhihu.com/p/2001", FetchedAt: nowStamp(),
+	}
+	if _, _, err := st.SaveFeedItems(context.Background(), "zhihu", "recommend", []core.Item{it}); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+	return st
+}
+
+func articleItem() core.Item {
+	return core.Item{ID: "zh:article/2001", Source: "zhihu", Feed: "recommend", Title: "专栏"}
+}
+
+// The article's open persists the body snapshot and the pseudo
+// floor; the comment walk splices under it; and a re-open's
+// background refresh keeps every walked comment — a refresh must
+// never unload the roots Ctrl+N paged in (刷新不抹缓存), and the
+// body snapshot keeps the article readable offline.
+func TestArticleDetailPersistsAndMergeKeepsWalkedComments(t *testing.T) {
+	st := articleStore(t, articlePlane(t))
+	ctx := context.Background()
+	it := articleItem()
+
+	c, err := Detail(ctx, st, core.DefaultSources(), it)
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if !strings.Contains(c.Body, "正文") || len(c.Comments) != 1 || c.Comments[0].ID != "2001" {
+		t.Fatalf("content = %q %+v", c.Body, c.Comments)
+	}
+	if c.Comments[0].NumChildren == nil || *c.Comments[0].NumChildren != 3 {
+		t.Fatalf("pseudo floor count = %v, want the server's 3", c.Comments[0].NumChildren)
+	}
+
+	// The comment walk: first page (roots + the gap-completed child),
+	// then the composite-cursor page.
+	tree, next, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "2001", "")
+	if err != nil {
+		t.Fatalf("comments page: %v", err)
+	}
+	var ids []string
+	for _, cm := range tree {
+		ids = append(ids, cm.ID)
+	}
+	if strings.Join(ids, ",") != "2001,701,801,702" {
+		t.Fatalf("comments merge = %v", ids)
+	}
+	if !strings.Contains(next, "offset=5_11616058687_0") {
+		t.Fatalf("next = %q, want the composite cursor", next)
+	}
+	if _, _, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "2001", next); err != nil {
+		t.Fatalf("comments page two: %v", err)
+	}
+
+	// The re-open's background refresh: the pseudo floor leads, every
+	// walked comment survives.
+	if _, err := Detail(ctx, st, core.DefaultSources(), it); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	got, _ := st.CommentsForItem(ctx, it.ID)
+	ids = ids[:0]
+	for _, cm := range got {
+		ids = append(ids, cm.ID)
+	}
+	if strings.Join(ids, ",") != "2001,701,801,702,703" {
+		t.Fatalf("refresh merge = %v (the walked comments must survive)", ids)
+	}
+
+	// The body snapshot landed on the row: offline re-opens read it.
+	rows, err := st.FeedItems(ctx, "zhihu", "recommend", false)
+	if err != nil || len(rows) != 1 || !strings.Contains(rows[0].Item.Body, "正文") {
+		t.Fatalf("body snapshot missing: %v %+v", err, rows)
+	}
+}

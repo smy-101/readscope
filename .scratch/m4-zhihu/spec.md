@@ -26,8 +26,8 @@ Status: ready-for-agent
 | 问题元信息 | `GET www.zhihu.com/api/v4/questions/{qid}?include=detail,excerpt,answer_count,follower_count,visit_count,author,created` | cookie + `x-zse-93`(必带,缺失=403 code 10003) | — | 描述 detail 为 HTML |
 | 回答 | `GET www.zhihu.com/api/v4/questions/{qid}/feeds?include=…&limit=5&order=default&platform=desktop` | cookie(**首次入口不带 x-zse-93,带=403**) | `paging.next` | `content` 为 HTML;include 集保持精简形态 |
 | 评论 | `GET www.zhihu.com/api/v4/comment_v5/answers/{aid}/root_comment?order_by=score&limit=20&offset=` | cookie(x-zse-93 无害) | offset / `paging.next` | root 只带 1–2 条热门子回复;缺口 = `child_comment_count − len(child_comments)`,补全走 `comment_v5/comment/{id}/child_comment` 游标(单根最多 6 页) |
-| 文章正文 | `GET www.zhihu.com/api/v4/articles/{id}` | cookie + `x-zse-93`(v4 族矩阵,09 号票 probe 复核) | — | `content` 为 HTML 进渲染管线;标题/作者随卡(09 号票) |
-| 文章评论 | `GET www.zhihu.com/api/v4/comment_v5/articles/{id}/root_comment?order_by=score&limit=20&offset=` | cookie | offset / `paging.next` | 与回答评论同构(根楼层 + 热门子回复 + 缺口补全)(09 号票) |
+| 文章正文 | `GET zhuanlan.zhihu.com/api/articles/{id}` | cookie(匿名 403 code 10003);无版本头 | — | **09 号票实测(2026-12)修正:spec 原写的 `www/api/v4/articles` 拼法已死——403 code 10003,带不带 x-zse-93、有无 cookie 皆拒**;真门在 zhuanlan 服务,`content` 为 HTML 进渲染管线,`title/author.name/comment_count/voteup_count/created/updated` 齐,id 以字符串回传(json.Number 兼容) |
+| 文章评论 | `GET www.zhihu.com/api/v4/comment_v5/articles/{id}/root_comment?order_by=score&limit=20&offset=` | cookie | offset / `paging.next` | 09 号票实测 GREEN(2026-12,真网 roots=2);与回答评论同构(根楼层 + 热门子回复 + 缺口补全),游标契约同款(首页免 offset、翻页 verbatim) |
 
 公共请求形态:桌面 Chrome UA;`x-requested-with: fetch`;Referer 按端点;`x-zse-93: 101_3_3.0`(静态常量,按上表矩阵)。**x-zse-96 签名一律不需要**(2026-11 FeedScope 实测,本源不实现签名器);zse-ck JS 挑战只挂 HTML 页,JSON API 不经过(01 号票复核)。
 

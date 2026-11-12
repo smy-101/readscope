@@ -83,7 +83,7 @@ ranking.
 
 ### Zhihu
 
-Tab over to Zhihu for three feeds. The **hot board** (热榜) and the **daily digest** (知乎日报) are
+Tab over to Zhihu for four feeds. The **hot board** (热榜) and the **daily digest** (知乎日报) are
 anonymous — no account, no cookie — served by `api.zhihu.com` and `daily.zhihu.com`. The hot board
 is the whole-site trending list: a fixed ~30 question cards ranked by heat ("2045 万热度" in the
 meta column), `Ctrl+N` reports the end. The daily digest is one day's issue, its stories fetched
@@ -95,7 +95,10 @@ question cards from the people you follow, cursor-paged by `Ctrl+N`. Opening a q
 in three layers, HN-style: the question layer, then the answer layer — `Enter` on a floor reads
 that answer's full text, `←`/`→` moves between answers (`Ctrl+N` loads the next answers page) —
 then `Enter` on an answer opens its comments — root comments as floors, replies
-indented underneath, long threads completed by paging.
+indented underneath, long threads completed by paging. Both cursor feeds also carry
+**article cards** (专栏 posts — your follows' and the algorithm's): `Enter` opens the article's
+full text, `Enter` again its comments (the same comment shape as an answer's, two layers in
+all). Pin/video/ad cards never enter the lists.
 
 Zhihu is on for fresh installs (`enabled = ["rss", "hn", "zhihu"]` in `sources.toml`); see the
 upgrade note above if your file predates it.

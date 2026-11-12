@@ -43,7 +43,7 @@ const (
 	 {"target":{"type":"answer","id":1912345678901234567,"author":{"name":"李四"},
 	  "question":{"id":18984420158198241699,"title":"关注的问题"}}},
 	 {"target":{"type":"question","id":100001,"title":"关注的新提问","author":{"name":"王五"}}},
-	 {"target":{"type":"article","id":200002,"title":"被丢弃的文章"}},
+	 {"target":{"type":"article","id":200002,"title":"被丢弃的文章","created":1700000000}},
 	 {"target":{"type":"pin","id":300003}}
 	],"paging":{"next":"https://www.zhihu.com/api/v3/moments?cursor=abc","is_end":false}}`
 
@@ -61,6 +61,15 @@ const (
 
 	questionMetaJSON = `{"title":"为什么终端阅读器又火了？","author":{"name":"张三"},
 	 "answer_count":213,"visit_count":12000000,"detail":"<p>问题描述</p>"}`
+
+	// articleMetaJSON is the v4 articles door's payload (ticket 09):
+	// title/author/content HTML + the comment_count the pseudo floor
+	// carries. The id is >2^53 — article ids share the question ids'
+	// big-integer risk.
+	articleMetaJSON = `{"title":"专栏文章标题","author":{"name":"作者甲"},
+	 "content":"<p>文章正文<b>富文本</b>。</p>","excerpt":"摘录",
+	 "comment_count":88,"voteup_count":1024,
+	 "created":1710000000,"updated":1710000100}`
 
 	v4ErrJSON = `{"error":{"code":10003,"message":"请升级客户端版本"}}`
 
@@ -119,6 +128,11 @@ type fakeZhihu struct {
 	childPages           map[string][]string // root id → page bodies in walk order
 	childClicks          map[string]int
 	extraPages           map[string]string // "path?query" (exact) or path → body, for cursor-addressed pages (paging.next targets)
+
+	// ticket 09 fixtures: the article family's overrides.
+	articleMetaOverride  string // serve this body for /api/v4/articles/*
+	articleRootOverride  string // serve this body for comment_v5/articles/*/root_comment
+	blockArticleComments bool   // serve 403 on the article comments door (stale-session fixture)
 }
 
 // offsetParamRe picks the offset parameter's value out of a raw
@@ -263,12 +277,46 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				write(200, `{"data":[],"paging":{"next":"`+schemeHost(r)+req.path+`?limit=10&offset=`+m[1]+`&order_by=score","is_end":false,"totals":0}}`)
 				return
 			}
+			// The article comments door (ticket 09) rides the same shape;
+			// its own override/stale arms live here, before the answer
+			// door's defaults.
+			if strings.Contains(req.path, "/comment_v5/articles/") {
+				if f.blockArticleComments {
+					write(403, v4ErrJSON) // stale z_c0 on the v4 family
+					return
+				}
+				if f.articleRootOverride != "" {
+					write(200, f.articleRootOverride)
+					return
+				}
+			}
 		}
 		if f.rootOverride != "" {
 			write(200, f.rootOverride)
 			return
 		}
 		write(200, commentsJSON)
+	case strings.HasPrefix(req.path, "/api/articles/"):
+		// The zhuanlan article door (ticket 09, probe-measured): cookie
+		// required (anonymous 403 code 10003), NO version header — the
+		// www /api/v4/articles spelling is dead and never dialed.
+		if !req.cookie {
+			write(403, v4ErrJSON)
+			return
+		}
+		if f.staleStatus != 0 {
+			write(f.staleStatus, v4ErrJSON) // stale z_c0: the detail family 401/403s
+			return
+		}
+		if f.goneStatus != 0 {
+			write(f.goneStatus, v4ErrJSON) // the article was deleted upstream
+			return
+		}
+		if f.articleMetaOverride != "" {
+			write(200, f.articleMetaOverride)
+			return
+		}
+		write(200, articleMetaJSON)
 	case strings.HasPrefix(req.path, "/api/v4/questions/"):
 		feeds := strings.HasSuffix(req.path, "/feeds")
 		if !req.cookie || f.staleStatus != 0 {
@@ -382,7 +430,7 @@ func newTestProbe(t *testing.T, fake *fakeZhihu, cookie string) (*Probe, *string
 	out := filepath.Join(t.TempDir(), "samples")
 	var buf strings.Builder
 	p := &Probe{
-		Hosts:        Hosts{API: srv.URL, Daily: srv.URL, Web: srv.URL},
+		Hosts:        Hosts{API: srv.URL, Daily: srv.URL, Web: srv.URL, Zhuanlan: srv.URL},
 		CookieHeader: cookie,
 		OutDir:       out,
 		Client:       srv.Client(),
@@ -410,6 +458,7 @@ func TestProbeFullWalkWithCookie(t *testing.T) {
 		"daily-latest": "GREEN", "daily-story": "GREEN",
 		"moments": "GREEN", "recommend": "GREEN", "question-meta": "GREEN",
 		"answers-feeds": "GREEN", "comments-root": "GREEN",
+		"article-meta": "GREEN", "article-comments": "GREEN",
 		"matrix-questions-nozse": "MATCH", "matrix-feeds-withzse": "MATCH",
 	} {
 		if v[name] != want {
@@ -458,17 +507,29 @@ func TestProbeFullWalkWithCookie(t *testing.T) {
 	}
 
 	// The chain: qid from the hot list, aid from the feeds page, story
-	// id from the daily list.
+	// id from the daily list, article id from the first card census
+	// that served one (moments walks before recommend).
 	if h := fake.hit("/api/v4/questions/"); h == nil || !strings.Contains(h.path, "/questions/"+fakeQID) {
 		t.Errorf("question-meta path missing url-extracted qid: %+v", h)
 	}
 	if h := fake.hit("/api/v4/comment_v5/"); h == nil || !strings.Contains(h.path, "/answers/"+fakeAID) {
 		t.Errorf("comments-root path missing chained aid: %+v", h)
 	}
+	if h := fake.hitExact("/api/articles/200002"); h == nil || !h.cookie || h.zse93 ||
+		h.referer != "https://zhuanlan.zhihu.com/p/200002" {
+		t.Errorf("article-meta headers: cookie/no-zse93/referer contract broken: %+v", h)
+	}
+	if h := fake.hit("/api/v4/comment_v5/articles/200002"); h == nil || !h.cookie {
+		t.Errorf("article-comments hit missing or cookie-less: %+v", h)
+	}
+	if h := fake.hit("/api/v4/comment_v5/articles/200002"); h != nil && h.query != "order_by=score&limit=20&offset=" {
+		t.Errorf("article-comments query = %q, want the empty-offset first page", h.query)
+	}
 
 	// Samples on disk for every walked endpoint.
 	for _, name := range []string{"hot-list", "hot-www-door", "daily-latest", "daily-story",
 		"moments", "recommend", "question-meta", "answers-feeds", "comments-root",
+		"article-meta", "article-comments",
 		"matrix-questions-nozse", "matrix-feeds-withzse"} {
 		if _, err := os.Stat(filepath.Join(out, name+".json")); err != nil {
 			t.Errorf("sample %s.json missing: %v", name, err)
@@ -478,7 +539,7 @@ func TestProbeFullWalkWithCookie(t *testing.T) {
 	// The report says what the tracer needs to say.
 	s := buf.String()
 	for _, want := range []string{"GREEN", ">2^53", "2045 万热度", "answer=1 question=1",
-		"dropped=2", "article=1", "child_gap=12"} {
+		"dropped=1", "article=1", "child_gap=12", "专栏文章标题", "roots="} {
 		if !strings.Contains(s, want) {
 			t.Errorf("report missing %q\n---\n%s", want, s)
 		}
@@ -493,6 +554,7 @@ func TestProbeNoCookieSkipsLoginEndpoints(t *testing.T) {
 	v := verdicts(rs)
 	for name := range map[string]struct{}{
 		"hot-www-door": {}, "moments": {}, "recommend": {}, "question-meta": {}, "answers-feeds": {}, "comments-root": {},
+		"article-meta": {}, "article-comments": {},
 	} {
 		if v[name] != "SKIPPED" {
 			t.Errorf("%s = %q, want SKIPPED (note: %s)", name, v[name], noteOf(rs, name))

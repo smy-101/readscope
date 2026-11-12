@@ -43,6 +43,7 @@ func runZhihuProbe(args []string) int {
 	qidFlag := fs.String("qid", "", "override question id (else chained from the hot list)")
 	storyFlag := fs.String("story", "", "override daily story id (else chained from the daily list)")
 	aidFlag := fs.String("aid", "", "override answer id for the comment probe (else chained from answers)")
+	articleFlag := fs.String("article", "", "override article id for the article probe (else chained from a card census)")
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
 	}
@@ -64,12 +65,12 @@ func runZhihuProbe(args []string) int {
 	p := &zhihu.Probe{
 		Hosts:  zhihu.ProdHosts,
 		OutDir: *outFlag,
-		Args:   zhihu.ProbeArgs{QID: *qidFlag, StoryID: *storyFlag, Aid: *aidFlag},
+		Args:   zhihu.ProbeArgs{QID: *qidFlag, StoryID: *storyFlag, Aid: *aidFlag, ArticleID: *articleFlag},
 	}
 	// One base override for debugging (and any future fake-server
 	// scenario): every host root replaced by READSCOPE_ZHIHU_BASE.
 	if v := os.Getenv("READSCOPE_ZHIHU_BASE"); v != "" {
-		p.Hosts = zhihu.Hosts{API: v, Daily: v, Web: v}
+		p.Hosts = zhihu.Hosts{API: v, Daily: v, Web: v, Zhuanlan: v}
 	}
 	if header, _, err := zhihu.LoadCookie(cookiePath); err == nil {
 		p.CookieHeader = header

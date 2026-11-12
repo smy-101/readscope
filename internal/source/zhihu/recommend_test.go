@@ -63,16 +63,17 @@ func recommendSrcAt(t *testing.T, fake *fakeZhihu) (*Source, core.Feed, string) 
 	return nil, core.Feed{}, ""
 }
 
-// TestRecommendCursorPageFiltersToQuestionCards: the walk keeps
-// answer cards (folded into their question) and question cards,
-// drops the article card (ticket 09 will keep it) alongside
-// pin/video, and dedupes the same question within a page.
-func TestRecommendCursorPageFiltersToQuestionCards(t *testing.T) {
+// TestRecommendCursorPageKeepsQuestionAndArticleCards: the walk keeps
+// answer cards (folded into their question) and question cards, keeps
+// the article card as its own row (ticket 09), drops pin/video/ad,
+// and dedupes the same question within a page.
+func TestRecommendCursorPageKeepsQuestionAndArticleCards(t *testing.T) {
 	body := `{"data":[
 	 {"target":{"type":"answer","id":1912345678901234568,"author":{"name":"赵六"},
 	  "question":{"id":18984420158198241698,"title":"推荐的问题"}}},
 	 {"target":{"type":"question","id":18984420158198241698,"title":"同题重复卡","author":{"name":"重复"}}},
-	 {"target":{"type":"article","id":200009,"title":"09 号票之前的文章卡"}},
+	 {"target":{"type":"article","id":2085374500649096302,"title":"推荐流的文章","author":{"name":"专栏作者"},
+	  "created":1731500000,"updated":1731500500}},
 	 {"target":{"type":"pin","id":300010}},
 	 {"target":{"type":"video","id":400011}},
 	 {"target":{"type":"ad","id":500012,"title":"广告卡不进列表"}}
@@ -83,8 +84,8 @@ func TestRecommendCursorPageFiltersToQuestionCards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchCursorPage: %v", err)
 	}
-	if len(items) != 1 { // the answer folds into its question; the duplicate question card merges
-		t.Fatalf("got %d items, want 1 (answer folds; same-question dedupe; article/pin/video drop until 09)", len(items))
+	if len(items) != 2 { // the answer folds into its question; the duplicate question card merges; the article keeps its own row
+		t.Fatalf("got %d items, want 2 (answer folds; same-question dedupe; article row; pin/video/ad drop)", len(items))
 	}
 	it := items[0]
 	if it.ID != ItemID("18984420158198241698") || it.Feed != RecommendFeedKey || it.Title != "推荐的问题" {
@@ -96,8 +97,46 @@ func TestRecommendCursorPageFiltersToQuestionCards(t *testing.T) {
 	if it.URL != questionURL("18984420158198241698") {
 		t.Errorf("url = %q, want the canonical question page", it.URL)
 	}
+	// The article card's own row (ticket 09): same mapping both cursor
+	// feeds share — zh:article id, column page URL, the card's author.
+	art := items[1]
+	if art.ID != "zh:article/2085374500649096302" || art.Feed != RecommendFeedKey {
+		t.Errorf("article row = {%s %s}, want the zh:article row on the recommend feed", art.ID, art.Feed)
+	}
+	if art.Title != "推荐流的文章" || art.Author != "专栏作者" {
+		t.Errorf("article title/author = %q/%q, want the card's own", art.Title, art.Author)
+	}
+	if art.URL != "https://zhuanlan.zhihu.com/p/2085374500649096302" {
+		t.Errorf("article url = %q, want the column page", art.URL)
+	}
 	if next != "https://www.zhihu.com/api/v3/feed/topstory/recommend?after_id=5&desktop=true" {
 		t.Errorf("next cursor = %q, want paging.next verbatim", next)
+	}
+}
+
+// TestRecommendArticleCardClockCreatedFallback: the article clock
+// prefers updated but falls back to created alone (probe 2026-11:
+// article cards carry created/updated, no _time suffix) — and a
+// card with neither clock orders by the fetch's clock (FetchedAt).
+func TestRecommendArticleCardClockCreatedFallback(t *testing.T) {
+	body := `{"data":[
+	 {"target":{"type":"article","id":111,"title":"只有 created","author":{"name":"甲"},"created":1731400000}},
+	 {"target":{"type":"article","id":222,"title":"没有时钟","author":{"name":"乙"}}}
+	],"paging":{"is_end":true}}`
+	src, f, _ := recommendSrcAt(t, &fakeZhihu{t: t, recommendOverride: body})
+
+	items, _, err := src.FetchCursorPage(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("FetchCursorPage: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2 article rows", len(items))
+	}
+	if items[0].PublishedAt == nil || items[0].PublishedAt.Unix() != 1731400000 {
+		t.Errorf("created-only card publishedAt = %v, want its created clock", items[0].PublishedAt)
+	}
+	if items[1].PublishedAt != nil {
+		t.Errorf("clock-less card publishedAt = %v, want nil (the fetch clock orders it, via FetchedAt)", items[1].PublishedAt)
 	}
 }
 

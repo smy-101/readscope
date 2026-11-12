@@ -24,8 +24,10 @@ import (
 // card (question id past 2^53 — the id must survive exact through
 // json.Number), the same question again as a direct question card
 // (later in the page, so the answer card's author wins the row), an
-// unrelated question card, and the card kinds the spec drops
-// (article/pin/zvideo/feed_group). paging.next addresses page two.
+// unrelated question card, an article card (ticket 09: its own row —
+// id past 2^53, the article clock's created/updated spelling), and
+// the card kinds the spec drops (pin/zvideo/feed_group). paging.next
+// addresses page two.
 const followCardsJSON = `{"data":[
  {"target":{"type":"answer","id":1912345678901234567,"author":{"name":"李四"},
   "updated_time":1731400000,
@@ -34,7 +36,8 @@ const followCardsJSON = `{"data":[
   "author":{"name":"王五"},"created_time":1731300000}},
  {"target":{"type":"question","id":100001,"title":"关注的新提问","author":{"name":"赵六"},
   "created_time":1731200000}},
- {"target":{"type":"article","id":200002,"title":"被丢弃的文章","author":{"name":"作者"}}},
+ {"target":{"type":"article","id":2098551208264914833,"title":"关注的专栏","author":{"name":"作者"},
+  "created":1731490000,"updated":1731500000}},
  {"target":{"type":"pin","id":300003}},
  {"target":{"type":"zvideo","id":400004,"title":"被丢弃的视频"}},
  {"target":{"type":"feed_group","id":500005}},
@@ -98,8 +101,8 @@ func TestFetchCursorPageFiltersToQuestionCards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchCursorPage: %v", err)
 	}
-	if len(items) != 2 { // the answer card and its duplicate question card are one row
-		t.Fatalf("got %d items, want 2 (answer folds into its question; article/pin/zvideo/feed_group drop)", len(items))
+	if len(items) != 3 { // the answer card and its duplicate question card are one row; the article card is its own row since 09
+		t.Fatalf("got %d items, want 3 (answer folds into its question; article keeps its own row; pin/zvideo/feed_group/ad drop)", len(items))
 	}
 
 	top := items[0]
@@ -131,6 +134,23 @@ func TestFetchCursorPageFiltersToQuestionCards(t *testing.T) {
 	if asked.PublishedAt == nil || asked.PublishedAt.Unix() != 1731200000 {
 		t.Errorf("question card publishedAt = %v, want its created_time fallback", asked.PublishedAt)
 	}
+
+	// The article card is its own row since ticket 09: the column
+	// page URL, the article's own author, the big id digit-exact, and
+	// the article clock spelling (updated preferred over created).
+	art := items[2]
+	if art.ID != "zh:article/2098551208264914833" {
+		t.Errorf("article id = %q, want the card's big id digit-exact", art.ID)
+	}
+	if art.Feed != FollowFeedKey || art.Source != ID || art.Title != "关注的专栏" || art.Author != "作者" {
+		t.Errorf("article row mapping = %+v", art)
+	}
+	if art.URL != "https://zhuanlan.zhihu.com/p/2098551208264914833" {
+		t.Errorf("article url = %q, want the column page", art.URL)
+	}
+	if art.PublishedAt == nil || art.PublishedAt.Unix() != 1731500000 {
+		t.Errorf("article publishedAt = %v, want the card's updated clock", art.PublishedAt)
+	}
 	// The walk continues at the server's own address for page two.
 	if next != "https://www.zhihu.com/api/v3/moments?after_id=1912345678901234567" {
 		t.Errorf("next cursor = %q, want paging.next verbatim", next)
@@ -141,7 +161,7 @@ func TestFetchCursorPageFiltersToQuestionCards(t *testing.T) {
 // zero rows, but the served cursor still advances the walk.
 func TestFetchCursorPageFilteredEmptyStillServesCursor(t *testing.T) {
 	body := `{"data":[
-	 {"target":{"type":"pin","id":1}},{"target":{"type":"article","id":2,"title":"文"}}
+	 {"target":{"type":"pin","id":1}},{"target":{"type":"zvideo","id":2,"title":"视"}}
 	],"paging":{"next":"https://www.zhihu.com/api/v3/moments?after_id=2","is_end":false}}`
 	src, _ := followSrcAt(t, &fakeZhihu{momentsOverride: body})
 	items, next, err := src.FetchCursorPage(t.Context(), followFeed(src), "")
