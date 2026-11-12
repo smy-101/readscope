@@ -2,15 +2,17 @@
 
 Status: ready-for-agent
 
+> **2026-11-12 修订(二)**:推荐 feed 收编——原 Out of Scope「推荐 feed(算法流)」推翻(用户日常主刷推荐);加票 08(推荐 feed)/09(文章卡),关注流的文章卡顺带收编;想法(pin)/视频卡维持两个 feed 都不收。
+
 上游方案:`docs/PLAN.md` §8 里程碑 M4、ADR #2(经 #14 修订)/#13/#14;术语见 `GLOSSARY.md`(信息流 + Hacker News + 知乎 三节)。
 
 ## Problem Statement
 
-用户在终端里想刷知乎:热榜看全站话题、关注流看自己关心的人的新回答、知乎日报读编辑精选全文。当前 readscope 源栏只有 RSS/HN,知乎是占位符。知乎未登录网页有登录墙 + zse-ck JS 挑战(纯 HTTP 客户端不可达),App 无开放 API;PLAN v1 曾把"知乎登录态抓取"整体列为非目标(指浏览器常驻通道,工程量以月计)。2026-11 调研 + FeedScope 源码实测矩阵确认了更轻的路线:**免签 API(只认 cookie)+ 手动贴 cookie 的 Go 直连**,工程量收敛到周级——本里程碑把这条路线落成第四个源。
+用户在终端里想刷知乎:热榜看全站话题、推荐流刷算法推荐(日常主力)、关注流看自己关心的人的新回答、知乎日报读编辑精选全文。当前 readscope 源栏只有 RSS/HN,知乎是占位符。知乎未登录网页有登录墙 + zse-ck JS 挑战(纯 HTTP 客户端不可达),App 无开放 API;PLAN v1 曾把"知乎登录态抓取"整体列为非目标(指浏览器常驻通道,工程量以月计)。2026-11 调研 + FeedScope 源码实测矩阵确认了更轻的路线:**免签 API(只认 cookie)+ 手动贴 cookie 的 Go 直连**,工程量收敛到周级——本里程碑把这条路线落成第四个源。
 
 ## Solution
 
-新增 zhihu 源,feeds = 热榜(免登录)/ 关注(cookie)/ 知乎日报(免登录)。列表条目统一为问题卡(回答卡归并到所属问题,文章/想法/视频卡丢弃)与日报条目;详情复用三层详情模型:问题层(描述 + 回答楼层)→ 回答层(单答全文,←→ 切换)→ 评论层(根评论楼层 + 子回复扁平化)。登录仪式 = 手动贴 cookie(独立文件 0600),Ctrl+U 重登;v4 详情端点 401/403 = 会话失效 → 引导重登(不清 cookie),热榜/日报不受影响。全链路缓存先行,离线可读。
+新增 zhihu 源,feeds = 热榜(免登录)/ 推荐(cookie)/ 关注(cookie)/ 知乎日报(免登录)。列表条目统一为问题卡(回答卡归并到所属问题)、文章卡(推荐流与关注流都收,id=`zh:article/<id>`,详情两层)、日报条目;想法/视频/广告卡丢弃。问题详情复用三层详情模型:问题层(描述 + 回答楼层)→ 回答层(单答全文,←→ 切换)→ 评论层(根评论楼层 + 子回复扁平化);文章详情两层:正文层 → 评论层(与回答评论同构)。登录仪式 = 手动贴 cookie(独立文件 0600),Ctrl+U 重登;v4 详情端点 401/403 = 会话失效 → 引导重登(不清 cookie),热榜/日报不受影响。全链路缓存先行,离线可读。
 
 ## 数据面契约(2026-11 实测 + FeedScope 同源矩阵背书)
 
@@ -19,10 +21,13 @@ Status: ready-for-agent
 | 热榜 | `GET api.zhihu.com/topstory/hot-list?limit=10` | 无(仅桌面 UA) | 无(上限 30 条,limit 参数无效) | qid 一律从 `target.url` 提取(裸大整数超 2^53,数值解析丢精度);元信息 = `detail_text`("2045 万热度") |
 | 日报列表 | `GET news-at.zhihu.com/api/4/news/latest` | 无 | 无(当日即全量) | hint 作元信息列("作者 · 2 分钟阅读") |
 | 日报正文 | `GET news-at.zhihu.com/api/4/story/{id}` | 无 | — | `body` 为 HTML,进渲染管线;存 body 快照离线可读 |
-| 关注流 | `GET www.zhihu.com/api/v3/moments?limit=10&desktop=true` | cookie | `paging.next` 游标 | Referer=`https://www.zhihu.com/follow`;只留问题卡(answer 卡归并所属问题,article/pin/video/ad 丢弃) |
+| 关注流 | `GET www.zhihu.com/api/v3/moments?limit=10&desktop=true` | cookie | `paging.next` 游标 | Referer=`https://www.zhihu.com/follow`;问题卡 + 文章卡(answer 卡归并所属问题,pin/video/ad 丢弃;文章卡 09 收编) |
+| 推荐流 | `GET www.zhihu.com/api/v3/feed/topstory/recommend?desktop=true` | cookie | `paging.next` 游标(verbatim,自带 session_token/after_id/page_number,入口无需 seed) | Referer=`https://www.zhihu.com/`;问题卡 + 文章卡(answer→问题归并;pin/video/ad 丢弃)。**2026-11-12 真网 GREEN**:卡片字段与 moments 同款(question.id/author.name/created_time·updated_time);article 卡时钟字段名为 created/updated(unix 秒)、id 超 2^53;游标第 2 页 200 且与首页零重叠 |
 | 问题元信息 | `GET www.zhihu.com/api/v4/questions/{qid}?include=detail,excerpt,answer_count,follower_count,visit_count,author,created` | cookie + `x-zse-93`(必带,缺失=403 code 10003) | — | 描述 detail 为 HTML |
 | 回答 | `GET www.zhihu.com/api/v4/questions/{qid}/feeds?include=…&limit=5&order=default&platform=desktop` | cookie(**首次入口不带 x-zse-93,带=403**) | `paging.next` | `content` 为 HTML;include 集保持精简形态 |
 | 评论 | `GET www.zhihu.com/api/v4/comment_v5/answers/{aid}/root_comment?order_by=score&limit=20&offset=` | cookie(x-zse-93 无害) | offset / `paging.next` | root 只带 1–2 条热门子回复;缺口 = `child_comment_count − len(child_comments)`,补全走 `comment_v5/comment/{id}/child_comment` 游标(单根最多 6 页) |
+| 文章正文 | `GET www.zhihu.com/api/v4/articles/{id}` | cookie + `x-zse-93`(v4 族矩阵,09 号票 probe 复核) | — | `content` 为 HTML 进渲染管线;标题/作者随卡(09 号票) |
+| 文章评论 | `GET www.zhihu.com/api/v4/comment_v5/articles/{id}/root_comment?order_by=score&limit=20&offset=` | cookie | offset / `paging.next` | 与回答评论同构(根楼层 + 热门子回复 + 缺口补全)(09 号票) |
 
 公共请求形态:桌面 Chrome UA;`x-requested-with: fetch`;Referer 按端点;`x-zse-93: 101_3_3.0`(静态常量,按上表矩阵)。**x-zse-96 签名一律不需要**(2026-11 FeedScope 实测,本源不实现签名器);zse-ck JS 挑战只挂 HTML 页,JSON API 不经过(01 号票复核)。
 
@@ -33,7 +38,7 @@ Status: ready-for-agent
 ## User Stories
 
 1. 作为读者,我想 Tab 切到知乎就看到热榜,以便不开浏览器了解今天全站在吵什么
-2. 作为读者,我想在边栏切 热榜 / 关注 / 知乎日报,以便按需浏览
+2. 作为读者,我想在边栏切 热榜 / 推荐 / 关注 / 知乎日报,以便按需浏览
 3. 作为读者,我想热榜行元信息列看到热度("2045 万热度"),以便判断话题热度
 4. 作为读者,我想 Enter 打开问题,看到问题描述与回答楼层,以便扫读讨论结构
 5. 作为读者,我想楼层头显示 author · 赞同 · N 评论,以便挑选想读的回答
@@ -48,12 +53,16 @@ Status: ready-for-agent
 14. 作为读者,我想日报条目 Enter 直接读排版好的全文、离线也可读,以便通勤断网翻旧刊
 15. 作为读者,我想 `readscope doctor` 报告知乎 cookie 文件状态,以便排查问题
 16. 作为读者,我想新装 readscope 默认就有知乎源(热榜/日报开箱即用),以便零配置可用
+17. 作为读者,我想边栏切到推荐刷算法推荐的问题与文章,以便日常主浏览不开浏览器
+18. 作为读者,我想 Ctrl+N 沿游标深翻推荐流、F5 拿新一轮而已读不丢,以便连续刷不重读
+19. 作为读者,我想 Enter 打开文章卡读全文、再 Enter 进评论区,以便文章与问题同一套肌肉记忆
+20. 作为读者,我想关注的人发专栏时关注流也出文章卡,以便关注内容不缺块
 
 ## Implementation Decisions
 
 - 新增 `internal/source/zhihu` 包,id `"zhihu"`,init 注册进源注册表;实现 Source + DetailSource + PagedSource(游标变体):`feed_fetch_state` 增 cursor 列(下一号 migration),"下一页 = 当前游标"泛化页深语义,重启从存储游标续翻
 - `DefaultSources` 改 `["rss","hn","zhihu"]`;已存在的 sources.toml 不自动改写,README 记手动加法(m3 同款)
-- 条目 id:`zh:question/<qid>`(热榜与关注同题同 id,跨 feed 重归属复用既有机制)、`zh:daily/<storyId>`
+- 条目 id:`zh:question/<qid>`(热榜与关注同题同 id,跨 feed 重归属复用既有机制)、`zh:daily/<storyId>`、`zh:article/<id>`(推荐流与关注流的文章卡,URL=`zhuanlan.zhihu.com/p/<id>`,09 号票)
 - 热度复用热度快照 points 列("2045 万热度"折算数值存入),元信息列按源格式化还原;关注流元信息 = 作者名(author 列);日报 = hint
 - cookie:`~/.config/readscope/zhihu.cookies`,权限 0600,内容为原样粘贴的 Cookie 请求头文本;解析出 z_c0/d_c0 判活,其余键值原样透传;`readscope zhihu login` 子命令引导粘贴;TUI Ctrl+U 弹输入 dialog;doctor 报告存在/权限/z_c0 有无
 - 失效处理:详情族(v4/comment_v5)401/403 → 状态栏"登录态失效,Ctrl+U 重新登录",不清 cookie、不中断热榜/日报;列表族(v3)403 原样报错
@@ -63,6 +72,8 @@ Status: ready-for-agent
 - 缓存:条目快照(items.body)、评论整树(comments 表)沿用既有 DAO;开帖标记复用;日报正文进 body 快照
 - 键位:Ctrl+U 登录(全局);F1 帮助收口新键
 - i18n:feed 标签 + 登录/失效/降级状态键,zh-CN/en 双语同步,键树一致性测试守住
+- 推荐 feed(08 号票):key=`recommend`,i18n `zhihu.recommend`(推荐/Recommend),边栏序 热榜→推荐→关注→日报;cookie 门禁与关注流同款(preflight 零拨号 ErrLoginRequired→Ctrl+U 引导);游标语义同关注流(cursor 落库、重启续翻、F5 重锚);卡片过滤 answer→问题归并/question 直入/article→文章卡(09)/pin、video、广告丢弃,同题去重;参数与卡片字段形态 08 号票 probe 实测收口
+- 文章卡(09 号票):详情两层(正文层=标题+作者+v4/articles content HTML → 评论层=comment_v5/articles root_comment,与回答评论同构:根楼层、扁平化 @parent、缺口补全、offset 翻页);DetailOnDemand 按 id 前缀分派,v4 族 401/403 → 登录引导(不清 cookie);推荐流与关注流共用卡片映射
 - 无新第三方依赖
 
 ## Testing Decisions
@@ -75,8 +86,7 @@ Status: ready-for-agent
 
 ## Out of Scope
 
-- 关注流的文章卡/想法卡/视频卡(丢弃;文章卡是后续纯增量)
-- 推荐 feed(算法流,与阅读器定位弱相关)
+- 想法(pin)卡与视频卡(推荐流/关注流都不收;碎片化,与阅读器定位弱相关)
 - chromedp 扫码登录仪式(cookie 文件是唯一事实源,通道可后补)
 - zse-ck JS 挑战破解、知乎 HTML 页抓取(JSON API 不经过挑战)
 - 知乎官方数据开放平台与第三方付费 API
@@ -103,3 +113,5 @@ Status: ready-for-agent
 | 05 | 关注 feed(问题卡过滤 + 游标分页) | 1–2 天 |
 | 06 | 问题三层详情(回答楼层/回答层/评论层 + 缓存) | 3–5 天 |
 | 07 | M4 验收(真网 smoke + README/F1/i18n 收口) | 0.5–1 天 |
+| 08 | 推荐 feed(probe 实测 + 问题卡游标分页 + cookie 门禁) | 1–1.5 天 |
+| 09 | 文章卡(zh:article 行 + 两层详情 + 关注流收编) | 2–3 天 |

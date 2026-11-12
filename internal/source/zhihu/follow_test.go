@@ -60,14 +60,14 @@ func followFeed(src *Source) core.Feed {
 	panic("no follow feed")
 }
 
-func TestFeedsAreHotThenFollow(t *testing.T) {
+func TestFeedsAreHotThenFollow(t *testing.T) { // order itself pinned in recommend_test (ticket 08)
 	fake := &fakeZhihu{}
 	src, _ := followSrcAt(t, fake) // server unused: Feeds dials nothing
 	feeds := src.Feeds()
-	if len(feeds) != 3 {
-		t.Fatalf("got %d feeds, want 3 (hot, follow, daily — ticket 03)", len(feeds))
+	if len(feeds) != 4 {
+		t.Fatalf("got %d feeds, want 4 (hot, recommend, follow, daily — ticket 08)", len(feeds))
 	}
-	hot, follow := feeds[0], feeds[1]
+	hot, follow := feeds[0], feeds[2]
 	if hot.Key != HotFeedKey || hot.ListSort != core.ListSortPoints {
 		t.Errorf("hot feed = %+v", hot)
 	}

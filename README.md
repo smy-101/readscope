@@ -10,7 +10,7 @@ IME-safe UI. Inspired by [FeedScope](https://github.com/howardli/FeedScope).
 
 ## Features (planned for v0.1)
 
-- **Feeds**: RSS/Atom subscriptions with OPML import/export; Hacker News via the public Algolia API — no login, no API key; Zhihu hot board and daily digest anonymously, follow feed and answer comments with a pasted browser cookie
+- **Feeds**: RSS/Atom subscriptions with OPML import/export; Hacker News via the public Algolia API — no login, no API key; Zhihu hot board and daily digest anonymously, recommend feed, follow feed and answer comments with a pasted browser cookie
 - **EPUB bookshelf**: scan a library directory, `add` copies books in; read in a dedicated full-screen mode with TOC, bookmarks and full-text search
 - **State that survives**: read marks, favorites (full snapshots), and reading progress persist in SQLite; cached lists paint instantly and stay readable offline
 - **CJK-aware rendering**: one shared HTML→terminal pipeline renders both feed articles and EPUB chapters, with Chinese-aware line wrapping and code highlighting
@@ -102,7 +102,7 @@ upgrade note above if your file predates it.
 
 #### Cookie login (Ctrl+U)
 
-Only the follow feed and the answer-comments layer ask for a cookie — everything above works
+Only the recommend feed, the follow feed and the answer-comments layer ask for a cookie — everything above works
 without one. To log in:
 
 1. Log in to `zhihu.com` in your browser.
@@ -116,7 +116,7 @@ written. The header is stored as `<config dir>/zhihu.cookies` with mode `0600`, 
 doctor` reports its state. Saving is 保存即用: the next `F5` picks the new cookie up, no restart.
 
 Cookies expire after days to weeks. When that happens the detail family answers 401/403 and the
-UI says *login expired — `Ctrl+U` to re-login*; the follow feed shows the same guidance. Delete
+UI says *login expired — `Ctrl+U` to re-login*; the recommend and follow feeds show the same guidance. Delete
 the file and you are back in anonymous mode: hot board and daily digest keep working, the follow
 feed asks for a login.
 

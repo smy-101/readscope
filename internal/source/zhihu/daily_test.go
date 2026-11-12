@@ -49,13 +49,13 @@ func dailyFeed() core.Feed {
 	return core.Feed{}
 }
 
-func TestDailyFeedSitsThirdInSidebar(t *testing.T) {
+func TestDailyFeedSitsFourthInSidebar(t *testing.T) {
 	src := zhihuSrcAt(t, &fakeZhihu{})
 	feeds := src.Feeds()
-	if len(feeds) != 3 {
-		t.Fatalf("got %d feeds, want 3 (hot, follow, daily)", len(feeds))
+	if len(feeds) != 4 {
+		t.Fatalf("got %d feeds, want 4 (hot, recommend, follow, daily — ticket 08)", len(feeds))
 	}
-	daily := feeds[2]
+	daily := feeds[3]
 	if daily.Key != DailyFeedKey || daily.LabelKey != "zhihu.daily" {
 		t.Fatalf("daily feed = %+v", daily)
 	}

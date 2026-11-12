@@ -383,6 +383,38 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 		res(r)
 	}
 
+	// 5b. Recommend feed (ticket 08): the home page's algorithmic
+	// feed — same v3 session door as moments, same card census plus
+	// the article tally kept apart (ticket 09 will keep those cards;
+	// the probe already tells them from the true drops).
+	if login("recommend") {
+		r := p.outcome("recommend",
+			tr.Get(ctx, epRecommend, h.Web+"/api/v3/feed/topstory/recommend?desktop=true"),
+			func(b []byte) (string, bool) {
+				var ms moments
+				if err := json.Unmarshal(b, &ms); err != nil {
+					return "unparseable: " + err.Error(), false
+				}
+				keptA, keptQ, articles, dropped := 0, 0, 0, map[string]int{}
+				for _, m := range ms.Data {
+					switch m.Target.Type {
+					case "answer":
+						keptA++
+					case "question":
+						keptQ++
+					case "article":
+						articles++ // kept apart: ticket 09's rows, not a drop
+					default:
+						dropped[m.Target.Type]++
+					}
+				}
+				note := fmt.Sprintf("cards=%d kept=%d(answer=%d question=%d) article=%d dropped=%d%s cursor=%v",
+					len(ms.Data), keptA+keptQ, keptA, keptQ, articles, len(ms.Data)-keptA-keptQ-articles, census(dropped), ms.Paging.Next != "") + redesignNote(len(ms.Data))
+				return note, true
+			})
+		res(r)
+	}
+
 	// The v4 pair, built once — the walk and the header-matrix legs hit
 	// the same two addresses. Referer carries the qid; the matrix rows
 	// hold everything else.

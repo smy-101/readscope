@@ -29,6 +29,7 @@ comments = "%d comments"
 
 [zhihu]
 hot = "Hot List"
+recommend = "Recommend"
 follow = "Following"
 daily = "Daily"
 heat = "%d万 heat"

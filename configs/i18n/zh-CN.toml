@@ -29,6 +29,7 @@ comments = "%d 条评论"
 
 [zhihu]
 hot = "热榜"
+recommend = "推荐"
 follow = "关注"
 daily = "日报"
 heat = "%d 万热度"

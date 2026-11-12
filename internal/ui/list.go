@@ -200,11 +200,12 @@ func (m Model) rowMeta(row store.ItemRow) string {
 // ifs): the hot board's heat reading "N 万热度" from the folded heat
 // snapshot (the fold lives in zhihu.heatPoints, each side pinned by
 // its own test; the fold only ever stores whole 万, so the division
-// restores the exact number); the follow feed's card author (the
-// answerer on an answer card, the asker on a question card); the
-// daily digest's hint, carried verbatim in the meta column — the
-// source serves it as one atomic string. A row without its feed's
-// segment keeps the meta blank like the date-less rows always have.
+// restores the exact number); the follow and recommend feeds' card
+// author (the answerer on an answer card, the asker on a question
+// card); the daily digest's hint, carried verbatim in the meta
+// column — the source serves it as one atomic string. A row without
+// its feed's segment keeps the meta blank like the date-less rows
+// always have.
 func (m Model) zhihuMeta(it core.Item) string {
 	switch it.Feed {
 	case zhihu.HotFeedKey:
@@ -214,7 +215,7 @@ func (m Model) zhihuMeta(it core.Item) string {
 		return "" // pinned card, or a heat format zhihu invented later
 	case zhihu.DailyFeedKey:
 		return it.Meta // the hint, verbatim
-	default: // follow
+	default: // follow, recommend
 		return it.Author
 	}
 }

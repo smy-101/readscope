@@ -109,6 +109,10 @@ var (
 		Name: "moments", Referer: "https://www.zhihu.com/follow",
 		Cookie: true, Gated: true, Family: FamilyList, // v3: 403 = risk control, raw error (follow feed, ticket 05)
 	}
+	epRecommend = Endpoint{
+		Name: "recommend", Referer: "https://www.zhihu.com/",
+		Cookie: true, Gated: true, Family: FamilyList, // v3 session door, the home page's own feed (ticket 08); 403 = risk control, raw error
+	}
 	epQuestionMeta = Endpoint{
 		Name: "question-meta", Referer: "https://www.zhihu.com/question/", // + qid at the call site
 		ZSE93: true, Cookie: true, Gated: true, Family: FamilyDetail,

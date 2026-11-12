@@ -741,23 +741,27 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Source: %v", err)
 	}
-	if len(results) != 3 {
-		t.Fatalf("got %d results, want 3 (hot ok, follow gated, daily ok — tickets 03/05)", len(results))
+	if len(results) != 4 {
+		t.Fatalf("got %d results, want 4 (hot ok, recommend gated, follow gated, daily ok — tickets 03/05/08)", len(results))
 	}
 	r := results[0]
 	if r.Err != nil || r.New != 2 || r.Total != 2 || r.Feed != "hot" {
 		t.Fatalf("hot result = %+v", r)
 	}
-	// The follow feed without a cookie: the gated preflight answers
-	// ErrLoginRequired on its own Result — the anonymous board beside
-	// it is unaffected (the spec's per-feed isolation).
-	if f := results[1]; f.Feed != "follow" || !errors.Is(f.Err, zhihu.ErrLoginRequired) {
+	// The cookie-gated feeds without a cookie: the gated preflight
+	// answers ErrLoginRequired on their own Results — the anonymous
+	// board beside them is unaffected (the spec's per-feed isolation).
+	// Ticket 08 adds the recommend feed to the gated family.
+	if f := results[1]; f.Feed != "recommend" || !errors.Is(f.Err, zhihu.ErrLoginRequired) {
+		t.Fatalf("recommend result = %+v, want ErrLoginRequired (Ctrl+U guidance)", f)
+	}
+	if f := results[2]; f.Feed != "follow" || !errors.Is(f.Err, zhihu.ErrLoginRequired) {
 		t.Fatalf("follow result = %+v, want ErrLoginRequired (Ctrl+U guidance)", f)
 	}
 	// The daily digest lands its row with the hint riding the meta
 	// column and no body — the full text is a first-open fetch
 	// (BodySource, ticket 03).
-	if f := results[2]; f.Err != nil || f.New != 1 || f.Total != 1 || f.Feed != "daily" {
+	if f := results[3]; f.Err != nil || f.New != 1 || f.Total != 1 || f.Feed != "daily" {
 		t.Fatalf("daily result = %+v", f)
 	}
 	dailyRows, err := st.FeedItems(context.Background(), "zhihu", "daily", false)
@@ -783,7 +787,7 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	if r := results2[0]; r.Err != nil || r.New != 0 || r.Total != 2 {
 		t.Fatalf("second refresh should add nothing: %+v", r)
 	}
-	if f := results2[2]; f.Err != nil || f.New != 0 || f.Total != 1 {
+	if f := results2[3]; f.Err != nil || f.New != 0 || f.Total != 1 {
 		t.Fatalf("second daily refresh should add nothing: %+v", f)
 	}
 	rows, err := st.FeedItems(context.Background(), "zhihu", "hot", false)
@@ -991,5 +995,125 @@ func TestFollowFeedCursorWalk(t *testing.T) {
 	// every call above built a fresh source, exactly what a restart does.
 	if got, want := walkSoFar(), []string{"", "A", "B", "C", "C", ""}; !slices.Equal(got, want) {
 		t.Fatalf("the walk dialed %v, want %v (no known page re-fetched)", got, want)
+	}
+}
+
+// recommendFake is the recommend door's followMomentsFake twin: a
+// three-page cursor walk (first page, the last page, and the end's
+// re-report) behind one absolute-cursor server, cookie-gated. The
+// walk's shape proves the recommend feed rides the SAME cursor
+// pipeline the follow feed pinned — no new mechanism (ticket 08).
+func recommendFake(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+	a := func(qid, title, author string, updated int64) string {
+		return fmt.Sprintf(`{"target":{"type":"answer","id":%s,"author":{"name":%q},`+
+			`"question":{"id":%s,"title":%q},"updated_time":%d}}`, qid, author, qid, title, updated)
+	}
+	pages := map[string]string{
+		"": fmt.Sprintf(`{"data":[%s,%s],"paging":{"next":"%%NEXT%%A","is_end":false}}`,
+			a("2101", "推荐问题一", "赵六", 1731400400), a("2102", "推荐问题二", "钱七", 1731400300)),
+		"A": fmt.Sprintf(`{"data":[%s,%s],"paging":{"next":"","is_end":true}}`,
+			a("2102", "推荐问题二", "钱七", 1731400300), a("2103", "推荐问题三", "孙八", 1731400200)),
+	}
+	var mu sync.Mutex
+	queries := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/feed/topstory/recommend" {
+			http.Error(w, "no fixture", http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Cookie") == "" {
+			http.Error(w, `{"error":{"code":101}}`, http.StatusForbidden)
+			return
+		}
+		cursor := r.URL.Query().Get("after_id")
+		mu.Lock()
+		queries = append(queries, cursor)
+		mu.Unlock()
+		body, ok := pages[cursor]
+		if !ok {
+			http.Error(w, "no fixture", http.StatusNotFound)
+			return
+		}
+		fmt.Fprint(w, strings.ReplaceAll(body, "%NEXT%", srvCursorBase(r)+"/api/v3/feed/topstory/recommend?after_id="))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), queries...)
+	}
+}
+
+// TestRecommendFeedCursorWalk: F5 lands the first page and its
+// cursor, Ctrl+N walks the stored cursor (the re-served question
+// dedupes, the end reports with rows aboard), the end re-reports, F5
+// re-anchors — the follow feed's walk contract, replayed against the
+// recommend door to pin the routing (the pipeline itself is feed-
+// agnostic and pinned by the follow tests).
+func TestRecommendFeedCursorWalk(t *testing.T) {
+	srv, dialed := recommendFake(t)
+	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
+	t.Setenv("READSCOPE_CONFIG", t.TempDir())
+	if path, err := zhihu.CookiePath(); err != nil {
+		t.Fatalf("cookie path: %v", err)
+	} else if _, err := zhihu.SaveCookie(path, "z_c0=session; d_c0=os"); err != nil {
+		t.Fatalf("save cookie: %v", err)
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "recommend.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srcs := core.DefaultSources()
+	ctx := context.Background()
+
+	// F5: the first page lands, stamped with the recommend feed.
+	results, err := Feed(ctx, st, srcs, "zhihu", "recommend")
+	if err != nil || len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("F5 recommend = (%+v, %v)", results, err)
+	}
+	if r := results[0]; r.New != 2 || r.Total != 2 || r.Feed != "recommend" {
+		t.Fatalf("F5 result = %+v, want 2 new / 2 total on recommend", r)
+	}
+	if cursor, _ := st.LoadCursor(ctx, "zhihu", "recommend"); !strings.Contains(cursor, "after_id=A") {
+		t.Fatalf("cursor after F5 = %q, want page A's address", cursor)
+	}
+
+	// Ctrl+N: the re-served question dedupes, the new one lands, and
+	// the page served no next cursor — the end reports with rows.
+	res, end, err := More(ctx, st, srcs, "zhihu", "recommend")
+	if err != nil || !end {
+		t.Fatalf("More = (%+v, %v, %v), want the end with rows aboard", res, end, err)
+	}
+	if res.New != 1 || res.Total != 3 {
+		t.Fatalf("More = %+v, want 1 new / 3 total", res)
+	}
+	rows, err := st.FeedItems(ctx, "zhihu", "recommend", false)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows after More = (%d, %v), want 3 — no duplicates", len(rows), err)
+	}
+
+	// The end re-reports without regressing the cursor.
+	if res, end, err = More(ctx, st, srcs, "zhihu", "recommend"); err != nil || !end || res.New != 0 {
+		t.Fatalf("post-end More = (%+v, %v, %v), want the end again, nothing new", res, end, err)
+	}
+
+	// F5 re-anchors to the fresh first page's next.
+	if _, err := Feed(ctx, st, srcs, "zhihu", "recommend"); err != nil {
+		t.Fatalf("re-F5: %v", err)
+	}
+	if cursor, _ := st.LoadCursor(ctx, "zhihu", "recommend"); !strings.Contains(cursor, "after_id=A") {
+		t.Fatalf("cursor after re-F5 = %q, want re-anchored to the first page's next", cursor)
+	}
+
+	// The dial log: F5, page A, the end's re-report, the re-F5 — page
+	// 1 twice (two F5s), page A twice, nothing else.
+	if got, want := dialed(), []string{"", "A", "A", ""}; !slices.Equal(got, want) {
+		t.Fatalf("the walk dialed %v, want %v", got, want)
 	}
 }

@@ -52,7 +52,7 @@ func dailyModel(t *testing.T, items []core.Item) Model {
 		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
 		m = pump(t, m, cmd)
 	}
-	for range 2 { // sidebar: hot → follow → daily
+	for range 3 { // sidebar: hot → recommend → follow → daily (ticket 08)
 		var cmd tea.Cmd
 		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyDown})
 		m = pump(t, m, cmd)
@@ -192,7 +192,7 @@ func TestDailyBodySurvivesRestartOffline(t *testing.T) {
 			m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
 			m = pump(t, m, cmd)
 		}
-		for range 2 { // sidebar: hot → follow → daily
+		for range 3 { // sidebar: hot → recommend → follow → daily (ticket 08)
 			var cmd tea.Cmd
 			m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyDown})
 			m = pump(t, m, cmd)

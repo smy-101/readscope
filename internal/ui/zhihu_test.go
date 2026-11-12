@@ -165,9 +165,12 @@ func followModel(t *testing.T, items []core.Item) Model {
 		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
 		m = pump(t, m, cmd)
 	}
-	// sidebar: hot → follow (feedsMsg already landed via the pump)
-	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyDown})
-	m = pump(t, m, cmd)
+	// sidebar: hot → recommend → follow (feedsMsg already landed via the pump; ticket 08 inserts recommend)
+	var cmd tea.Cmd
+	for range 2 {
+		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyDown})
+		m = pump(t, m, cmd)
+	}
 	if m.selectedFeedKey() != "follow" {
 		t.Fatalf("selected feed = %q, want follow", m.selectedFeedKey())
 	}

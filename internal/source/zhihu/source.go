@@ -39,6 +39,11 @@ const HotFeedKey = "hot"
 // cookie-gated, cursor-paged.
 const FollowFeedKey = "follow"
 
+// RecommendFeedKey is the recommend feed's stable key (GLOSSARY:
+// 推荐流) — the home page's algorithmic feed, cookie-gated,
+// cursor-paged, same door family as the follow feed (ticket 08).
+const RecommendFeedKey = "recommend"
+
 // DailyFeedKey is the daily digest's stable key (GLOSSARY: 知乎日报)
 // — anonymous, a day's snapshot, lazy bodies.
 const DailyFeedKey = "daily"
@@ -48,6 +53,9 @@ const hotLabelKey = "zhihu.hot"
 
 // followLabelKey is the follow feed's i18n key.
 const followLabelKey = "zhihu.follow"
+
+// recommendLabelKey is the recommend feed's i18n key.
+const recommendLabelKey = "zhihu.recommend"
 
 // dailyLabelKey is the daily feed's i18n key.
 const dailyLabelKey = "zhihu.daily"
@@ -116,6 +124,14 @@ func (s *Source) momentsURL() string {
 	return s.hosts.Web + "/api/v3/moments?limit=10&desktop=true"
 }
 
+// recommendURL is the recommend feed's first page: the home page's
+// own XHR door, no seed needed (probe 2026-11-12: the server hands
+// session_token inside paging.next, the entry takes ?desktop=true
+// alone). Later pages ride paging.next verbatim, same as moments.
+func (s *Source) recommendURL() string {
+	return s.hosts.Web + "/api/v3/feed/topstory/recommend?desktop=true"
+}
+
 // dailyLatestURL is the daily digest's anonymous list door: one
 // GET, the current issue whole (no paging — a day is the full
 // snapshot).
@@ -126,9 +142,9 @@ func (s *Source) storyURL(storyID string) string {
 	return s.hosts.Daily + "/api/4/story/" + storyID
 }
 
-// Feeds implements source.Source: the hot board, the follow feed and
-// the daily digest in sidebar order (spec §Solution: 热榜 / 关注 /
-// 知乎日报).
+// Feeds implements source.Source: the hot board, the recommend
+// feed, the follow feed and the daily digest in sidebar order (spec
+// revision 2: 热榜 → 推荐 → 关注 → 日报).
 func (s *Source) Feeds() []core.Feed {
 	return []core.Feed{
 		{
@@ -139,6 +155,14 @@ func (s *Source) Feeds() []core.Feed {
 			// declares ListSortPoints like hn's popularity feeds and the
 			// UI ranks rows by the heat snapshot.
 			ListSort: core.ListSortPoints,
+		},
+		{
+			Key:      RecommendFeedKey,
+			LabelKey: recommendLabelKey,
+			URL:      s.recommendURL(),
+			// The algorithmic stream orders by the card's own clock
+			// (created/updated, newest first) like the follow feed —
+			// ListSortTime, the zero value.
 		},
 		{
 			Key:      FollowFeedKey,
@@ -194,13 +218,13 @@ func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 		return s.fetchHot(ctx, f)
 	case DailyFeedKey:
 		return s.fetchDaily(ctx, f)
-	case FollowFeedKey:
-		// A loud refusal, not a half-fetch: the follow feed's pages
+	case FollowFeedKey, RecommendFeedKey:
+		// A loud refusal, not a half-fetch: the cursor feeds' pages
 		// carry the cursor the caller must persist, which Fetch's
-		// items-only shape cannot — the refresh layer routes it to
+		// items-only shape cannot — the refresh layer routes them to
 		// FetchCursorPage before probing Fetch, so landing here is a
 		// wiring bug, and it should say so.
-		return nil, fmt.Errorf("fetch follow: cursor-paged feed — walk it via FetchCursorPage")
+		return nil, fmt.Errorf("fetch %s: cursor-paged feed — walk it via FetchCursorPage", f.Key)
 	default:
 		return nil, fmt.Errorf("fetch %s: unknown zhihu feed", f.Key)
 	}
@@ -311,29 +335,41 @@ func heatPoints(detailText string) *int {
 
 // --- the follow feed (ticket 05) -----------------------------------------
 
-// CursorPaged implements source.CursorPagedSource: the follow feed
-// alone pages by cursor — the board is a fixed window and the daily
-// digest a day's snapshot, neither has a page two.
-func (s *Source) CursorPaged(f core.Feed) bool { return f.Key == FollowFeedKey }
+// CursorPaged implements source.CursorPagedSource: the follow and
+// recommend feeds page by cursor — the board is a fixed window and
+// the daily digest a day's snapshot, neither has a page two.
+func (s *Source) CursorPaged(f core.Feed) bool {
+	return f.Key == FollowFeedKey || f.Key == RecommendFeedKey
+}
 
-// FetchCursorPage implements source.CursorPagedSource: one moments
-// page — the first when cursor is "", else the page the server
-// addressed with that cursor (paging.next rides verbatim: the server
-// spells its own page addresses). Only question cards become rows
-// (questionCard folds answer cards into their question and drops
-// everything else); the same question twice on one page keeps the
-// first card. The next walk position is the server's paging.next,
-// "" meaning no further page — which, not an empty filtered page, is
-// the walk's end (see the interface contract).
+// FetchCursorPage implements source.CursorPagedSource: one moments or
+// recommend page — the first when cursor is "", else the page the
+// server addressed with that cursor (paging.next rides verbatim: the
+// server spells its own page addresses). Only question cards become
+// rows (questionCard folds answer cards into their question and
+// drops everything else — the article card included until ticket 09);
+// the same question twice on one page keeps the first card. The next
+// walk position is the server's paging.next, "" meaning no further
+// page — which, not an empty filtered page, is the walk's end (see
+// the interface contract).
 func (s *Source) FetchCursorPage(ctx context.Context, f core.Feed, cursor string) ([]core.Item, string, error) {
-	if f.Key != FollowFeedKey {
+	var url string
+	switch f.Key {
+	case FollowFeedKey:
+		url = s.momentsURL()
+	case RecommendFeedKey:
+		url = s.recommendURL()
+	default:
 		return nil, "", fmt.Errorf("fetch %s: not a zhihu cursor feed", f.Key)
 	}
-	url := s.momentsURL()
 	if cursor != "" {
 		url = cursor
 	}
-	res := s.tr.Get(ctx, epMoments, url)
+	ep := epMoments
+	if f.Key == RecommendFeedKey {
+		ep = epRecommend
+	}
+	res := s.tr.Get(ctx, ep, url)
 	if res.Err != nil {
 		return nil, "", fmt.Errorf("fetch %s: %w", f.Key, res.Err)
 	}
@@ -344,7 +380,7 @@ func (s *Source) FetchCursorPage(ctx context.Context, f core.Feed, cursor string
 	now := time.Now().UTC()
 	items, seen := make([]core.Item, 0, len(page.Data)), map[string]bool{}
 	for _, card := range page.Data {
-		it, ok := questionCard(card, now)
+		it, ok := questionCard(card, f.Key, now)
 		if !ok || seen[it.ID] {
 			continue // 同题去重: the page's first card owns the row
 		}
@@ -354,13 +390,15 @@ func (s *Source) FetchCursorPage(ctx context.Context, f core.Feed, cursor string
 	return items, page.Paging.Next, nil
 }
 
-// questionCard maps one moments card to its question-card row
-// (GLOSSARY: 问题卡). Answer cards fold into their question — the
-// answerer's name rides the author column — question cards pass
-// through, and every other card (article/pin/video/advert/…) is not a
-// row and not an error. Cards without a usable qid or title skip the
-// same way the hot board's degenerate rows do.
-func questionCard(c momentsCard, now time.Time) (core.Item, bool) {
+// questionCard maps one moments-family card (moments and recommend
+// serve field-compatible targets, probe 2026-11-12) to its
+// question-card row (GLOSSARY: 问题卡), stamped with the feed it
+// arrived on. Answer cards fold into their question — the answerer's
+// name rides the author column — question cards pass through, and
+// every other card (article/pin/video/advert/…) is not a row and not
+// an error. Cards without a usable qid or title skip the same way the
+// hot board's degenerate rows do.
+func questionCard(c momentsCard, feedKey string, now time.Time) (core.Item, bool) {
 	var qid, title, author string
 	switch c.Target.Type {
 	case "answer":
@@ -378,7 +416,7 @@ func questionCard(c momentsCard, now time.Time) (core.Item, bool) {
 	it := core.Item{
 		ID:     ItemID(qid),
 		Source: ID,
-		Feed:   FollowFeedKey,
+		Feed:   feedKey,
 		Title:  title,
 		URL:    questionURL(qid),
 		Author: author,

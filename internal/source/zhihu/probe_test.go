@@ -47,6 +47,17 @@ const (
 	 {"target":{"type":"pin","id":300003}}
 	],"paging":{"next":"https://www.zhihu.com/api/v3/moments?cursor=abc","is_end":false}}`
 
+	// recommend (ticket 08) mixes the algorithmic feed's card kinds:
+	// answer/question kept as question cards, article censused apart
+	// (ticket 09 will keep it), pin/video dropped.
+	recommendJSON = `{"data":[
+	 {"target":{"type":"answer","id":1912345678901234568,"author":{"name":"赵六"},
+	  "question":{"id":18984420158198241698,"title":"推荐的问题"}}},
+	 {"target":{"type":"article","id":200009,"title":"推荐的文章"}},
+	 {"target":{"type":"pin","id":300010}},
+	 {"target":{"type":"video","id":400011}}
+	],"paging":{"next":"https://www.zhihu.com/api/v3/feed/topstory/recommend?cursor=xyz","is_end":false}}`
+
 	questionMetaJSON = `{"title":"为什么终端阅读器又火了？","author":{"name":"张三"},
 	 "answer_count":213,"visit_count":12000000,"detail":"<p>问题描述</p>"}`
 
@@ -88,9 +99,11 @@ type fakeZhihu struct {
 	mu                  sync.Mutex
 	hits                []request
 	blockMoments        bool   // simulate risk control (403 even with cookie)
+	blockRecommend      bool   // simulate risk control on the recommend door (403 even with cookie)
 	emptyHot            bool   // serve {"data":[]} — redesign tripwire fixture
 	hotOverride         string // serve this body for /topstory/hot-list (source-test fixtures)
 	momentsOverride     string // serve this body for /api/v3/moments (follow-feed fixtures)
+	recommendOverride   string // serve this body for /api/v3/feed/topstory/recommend (ticket 08 fixtures)
 	dailyLatestOverride string // serve this body for /api/4/news/latest (ticket 03 fixtures)
 	dailyStoryOverride  string // serve this body for /api/4/story/* (ticket 03 fixtures)
 	staleStatus         int    // ≠0: v4/comment_v5 answer this status despite a cookie (stale z_c0)
@@ -193,6 +206,20 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(200, momentsJSON)
+	case req.path == "/api/v3/feed/topstory/recommend":
+		if !req.cookie {
+			write(403, v4ErrJSON) // anonymous: the www v3 gateway's session door
+			return
+		}
+		if f.blockRecommend {
+			write(403, v4ErrJSON) // pure risk control
+			return
+		}
+		if f.recommendOverride != "" {
+			write(200, f.recommendOverride)
+			return
+		}
+		write(200, recommendJSON)
 	case strings.HasPrefix(req.path, "/api/v4/comment_v5/"):
 		if !req.cookie || f.staleStatus != 0 {
 			write(f.staleStatusOr(401), v4ErrJSON)
@@ -380,7 +407,7 @@ func TestProbeFullWalkWithCookie(t *testing.T) {
 	for name, want := range map[string]string{
 		"hot-list": "GREEN", "hot-www-door": "GREEN",
 		"daily-latest": "GREEN", "daily-story": "GREEN",
-		"moments": "GREEN", "question-meta": "GREEN",
+		"moments": "GREEN", "recommend": "GREEN", "question-meta": "GREEN",
 		"answers-feeds": "GREEN", "comments-root": "GREEN",
 		"matrix-questions-nozse": "MATCH", "matrix-feeds-withzse": "MATCH",
 	} {
@@ -398,6 +425,9 @@ func TestProbeFullWalkWithCookie(t *testing.T) {
 	}
 	if h := fake.hit("/api/v3/moments"); h == nil || h.referer != "https://www.zhihu.com/follow" || !h.cookie {
 		t.Errorf("moments headers: referer/cookie contract broken: %+v", h)
+	}
+	if h := fake.hitExact("/api/v3/feed/topstory/recommend"); h == nil || h.referer != "https://www.zhihu.com/" || !h.cookie {
+		t.Errorf("recommend headers: referer(home page)/cookie contract broken: %+v", h)
 	}
 	if h := fake.hit("/api/v4/questions/"); h == nil || !h.zse93 || h.referer != "https://www.zhihu.com/question/"+fakeQID {
 		t.Errorf("question-meta headers: zse93 required / referer contract broken: %+v", h)
@@ -437,7 +467,7 @@ func TestProbeFullWalkWithCookie(t *testing.T) {
 
 	// Samples on disk for every walked endpoint.
 	for _, name := range []string{"hot-list", "hot-www-door", "daily-latest", "daily-story",
-		"moments", "question-meta", "answers-feeds", "comments-root",
+		"moments", "recommend", "question-meta", "answers-feeds", "comments-root",
 		"matrix-questions-nozse", "matrix-feeds-withzse"} {
 		if _, err := os.Stat(filepath.Join(out, name+".json")); err != nil {
 			t.Errorf("sample %s.json missing: %v", name, err)
@@ -447,7 +477,7 @@ func TestProbeFullWalkWithCookie(t *testing.T) {
 	// The report says what the tracer needs to say.
 	s := buf.String()
 	for _, want := range []string{"GREEN", ">2^53", "2045 万热度", "answer=1 question=1",
-		"dropped=2", "child_gap=12"} {
+		"dropped=2", "article=1", "child_gap=12"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("report missing %q\n---\n%s", want, s)
 		}
@@ -461,7 +491,7 @@ func TestProbeNoCookieSkipsLoginEndpoints(t *testing.T) {
 	rs := p.Run(context.Background(), buf)
 	v := verdicts(rs)
 	for name := range map[string]struct{}{
-		"hot-www-door": {}, "moments": {}, "question-meta": {}, "answers-feeds": {}, "comments-root": {},
+		"hot-www-door": {}, "moments": {}, "recommend": {}, "question-meta": {}, "answers-feeds": {}, "comments-root": {},
 	} {
 		if v[name] != "SKIPPED" {
 			t.Errorf("%s = %q, want SKIPPED (note: %s)", name, v[name], noteOf(rs, name))
