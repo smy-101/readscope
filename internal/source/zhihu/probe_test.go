@@ -85,6 +85,7 @@ type fakeZhihu struct {
 	mu           sync.Mutex
 	hits         []request
 	blockMoments bool // simulate risk control (403 even with cookie)
+	emptyHot     bool // serve {"data":[]} — redesign tripwire fixture
 }
 
 func (f *fakeZhihu) record(r *http.Request) request {
@@ -112,6 +113,10 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case req.path == "/topstory/hot-list":
+		if f.emptyHot {
+			write(200, `{"data":[]}`)
+			return
+		}
 		write(200, hotJSON)
 	case req.path == "/api/v3/feed/topstory/hot-lists/total":
 		write(200, hotJSON)
@@ -312,6 +317,21 @@ func TestProbeBlockedMoments(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "HTTP 403") {
 		t.Errorf("report should carry the observed status:\n%s", buf)
+	}
+}
+
+func TestProbeRedesignTripwire(t *testing.T) {
+	// The spec's 「0 条解析即报站点可能改版」: a well-formed but empty
+	// list must carry the alarm in its note, not a silent GREEN.
+	fake := &fakeZhihu{t: t, emptyHot: true}
+	p, buf, _ := newTestProbe(t, fake, "")
+
+	rs := p.Run(context.Background(), buf)
+	if v := verdicts(rs)["hot-list"]; v != "GREEN" {
+		t.Fatalf("hot-list verdict = %q, want GREEN (endpoint reachable)", v)
+	}
+	if !strings.Contains(buf.String(), "站点可能改版") {
+		t.Errorf("0-row hot list should trip the redesign alarm:\n%s", buf)
 	}
 }
 

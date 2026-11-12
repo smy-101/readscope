@@ -1,9 +1,10 @@
 // Package zhihu implements the zhihu source on its cookie-gated JSON
 // APIs (M4): the hot list and the daily digest anonymously, the
 // follow feed and question details behind a pasted browser cookie —
-// no signature, no resident browser (ADR #14). Ticket 01 lands the
-// data-plane tracer (`readscope zhihu probe`) and the shared
-// primitives; the Source registration and feeds follow in ticket 02.
+// 免签 (GLOSSARY: 免签) direct requests, no resident browser (ADR
+// #14). Ticket 01 lands the data-plane tracer (`readscope zhihu
+// probe`) and the shared primitives; the Source registration and
+// feeds follow in ticket 02.
 //
 // The request shape mirrors FeedScope's 2026-11 measured matrix: a
 // desktop Chrome UA on every call, x-requested-with: fetch, a
@@ -11,11 +12,13 @@
 // declaration) only where the endpoint demands it.
 package zhihu
 
+// zhihu.go — shared constants.
+
 // DesktopUA is the browser identity every zhihu request wears. Zhihu's
 // JSON APIs risk-control non-browser fingerprints, so this package
-// deliberately does NOT use source.UserAgent (rss/hn hosts don't
-// care; zhihu's might). Single point of maintenance — the stop-loss
-// ladder's first rung swaps this string.
+// deliberately does NOT use source.UserAgent (see the exception noted
+// there; rss/hn hosts don't care, zhihu's might). Single point of
+// maintenance — the stop-loss ladder's first rung swaps this string.
 const DesktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 	"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 

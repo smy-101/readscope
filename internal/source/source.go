@@ -70,10 +70,12 @@ type PagedSource interface {
 	FetchPage(ctx context.Context, f core.Feed, page int) ([]core.Item, error)
 }
 
-// UserAgent identifies readscope to every content host (feeds now,
-// Hacker News in M3) — one client identity, so hosts and the doctor's
-// probe all see the same reader. The version suffix is not wired in
-// yet (cmd owns Version); worth revisiting if hosts care.
+// UserAgent identifies readscope to the content hosts that don't
+// care about fingerprints — every host except zhihu's risk-controlled
+// APIs, which carry their own DesktopUA (internal/source/zhihu). One
+// client identity per host policy, so hosts and the doctor's probe
+// all see the same reader. The version suffix is not wired in yet
+// (cmd owns Version); worth revisiting if hosts care.
 const UserAgent = "readscope (+https://github.com/smy-101/readscope)"
 
 // Constructor builds one source from the user's subscription config;

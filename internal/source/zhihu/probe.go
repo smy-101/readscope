@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -162,8 +163,9 @@ func errCode(body []byte) string {
 
 // hotList is the shape BOTH hot doors serve: rows of target (type,
 // title, url carrying the question id) plus detail_text (the heat
-// column). IDs decode via json.Number to stay exact; production ids
-// come from target.url (see QIDFromURL).
+// column — the raw input of the 热度快照, GLOSSARY: 热度快照). IDs
+// decode via json.Number to stay exact; production ids come from
+// target.url (see QIDFromURL).
 type hotList struct {
 	Data []struct {
 		DetailText string `json:"detail_text"`
@@ -190,9 +192,10 @@ type dailyStory struct {
 	Body  string `json:"body"`
 }
 
-// moments is the follow feed: heterogeneous cards, of which only
-// answer and question cards ever reach a list (question cards);
-// everything else the probe censuses as dropped.
+// moments is the follow feed (GLOSSARY: 关注流): heterogeneous
+// cards, of which only answer and question cards ever reach a list
+// as question cards (GLOSSARY: 问题卡); everything else the probe
+// censuses as dropped.
 type moments struct {
 	Data []struct {
 		Target struct {
@@ -221,8 +224,8 @@ type questionMeta struct {
 }
 
 // feedsPage is one page of a question's answers: target carries the
-// floor-head triple (author, voteup_count, comment_count) plus the
-// full-content HTML; paging.next is the cursor.
+// floor-head triple (GLOSSARY: 楼层头 — author, voteup_count,
+// comment_count) plus the full-content HTML; paging.next is the cursor.
 type feedsPage struct {
 	Data []struct {
 		Target struct {
@@ -241,9 +244,10 @@ type feedsPage struct {
 	} `json:"paging"`
 }
 
-// commentsRoot is the first page of an answer's comments: roots carry
-// child_comment_count and a 1-2 item hot-children preview; the gap
-// between them is what ticket 06's completion walk fills.
+// commentsRoot is the first page of an answer's comments (the feed
+// behind the 评论层, GLOSSARY: 评论层): roots carry child_comment_count
+// and a 1-2 item hot-children preview; the gap between them is what
+// ticket 06's completion walk fills.
 type commentsRoot struct {
 	Data []struct {
 		ID                json.Number           `json:"id"`
@@ -310,7 +314,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 			var hot hotList
 			verdict, note := verdictBlocked, "unparseable"
 			if err := json.Unmarshal(f.body, &hot); err == nil {
-				note = fmt.Sprintf("rows=%d", len(hot.Data))
+				note = fmt.Sprintf("rows=%d", len(hot.Data)) + redesignNote(len(hot.Data))
 				if len(hot.Data) > 0 {
 					q := QIDFromURL(hot.Data[0].Target.URL)
 					note += fmt.Sprintf(" qid1=%s heat[0]=%q", flag53(q), hot.Data[0].DetailText)
@@ -338,7 +342,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 			var hot hotList
 			verdict, note := verdictBlocked, "unparseable"
 			if err := json.Unmarshal(f.body, &hot); err == nil {
-				note = fmt.Sprintf("rows=%d", len(hot.Data))
+				note = fmt.Sprintf("rows=%d", len(hot.Data)) + redesignNote(len(hot.Data))
 				if len(hot.Data) > 0 {
 					note += fmt.Sprintf(" qid1=%s", flag53(QIDFromURL(hot.Data[0].Target.URL)))
 				}
@@ -367,7 +371,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 			note := "unparseable"
 			verdict := verdictBlocked
 			if err := json.Unmarshal(f.body, &latest); err == nil {
-				note = fmt.Sprintf("stories=%d", len(latest.Stories))
+				note = fmt.Sprintf("stories=%d", len(latest.Stories)) + redesignNote(len(latest.Stories))
 				if len(latest.Stories) > 0 {
 					storyID = string(latest.Stories[0].ID)
 					note += fmt.Sprintf(" first=%q hint=%q", latest.Stories[0].Title, latest.Stories[0].Hint)
@@ -441,7 +445,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 						}
 					}
 					note = fmt.Sprintf("cards=%d kept=%d(answer=%d question=%d) dropped=%d%s cursor=%v",
-						len(ms.Data), keptA+keptQ, keptA, keptQ, len(ms.Data)-keptA-keptQ, census(dropped), ms.Paging.Next != "")
+						len(ms.Data), keptA+keptQ, keptA, keptQ, len(ms.Data)-keptA-keptQ, census(dropped), ms.Paging.Next != "") + redesignNote(len(ms.Data))
 					verdict = verdictGreen
 				} else {
 					note += ": " + err.Error()
@@ -451,15 +455,21 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 		}
 	}
 
+	// The v4 pair, built once — the walk and the header-matrix legs hit
+	// the same two addresses.
+	var metaURL, feedsURL string
+	if qid != "" {
+		metaURL = fmt.Sprintf("%s/api/v4/questions/%s?include=%s", h.Web, qid, metaInclude)
+		feedsURL = fmt.Sprintf("%s/api/v4/questions/%s/feeds?include=%s&limit=5&order=default&platform=desktop",
+			h.Web, qid, feedsInclude)
+	}
+
 	// 6-7. Question meta + answers feeds (the v4 family).
 	var aid string
 	if qid == "" {
 		res(EndpointResult{"question-meta", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(hot-list) — or pass -qid"})
 		res(EndpointResult{"answers-feeds", "SKIPPED", verdictSkipped, "SKIPPED-UPSTREAM(hot-list) — or pass -qid"})
 	} else {
-		metaURL := fmt.Sprintf("%s/api/v4/questions/%s?include=%s", h.Web, qid, metaInclude)
-		feedsURL := fmt.Sprintf("%s/api/v4/questions/%s/feeds?include=%s&limit=5&order=default&platform=desktop",
-			h.Web, qid, feedsInclude)
 		referer := "https://www.zhihu.com/question/" + qid
 
 		if login("question-meta") {
@@ -500,7 +510,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 				verdict := verdictBlocked
 				note := "unparseable"
 				if err := json.Unmarshal(f.body, &fp); err == nil {
-					note = fmt.Sprintf("answers=%d", len(fp.Data))
+					note = fmt.Sprintf("answers=%d", len(fp.Data)) + redesignNote(len(fp.Data))
 					for _, a := range fp.Data {
 						if a.Target.Type == "answer" && a.Target.ID != "" {
 							if aid == "" {
@@ -542,7 +552,7 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 			verdict := verdictBlocked
 			note := "unparseable"
 			if err := json.Unmarshal(f.body, &cs); err == nil {
-				note = fmt.Sprintf("roots=%d", len(cs.Data))
+				note = fmt.Sprintf("roots=%d", len(cs.Data)) + redesignNote(len(cs.Data))
 				if len(cs.Data) > 0 {
 					r0 := cs.Data[0]
 					note += fmt.Sprintf(" first=%q like=%d child_gap=%d",
@@ -562,10 +572,6 @@ func (p *Probe) Run(ctx context.Context, w io.Writer) []EndpointResult {
 	if p.CookieHeader == "" || qid == "" {
 		res(EndpointResult{"header-matrix", "SKIPPED", verdictSkipped, "needs cookie + qid"})
 	} else {
-		metaURL := fmt.Sprintf("%s/api/v4/questions/%s?include=%s", h.Web, qid, metaInclude)
-		feedsURL := fmt.Sprintf("%s/api/v4/questions/%s/feeds?include=%s&limit=5&order=default&platform=desktop",
-			h.Web, qid, feedsInclude)
-
 		f1 := p.get(ctx, "matrix-questions-nozse", metaURL, "https://www.zhihu.com/question/"+qid, false, true)
 		switch {
 		case f1.err != nil:
@@ -633,22 +639,26 @@ func flag53(qid string) string {
 	return qid
 }
 
+// redesignNote is the spec's tripwire — 「0 条解析即报站点可能改版」:
+// zhihu's lists are never legitimately empty, so a well-formed but
+// 0-row parse means the shape moved under us. Reachability is real,
+// so the verdict stays GREEN; the note carries the alarm.
+func redesignNote(rows int) string {
+	if rows == 0 {
+		return " — 0 rows: 站点可能改版?"
+	}
+	return ""
+}
+
 // census renders a dropped-card tally like " (article=1,pin=1)".
 func census(dropped map[string]int) string {
 	if len(dropped) == 0 {
 		return ""
 	}
-	var parts []string
+	parts := make([]string, 0, len(dropped))
 	for k, v := range dropped {
 		parts = append(parts, fmt.Sprintf("%s=%d", k, v))
 	}
-	// Deterministic order for golden-ish report comparison.
-	for i := 0; i < len(parts); i++ {
-		for j := i + 1; j < len(parts); j++ {
-			if parts[j] < parts[i] {
-				parts[i], parts[j] = parts[j], parts[i]
-			}
-		}
-	}
+	sort.Strings(parts)
 	return " (" + strings.Join(parts, ",") + ")"
 }
