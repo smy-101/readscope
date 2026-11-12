@@ -81,12 +81,15 @@ type DetailPager interface {
 	// served: the walk's end). Floors arrive as top-level comments
 	// (ParentID ""), the same shape Detail's Comments carry.
 	FetchFloorsPage(ctx context.Context, it core.Item, cursor string) (floors []core.Comment, next string, err error)
-	// FetchAnswerComments returns one answer's comments at root
-	// offset: the roots served there with their child gaps completed
-	// (the hot-preview children deduped against the fetched pages),
-	// tree order, roots' ParentID the answer id. nextOffset is where
-	// the next page starts; -1 = the answer's comments are exhausted.
-	FetchAnswerComments(ctx context.Context, it core.Item, answerID string, offset int) (comments []core.Comment, nextOffset int, err error)
+	// FetchAnswerComments returns one answer's comments at the root
+	// walk's cursor position: "" the first page, else the previous
+	// call's next (the server's paging.next VERBATIM — the real cursor
+	// is a composite string the client must not parse). The roots
+	// served there arrive with their child gaps completed (the
+	// hot-preview children deduped against the fetched pages), tree
+	// order, roots' ParentID the answer id. next is the following
+	// page's cursor; "" = the answer's comments are exhausted.
+	FetchAnswerComments(ctx context.Context, it core.Item, answerID string, cursor string) (comments []core.Comment, next string, err error)
 	// AnswerURL is the Ctrl+O/Ctrl+Y target for one answer floor of
 	// this item — the question page anchored at the answer. A bare
 	// comment id cannot pair with its question alone, which is why

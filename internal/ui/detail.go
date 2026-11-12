@@ -72,15 +72,16 @@ type detail struct {
 	// source pages its detail layers on the network. The question
 	// layer's meta triple (question), the floors cursor and total
 	// (feedsCursor / floorsTotal), and the comment layer's per-answer
-	// next offset (commentsNext: answer id → next root offset, -1 =
-	// exhausted; missing key = never loaded) all ride the open
-	// session in memory — the comments cache replays whatever they
-	// walked in, and a fresh open starts the walks over.
+	// walk cursor (commentsNext: answer id → the server's next-page
+	// cursor verbatim, "" = exhausted; missing key = never loaded)
+	// all ride the open session in memory — the comments cache
+	// replays whatever they walked in, and a fresh open starts the
+	// walks over.
 	pager        source.DetailPager
 	question     *core.QuestionInfo
 	feedsCursor  string
 	floorsTotal  int64
-	commentsNext map[string]int
+	commentsNext map[string]string
 	commentsBusy bool
 	floorsBusy   bool
 
@@ -149,7 +150,7 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 	if m.listSel >= len(m.items) {
 		return false, nil
 	}
-	d := &detail{item: m.items[m.listSel], replyFloor: -1, commentsNext: map[string]int{}}
+	d := &detail{item: m.items[m.listSel], replyFloor: -1, commentsNext: map[string]string{}}
 	var bodyCmd tea.Cmd
 	if m.srcs != nil {
 		if src, err := source.New(d.item.Item.Source, m.srcs); err == nil {
@@ -964,7 +965,7 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 				m.nextReplyStart()
 				return true, nil
 			}
-			off := 0 // the walk's next roots page (0 = first load)
+			off := "" // the walk's next roots page ("" = first load)
 			if v, ok := d.commentsNext[d.floors[d.floorIdx].cm.ID]; ok {
 				off = v
 			}
@@ -1039,7 +1040,7 @@ func (m *Model) enterReplies() (bool, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	if !d.commentsBusy {
-		cmd = m.commentsPageCmd(0)
+		cmd = m.commentsPageCmd("")
 	}
 	d.replyTop = 0
 	m.layoutReplies() // the pending screen (loading or none)
@@ -1103,9 +1104,10 @@ func (m *Model) floorsLanded(msg floorsMsg) tea.Cmd {
 	return nil
 }
 
-// commentsPageCmd fetches one answer's comments page at offset — the
-// comment layer's first entry and its Ctrl+N at the walk's end.
-func (m *Model) commentsPageCmd(offset int) tea.Cmd {
+// commentsPageCmd fetches one answer's comments page at the walk's
+// cursor — the comment layer's first entry and its Ctrl+N at the
+// walk's end.
+func (m *Model) commentsPageCmd(cursor string) tea.Cmd {
 	d := m.reader
 	if d.commentsBusy {
 		return nil
@@ -1114,7 +1116,7 @@ func (m *Model) commentsPageCmd(offset int) tea.Cmd {
 		return nil
 	}
 	answerID := d.floors[d.floorIdx].cm.ID
-	if offset < 0 || d.commentsNext[answerID] < 0 {
+	if v, ok := d.commentsNext[answerID]; ok && v == "" {
 		m.status = m.cat.Get("status.more_end") // the walk already ended
 		return nil
 	}
@@ -1122,7 +1124,7 @@ func (m *Model) commentsPageCmd(offset int) tea.Cmd {
 	m.status = m.cat.Get("status.loading_more")
 	it, st, srcs := d.item.Item, m.st, m.srcs
 	return func() tea.Msg {
-		tree, next, err := refresh.DetailCommentsPage(context.Background(), st, srcs, it, answerID, offset)
+		tree, next, err := refresh.DetailCommentsPage(context.Background(), st, srcs, it, answerID, cursor)
 		return commentsPageMsg{itemID: it.ID, answerID: answerID, tree: tree, next: next, err: err}
 	}
 }
@@ -1132,7 +1134,7 @@ type commentsPageMsg struct {
 	itemID   string
 	answerID string
 	tree     []core.Comment
-	next     int
+	next     string
 	err      error
 }
 
@@ -1166,7 +1168,7 @@ func (m *Model) commentsPageLanded(msg commentsPageMsg) tea.Cmd {
 		f := &d.floors[d.floorIdx]
 		if len(f.replies) == 0 {
 			if _, queued := d.commentsNext[f.cm.ID]; !queued {
-				return m.commentsPageCmd(0)
+				return m.commentsPageCmd("")
 			}
 		}
 	}

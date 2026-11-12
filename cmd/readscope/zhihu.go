@@ -43,7 +43,7 @@ func runZhihuProbe(args []string) int {
 	qidFlag := fs.String("qid", "", "override question id (else chained from the hot list)")
 	storyFlag := fs.String("story", "", "override daily story id (else chained from the daily list)")
 	aidFlag := fs.String("aid", "", "override answer id for the comment probe (else chained from answers)")
-	if err := fs.Parse(reorderFlags(args[1:])); err != nil {
+	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
 	}
 	if fs.NArg() > 0 {

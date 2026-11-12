@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -103,7 +104,21 @@ type fakeZhihu struct {
 	goneStatus           int                 // ≠0: v4/questions + comment_v5 answer this (404 fixture)
 	childPages           map[string][]string // root id → page bodies in walk order
 	childClicks          map[string]int
-	extraPages           map[string]string // path → body, for cursor-addressed pages (paging.next targets)
+	extraPages           map[string]string // "path?query" (exact) or path → body, for cursor-addressed pages (paging.next targets)
+}
+
+// offsetParamRe picks the offset parameter's value out of a raw
+// query: digits-only values hit the real API's zombie quirk,
+// composite cursors ("387770585_11616175634_0") ride extraPages.
+var offsetParamRe = regexp.MustCompile(`(?:^|&)offset=([^&]*)`)
+
+// schemeHost rebuilds the request's scheme://host for fixture
+// paging.next addresses.
+func schemeHost(r *http.Request) string {
+	if r.TLS != nil {
+		return "https://" + r.Host
+	}
+	return "http://" + r.Host
 }
 
 func (f *fakeZhihu) record(r *http.Request) request {
@@ -131,8 +146,12 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		fmt.Fprint(w, body)
 	}
-	if body, ok := f.extraPages[req.path]; ok {
+	if body, ok := f.extraPages[req.path+"?"+req.query]; ok && req.query != "" {
 		write(200, body) // a cursor-addressed page: paging.next rides verbatim
+		return
+	}
+	if body, ok := f.extraPages[req.path]; ok {
+		write(200, body) // a cursor-addressed page (queryless spelling): paging.next rides verbatim
 		return
 	}
 	switch {
@@ -203,6 +222,19 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			write(200, pages[click])
 			return
+		}
+		if strings.Contains(req.path, "/root_comment") {
+			// Real-network contract (2026-12 smoke measurement): the
+			// first page rides NO offset parameter — a literal numeric
+			// offset (offset=0 included) answers HTTP 200 with a zombie
+			// empty page whose own next re-points at offset=0, on every
+			// answer, uniformly. Cursor pages arrive verbatim from
+			// paging.next (composite offset strings) and are served by
+			// the extraPages arm above.
+			if m := offsetParamRe.FindStringSubmatch(req.query); m != nil && m[1] != "" {
+				write(200, `{"data":[],"paging":{"next":"`+schemeHost(r)+req.path+`?limit=10&offset=`+m[1]+`&order_by=score","is_end":false,"totals":0}}`)
+				return
+			}
 		}
 		if f.rootOverride != "" {
 			write(200, f.rootOverride)

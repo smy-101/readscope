@@ -163,8 +163,11 @@ func TestAppendAnswerCommentsNamesTheMissingFloor(t *testing.T) {
 
 // detailPlane serves one question's whole detail data plane: meta,
 // two answers pages by cursor, and one answer's comments at two
-// offsets. The cookie gate mirrors the measured matrix loosely —
-// enough that a missing cookie fails loudly.
+// cursor positions (the 2026-12 real contract: first page rides no
+// offset, digits-only offsets eat a 200 zombie empty page, the next
+// page's cursor is a composite string followed verbatim). The cookie
+// gate mirrors the measured matrix loosely — enough that a missing
+// cookie fails loudly.
 func detailPlane(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -198,7 +201,15 @@ func detailPlane(t *testing.T) *httptest.Server {
 	})
 	mux.HandleFunc("/api/v4/comment_v5/answers/9001/root_comment", func(w http.ResponseWriter, r *http.Request) {
 		gate(w, r)
-		if r.URL.Query().Get("offset") == "20" {
+		const composite = "387770585_11616175634_0"
+		off := r.URL.Query().Get("offset")
+		if off != "" && off != composite && !strings.Contains(off, "_") {
+			// the real API's zombie quirk: digits-only offsets answer
+			// 200 with an empty page, uniformly
+			fmt.Fprint(w, `{"data":[],"paging":{"next":"http://`+r.Host+`/api/v4/comment_v5/answers/9001/root_comment?limit=10&offset=`+off+`&order_by=score","is_end":false}}`)
+			return
+		}
+		if off == composite {
 			fmt.Fprint(w, `{"data":[{"id":703,"author":{"name":"末根"},"like_count":0,"content":"末页"}],
 			 "paging":{"next":"","is_end":true}}`)
 			return
@@ -207,7 +218,7 @@ func detailPlane(t *testing.T) *httptest.Server {
 		 {"id":701,"author":{"name":"根一"},"like_count":3,"content":"根一",
 		  "child_comment_count":1,"child_comments":[]},
 		 {"id":702,"author":{"name":"根二"},"like_count":0,"content":"根二"}],
-		 "paging":{"next":"http://`+r.Host+`/api/v4/comment_v5/answers/9001/root_comment?order_by=score&limit=20&offset=20","is_end":false}}`)
+		 "paging":{"next":"http://`+r.Host+`/api/v4/comment_v5/answers/9001/root_comment?order_by=score&limit=20&offset=`+composite+`","is_end":false}}`)
 	})
 	mux.HandleFunc("/api/v4/comment_v5/comment/701/child_comment", func(w http.ResponseWriter, r *http.Request) {
 		gate(w, r)
@@ -307,7 +318,7 @@ func TestDetailRefreshKeepsPagedFloorsAndComments(t *testing.T) {
 	if _, _, err := DetailFloorsPage(ctx, st, core.DefaultSources(), it, c.Next); err != nil {
 		t.Fatalf("Ctrl+N floors: %v", err)
 	}
-	if _, _, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "9001", 0); err != nil {
+	if _, _, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "9001", ""); err != nil {
 		t.Fatalf("comment layer: %v", err)
 	}
 
@@ -354,7 +365,7 @@ func TestDetailPagingCompositions(t *testing.T) {
 		t.Fatalf("floors walk: %d floors, next=%q", len(tree), next)
 	}
 
-	tree2, nextOffset, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "9001", 0)
+	tree2, nextCursor, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "9001", "")
 	if err != nil {
 		t.Fatalf("comments page: %v", err)
 	}
@@ -367,17 +378,17 @@ func TestDetailPagingCompositions(t *testing.T) {
 	if strings.Join(ids, ",") != "9001,701,801,702,9002,9003" {
 		t.Fatalf("comments merge = %v", ids)
 	}
-	if nextOffset != 20 {
-		t.Fatalf("nextOffset = %d, want 20", nextOffset)
+	if !strings.HasSuffix(nextCursor, "offset=387770585_11616175634_0") {
+		t.Fatalf("nextCursor = %q, want the composite cursor", nextCursor)
 	}
 
 	// The second comments page (Ctrl+N at the reply layer's end).
-	tree3, endOffset, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "9001", 20)
+	tree3, endCursor, err := DetailCommentsPage(ctx, st, core.DefaultSources(), it, "9001", nextCursor)
 	if err != nil {
 		t.Fatalf("comments page two: %v", err)
 	}
-	if endOffset != -1 {
-		t.Fatalf("end offset = %d, want -1", endOffset)
+	if endCursor != "" {
+		t.Fatalf("end cursor = %q, want empty", endCursor)
 	}
 	if len(tree3) != len(tree2)+1 {
 		t.Fatalf("page two appended nothing: %d → %d", len(tree2), len(tree3))
@@ -393,7 +404,7 @@ func TestPagingCompositionsRefuseNonPagingSources(t *testing.T) {
 		!strings.Contains(err.Error(), "pages no detail") {
 		t.Fatalf("floors on hn = %v, want the named refusal", err)
 	}
-	if _, _, err := DetailCommentsPage(context.Background(), st, core.DefaultSources(), it, "10", 0); err == nil {
+	if _, _, err := DetailCommentsPage(context.Background(), st, core.DefaultSources(), it, "10", ""); err == nil {
 		t.Fatal("comments on hn must refuse too")
 	}
 }

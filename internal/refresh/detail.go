@@ -101,27 +101,28 @@ func DetailFloorsPage(ctx context.Context, st *store.Store, srcs *core.Sources, 
 // layer's first entry and its Ctrl+N) and folds it into the cache
 // under that answer floor: nodes the cache already holds skip whole,
 // the merged tree is what the cache and the caller now hold.
-// nextOffset is the next page's position (-1 = the answer's comments
-// are exhausted).
-func DetailCommentsPage(ctx context.Context, st *store.Store, srcs *core.Sources, it core.Item, answerID string, offset int) ([]core.Comment, int, error) {
+// cursor is the walk position — "" the first page, else the previous
+// next verbatim; next is the following page's cursor ("" = the
+// answer's comments are exhausted).
+func DetailCommentsPage(ctx context.Context, st *store.Store, srcs *core.Sources, it core.Item, answerID string, cursor string) ([]core.Comment, string, error) {
 	dp, err := detailPagerOf(srcs, it)
 	if err != nil {
-		return nil, -1, err
+		return nil, "", err
 	}
-	page, next, err := dp.FetchAnswerComments(ctx, it, answerID, offset)
+	page, next, err := dp.FetchAnswerComments(ctx, it, answerID, cursor)
 	if err != nil {
-		return nil, -1, err
+		return nil, "", err
 	}
 	old, err := st.CommentsForItem(ctx, it.ID)
 	if err != nil {
-		return nil, -1, fmt.Errorf("read cache %s: %w", it.ID, err)
+		return nil, "", fmt.Errorf("read cache %s: %w", it.ID, err)
 	}
 	merged, err := appendAnswerComments(old, answerID, page)
 	if err != nil {
-		return nil, -1, err
+		return nil, "", err
 	}
 	if err := st.SaveComments(ctx, it.ID, merged); err != nil {
-		return nil, -1, fmt.Errorf("cache comments %s: %w", it.ID, err)
+		return nil, "", fmt.Errorf("cache comments %s: %w", it.ID, err)
 	}
 	return merged, next, nil
 }

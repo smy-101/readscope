@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -261,27 +259,32 @@ func (s *Source) FetchFloorsPage(ctx context.Context, it core.Item, cursor strin
 }
 
 // FetchAnswerComments implements source.DetailPager: one answer's
-// comments at root offset — the roots served there, each root's
-// child gap completed by the child_comment walk, tree order with the
-// roots' ParentID set to the answer id (the cache stores the whole
-// question as one tree: floors and their comments together).
-// nextOffset is the paging.next URL's offset, -1 at the end.
-func (s *Source) FetchAnswerComments(ctx context.Context, it core.Item, answerID string, offset int) ([]core.Comment, int, error) {
+// comments at the root walk's cursor — "" the first page (the door
+// is spelled WITHOUT an offset parameter: the real API answers a
+// literal digits-only offset with a 200 zombie empty page, uniformly
+// — 2026-12 smoke measurement), else the previous next (the
+// server's paging.next verbatim: the real cursor is a composite
+// string like "387770585_11616175634_0", never an integer). Each
+// root's child gap is completed by the child_comment walk; tree
+// order with the roots' ParentID set to the answer id (the cache
+// stores the whole question as one tree: floors and their comments
+// together). next is the following page's cursor ("" = exhausted).
+func (s *Source) FetchAnswerComments(ctx context.Context, it core.Item, answerID string, cursor string) ([]core.Comment, string, error) {
 	if _, ok := qidOf(it.ID); !ok {
-		return nil, -1, fmt.Errorf("fetch comments: %q is not a zhihu question id", it.ID)
+		return nil, "", fmt.Errorf("fetch comments: %q is not a zhihu question id", it.ID)
 	}
-	if offset < 0 {
-		offset = 0
+	url := fmt.Sprintf("%s/api/v4/comment_v5/answers/%s/root_comment?order_by=score&limit=20",
+		s.hosts.Web, answerID)
+	if cursor != "" {
+		url = cursor // verbatim: the server spells its own page addresses
 	}
-	res := s.tr.Get(ctx, epCommentsRoot,
-		fmt.Sprintf("%s/api/v4/comment_v5/answers/%s/root_comment?order_by=score&limit=20&offset=%d",
-			s.hosts.Web, answerID, offset))
+	res := s.tr.Get(ctx, epCommentsRoot, url)
 	if res.Err != nil {
-		return nil, -1, fmt.Errorf("fetch comments %s: %w", answerID, res.Err)
+		return nil, "", fmt.Errorf("fetch comments %s: %w", answerID, res.Err)
 	}
 	var page commentsPage
 	if err := json.Unmarshal(res.Body, &page); err != nil {
-		return nil, -1, fmt.Errorf("parse comments %s: not zhihu JSON: %w", answerID, err)
+		return nil, "", fmt.Errorf("parse comments %s: not zhihu JSON: %w", answerID, err)
 	}
 
 	// Roots worth keeping, with their gaps completed. The walk is
@@ -302,11 +305,9 @@ func (s *Source) FetchAnswerComments(ctx context.Context, it core.Item, answerID
 		emitComments(n, answerID, &out)
 	}
 
-	next := -1
+	next := ""
 	if page.Paging.Next != "" && !page.Paging.IsEnd {
-		if o, err := offsetFromURL(page.Paging.Next); err == nil {
-			next = o
-		}
+		next = page.Paging.Next // verbatim cursor; never parsed
 	}
 	return out, next, nil
 }
@@ -447,15 +448,4 @@ func cleanIfHTML(s string) string {
 		return CleanHTML(s)
 	}
 	return s
-}
-
-// offsetFromURL digs the root_comment walk's position out of a
-// paging.next URL (…root_comment?…&offset=N) — the offset IS the
-// cursor; there is nothing else to carry.
-func offsetFromURL(raw string) (int, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(u.Query().Get("offset"))
 }
