@@ -16,8 +16,9 @@
 ## Comments
 - 02 评审转交:rowMeta 的 per-source if 级联到第二臂(hn/zhihu);日报 hint 元信息是首例源内按 feed 分流 —— 落地时考虑表驱动/per-feed 格式化,别加第三臂 if。
 - **转交已落地**:hint 存新列 `items.meta`(migration 009——源把 hint 作为不可拆分的原子串服务,author 列不重载);`ui.zhihuMeta` 改为按 feed 路由(热榜=热度快照、关注=author、日报=meta),rowMeta 本体未加臂。meta 列语义:仅存源无法分解的原子元信息, hn/热榜/关注等由语义字段组合的继续用字段。
-- 新增 `source.BodySource` 扩展(probe-don't-register 第 5 员):`BodyOnDemand(it)` 探针 + `FetchBody(ctx,it)`;实现落在 zhihu 包(仅 `zh:daily/` 前缀)。拉取+落库走 `refresh.Body`→`store.SaveBody`(body+FTS 同步,fetched_at 不动)。按需正文词条已进 GLOSSARY。
+- 新增 `source.BodySource` 扩展(probe-don't-register 第 5 员):`BodyOnDemand(it)` 探针 + `FetchBody(ctx,it)`——票面写的"Enter 走 DetailSource"落地为这个新扩展而非 DetailSource(Content 是评论形状,日报正文进 items.body,语义不合);实现落在 zhihu 包(仅 `zh:daily/` 前缀)。拉取+落库走 `refresh.Body`→`store.SaveBody`(body+FTS 同步,fetched_at 不动)。按需正文词条已进 GLOSSARY。
 - **转交 06**:zhihu 实现 DetailSource 后,`ui.openDetail` 的 hasDetail 探测需按 item 分流——问题卡走评论层,日报条目绝不能出现评论 footer/floors(现在 zhihu 无 DetailSource,全源 hasDetail=false 恰好安全;06 落地时这个隐蔽耦合会浮出)。CleanHTML(clean.go)已就位,问题详情/回答 HTML 直接复用;golden 机制在 zhihu/testdata 下(-update 同 render)。
-- `SaveFeedItems` 新规则:**空正文不覆盖已缓存正文**(items 行与 FTS 同步生效)——否则日报 F5 会洗掉已开条目的正文;非空正文照常覆盖(真正改稿)。rss/hn 行为不变(它们列表层总带正文)。
+- `SaveFeedItems` 新规则:**空正文不覆盖已缓存正文**(items 行与 FTS 同步生效)——否则日报 F5 会洗掉已开条目的正文;非空正文照常覆盖(真正改稿)。规则是全源全局的(GLOSSARY 按需正文词条明文"列表刷新永不抹掉已缓存的正文"):rss/hn 列表层总带正文放无感,代价是上游删稿变空正文时旧缓存保留——缓存先行、离线可读优先,接受(03 评审确认与 spec 一致)。
 - 离线语义:首开失败 = 状态栏「正文拉取失败:…」+ no_body 占位(明确提示);已开条目二次打开渲染快照零请求(UI 测试以 story door 命中计数钉死);F5 后已缓存正文存活(store 测试钉死)。
 - 测试基建:`fakeZhihu` 增 dailyLatestOverride/dailyStoryOverride 两腿;`brokenServer` 助手归 daily_test。
+- 双轴评审收口(Standards OK 3×P2 / Spec OK 4×P2,无 P0/P1):BodySource 注释 it's→its;票面"Enter 走 DetailSource"与落地出入已在上面一条 Comments 写明;video-box href 优先与 /80/ 变体按 href 优先收口、spec 内容前处理行已补记(生成式 lens URL 不敌服务端原给地址);空正文保留规则的全源作用域已在本票写明;补重启级离线测试 TestDailyBodySurvivesRestartOffline(同库新 model + 门死零拨号,Spec 评审建议)。getJSON 小助手未提取(评审自评价值低:四处调用点错误前缀与返回形状各异)。

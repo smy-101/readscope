@@ -67,7 +67,7 @@ type DetailSource interface {
 // items, its daily stories lazy-body items).
 type BodySource interface {
 	Source
-	// BodyOnDemand reports whether it's full text is fetched on first
+	// BodyOnDemand reports whether its full text is fetched on first
 	// open rather than riding the list snapshot.
 	BodyOnDemand(it core.Item) bool
 	// FetchBody fetches one item's full text, preprocessed for the

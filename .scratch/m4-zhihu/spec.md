@@ -57,7 +57,7 @@ Status: ready-for-agent
 - 热度复用热度快照 points 列("2045 万热度"折算数值存入),元信息列按源格式化还原;关注流元信息 = 作者名(author 列);日报 = hint
 - cookie:`~/.config/readscope/zhihu.cookies`,权限 0600,内容为原样粘贴的 Cookie 请求头文本;解析出 z_c0/d_c0 判活,其余键值原样透传;`readscope zhihu login` 子命令引导粘贴;TUI Ctrl+U 弹输入 dialog;doctor 报告存在/权限/z_c0 有无
 - 失效处理:详情族(v4/comment_v5)401/403 → 状态栏"登录态失效,Ctrl+U 重新登录",不清 cookie、不中断热榜/日报;列表族(v3)403 原样报错
-- 内容前处理(zhihu 包内的 DOM 清洗,渲染管线不改):剥 noscript 副本;sticker 贴纸取 alt 文本;`a.video-box` 卡片取 `data-lens-id` 生成 [视频] 链接;img URL 属性优先级 data-original > data-actualsrc > src(剥 zhimg `/50/` 缩略代理;src 为 data: 懒加载占位时跳过);相邻同图标记合并
+- 内容前处理(zhihu 包内的 DOM 清洗,渲染管线不改):剥 noscript 副本;sticker 贴纸取 alt 文本;`a.video-box` 卡片生成 [视频] 链接——href 优先(服务端原给的地址恒可开,防生成式 URL 失效),`data-lens-id` 生成 lens 页仅作 href 缺席时的兜底(03 评审补记:与本文首版「取 data-lens-id 生成」有出入,按 href 优先收口);img URL 属性优先级 data-original > data-actualsrc > src(剥 zhimg `/50/`、`/80/` 缩略代理——`/80/` 为 03 落地时补的变体,有测试;src 为 data: 懒加载占位时跳过);相邻同图标记合并
 - JSON 解析统一 `json.Number`,id 类字段一律从 URL/字符串提取
 - 评论子回复补全:缺口计算为纯函数;补全请求单根一游标并发上限克制(账号风控优先)
 - 缓存:条目快照(items.body)、评论整树(comments 表)沿用既有 DAO;开帖标记复用;日报正文进 body 快照

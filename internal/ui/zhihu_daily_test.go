@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/smy-101/readscope/internal/core"
+	"github.com/smy-101/readscope/internal/i18n"
+	"github.com/smy-101/readscope/internal/store"
+	"github.com/smy-101/readscope/internal/theme"
 
 	_ "github.com/smy-101/readscope/internal/source/zhihu" // register "zhihu", as main does
 )
@@ -153,5 +157,80 @@ func TestDailyOfflineFirstOpenIsLoud(t *testing.T) {
 	// still readable metadata (title, hint), just no cached text yet.
 	if !strings.Contains(m.View(), "机器知道它在读什么吗") {
 		t.Fatalf("the reader should stay open with the row's own metadata:\n%s", m.View())
+	}
+}
+
+// The restart leg of 离线可读: a body fetched in one model (one
+// "process") renders in a FRESH model over the same store with the
+// story door dead — the snapshot is the only copy that matters, and
+// no dial happens (the dead door would turn any fetch loud).
+func TestDailyBodySurvivesRestartOffline(t *testing.T) {
+	t.Setenv("READSCOPE_CONFIG", t.TempDir())
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	srv, hits := dailyStoryServer(t, "9792937", "<p>重启后离线可读的全文。</p>")
+	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
+
+	freshModel := func(t *testing.T, st *store.Store) Model {
+		t.Helper()
+		cfg := core.Defaults()
+		cat, err := i18n.Load("en")
+		if err != nil {
+			t.Fatalf("i18n: %v", err)
+		}
+		th, err := theme.Load("dark")
+		if err != nil {
+			t.Fatalf("theme: %v", err)
+		}
+		m := size(New(cfg, cat, th, st, core.DefaultSources()), 100, 30)
+		for range 3 { // books → rss → hn → zhihu
+			var cmd tea.Cmd
+			m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+			m = pump(t, m, cmd)
+		}
+		for range 2 { // sidebar: hot → follow → daily
+			var cmd tea.Cmd
+			m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyDown})
+			m = pump(t, m, cmd)
+		}
+		return key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // sidebar Enter: focus the list
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "restart.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, _, err := st.SaveFeedItems(context.Background(), "zhihu", "daily",
+		[]core.Item{dailyItem("9792937", "机器知道它在读什么吗", "", "")}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Process one: open the story online — the body lands in the store.
+	m1 := freshModel(t, st)
+	var cmd tea.Cmd
+	m1, cmd = keyCmd(m1, tea.KeyMsg{Type: tea.KeyEnter})
+	m1 = pump(t, m1, cmd)
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("setup: story hits = %d, want 1", n)
+	}
+
+	// Process two: fresh model, same store, door dead. The cached
+	// body renders — no dial, no error.
+	srv.Close()
+	m2 := freshModel(t, st)
+	m2, cmd = keyCmd(m2, tea.KeyMsg{Type: tea.KeyEnter})
+	m2 = pump(t, m2, cmd)
+	view := m2.View()
+	if !strings.Contains(view, "重启后离线可读的全文") {
+		t.Fatalf("restarted model should render the cached body offline:\n%s", view)
+	}
+	if m2.status != "" {
+		t.Fatalf("offline re-open must be silent, status = %q", m2.status)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("restart must not dial the story door again: %d hits", n)
 	}
 }
