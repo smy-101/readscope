@@ -166,23 +166,30 @@ type dailyStory struct {
 	Body  string `json:"body"`
 }
 
-// moments is the follow feed (GLOSSARY: 关注流): heterogeneous
-// cards, of which only answer and question cards ever reach a list
+// momentsCard is one heterogeneous card of the follow feed
+// (GLOSSARY: 关注流): only answer and question cards ever reach a list
 // as question cards (GLOSSARY: 问题卡); everything else the probe
-// censuses as dropped.
+// censuses as dropped. updated_time/created_time are the card's own
+// clock — the follow list orders by them, not by fetch time.
+type momentsCard struct {
+	Target momentsTarget `json:"target"`
+}
+
+type momentsTarget struct {
+	Type        string      `json:"type"`
+	ID          json.Number `json:"id"`
+	Title       string      `json:"title"`
+	Author      struct{ Name string }
+	UpdatedTime int64 `json:"updated_time"`
+	CreatedTime int64 `json:"created_time"`
+	Question    struct {
+		ID    json.Number `json:"id"`
+		Title string      `json:"title"`
+	} `json:"question"`
+}
+
 type moments struct {
-	Data []struct {
-		Target struct {
-			Type     string                `json:"type"`
-			ID       json.Number           `json:"id"`
-			Title    string                `json:"title"`
-			Author   struct{ Name string } `json:"author"`
-			Question struct {
-				ID    json.Number `json:"id"`
-				Title string      `json:"title"`
-			} `json:"question"`
-		} `json:"target"`
-	} `json:"data"`
+	Data   []momentsCard `json:"data"`
 	Paging struct {
 		Next  string `json:"next"`
 		IsEnd bool   `json:"is_end"`

@@ -7,17 +7,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/i18n"
+	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 
-	_ "github.com/smy-101/readscope/internal/source/hn"    // registry: hn
-	_ "github.com/smy-101/readscope/internal/source/rss"   // registry: rss
-	_ "github.com/smy-101/readscope/internal/source/zhihu" // registry: zhihu
+	_ "github.com/smy-101/readscope/internal/source/hn"  // registry: hn
+	_ "github.com/smy-101/readscope/internal/source/rss" // registry: rss
 )
 
 // The M2 tracer bullet, end to end against httptest servers on
@@ -703,6 +704,10 @@ func TestRefreshHNTracerBullet(t *testing.T) {
 // read state untouched, the heat snapshot refreshed in place.
 func TestRefreshZhihuTracerBullet(t *testing.T) {
 	heat := 2045 // 万, mutated between cycles
+	// An isolated config dir: the follow feed's gated preflight reads
+	// the real cookie file otherwise, and the second result below
+	// would depend on this machine's login state.
+	t.Setenv("READSCOPE_CONFIG", t.TempDir())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/topstory/hot-list" {
 			http.Error(w, "no fixture", http.StatusNotFound)
@@ -731,12 +736,18 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Source: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("got %d results, want 1 (the hot feed)", len(results))
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2 (hot ok, follow gated — ticket 05)", len(results))
 	}
 	r := results[0]
 	if r.Err != nil || r.New != 2 || r.Total != 2 || r.Feed != "hot" {
 		t.Fatalf("hot result = %+v", r)
+	}
+	// The follow feed without a cookie: the gated preflight answers
+	// ErrLoginRequired on its own Result — the anonymous board beside
+	// it is unaffected (the spec's per-feed isolation).
+	if f := results[1]; f.Feed != "follow" || !errors.Is(f.Err, zhihu.ErrLoginRequired) {
+		t.Fatalf("follow result = %+v, want ErrLoginRequired (Ctrl+U guidance)", f)
 	}
 
 	// Reading the top question, then refreshing with its heat moved:
@@ -773,5 +784,190 @@ func TestRefreshZhihuTracerBullet(t *testing.T) {
 	}
 	if top.Item.Points == nil || *top.Item.Points != 30000000 {
 		t.Fatalf("heat snapshot not refreshed: %+v", top.Item)
+	}
+}
+
+// followMomentsFake is the ticket-05 fixture: a fake moments endpoint
+// whose pages are addressed by the after_id cursor it serves. The
+// walk it spells out:
+//
+//	page 1 (no cursor) → q1, q2            next=A
+//	page A             → q2 again, q3      next=B   (re-serves a known row)
+//	page B             → pins only         next=C   (filters to empty)
+//	page C             → q4, then END      next=""  (the server's end)
+//
+// Every page demands the cookie (403 anonymous), so the whole walk
+// also pins the session riding every cursor request. It returns the
+// server and the walk-so-far: the raw cursor of every moments
+// request, in order, so tests can assert the walk never re-fetches a
+// known page.
+func followMomentsFake(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+	q := func(id, title string, updated int64) string {
+		return fmt.Sprintf(`{"target":{"type":"question","id":%s,"title":%q,`+
+			`"author":{"name":"作者%s"},"updated_time":%d}}`, id, title, id, updated)
+	}
+	pages := map[string]string{
+		"": fmt.Sprintf(`{"data":[%s,%s],"paging":{"next":"%%NEXT%%A","is_end":false}}`,
+			q("1001", "关注问题一", 1731400400), q("1002", "关注问题二", 1731400300)),
+		"A": fmt.Sprintf(`{"data":[%s,%s],"paging":{"next":"%%NEXT%%B","is_end":false}}`,
+			q("1002", "关注问题二", 1731400300), q("1003", "关注问题三", 1731400200)),
+		"B": `{"data":[{"target":{"type":"pin","id":9}},{"target":{"type":"article","id":8,"title":"文"}}],
+			"paging":{"next":"%NEXT%C","is_end":false}}`,
+		"C": fmt.Sprintf(`{"data":[%s],"paging":{"next":"","is_end":true}}`,
+			q("1004", "深处的提问", 1731300000)),
+	}
+	var mu sync.Mutex
+	queries := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cookie") == "" {
+			http.Error(w, `{"error":{"code":101}}`, http.StatusForbidden)
+			return
+		}
+		cursor := r.URL.Query().Get("after_id")
+		mu.Lock()
+		queries = append(queries, cursor)
+		mu.Unlock()
+		body, ok := pages[cursor]
+		if !ok {
+			http.Error(w, "no fixture", http.StatusNotFound)
+			return
+		}
+		// The served cursors must address this very server — paging.next
+		// is an absolute URL in the wild.
+		fmt.Fprint(w, strings.ReplaceAll(body, "%NEXT%", srvCursorBase(r)+"/api/v3/moments?after_id="))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), queries...)
+	}
+}
+
+// srvCursorBase rebuilds the request's own base URL (scheme://host).
+func srvCursorBase(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+// TestFollowFeedCursorWalk is the follow feed's end-to-end: F5 lands
+// the first page and its cursor, Ctrl+N walks the stored cursor page
+// by page (known rows re-served without duplication, read state
+// intact, a pin-streak page advances without being the end), the
+// server's end holds the cursor and re-reports, and — the restart
+// contract — the walk only ever dials the next unknown page. Every
+// call below builds a fresh source from the config, exactly what a
+// process restart does.
+func TestFollowFeedCursorWalk(t *testing.T) {
+	srv, walkSoFar := followMomentsFake(t)
+	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
+	cfg := t.TempDir()
+	t.Setenv("READSCOPE_CONFIG", cfg)
+	if path, err := zhihu.CookiePath(); err != nil {
+		t.Fatalf("cookie path: %v", err)
+	} else if _, err := zhihu.SaveCookie(path, "z_c0=session; d_c0=os; k1=v1"); err != nil {
+		t.Fatalf("save cookie: %v", err)
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "follow.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srcs := core.DefaultSources()
+	ctx := context.Background()
+
+	// F5: the first page lands, the walk is anchored after it.
+	results, err := Feed(ctx, st, srcs, "zhihu", "follow")
+	if err != nil || len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("F5 follow = (%+v, %v)", results, err)
+	}
+	if r := results[0]; r.New != 2 || r.Total != 2 {
+		t.Fatalf("F5 result = %+v, want 2 new / 2 total", r)
+	}
+	cursor, err := st.LoadCursor(ctx, "zhihu", "follow")
+	if err != nil || !strings.Contains(cursor, "after_id=A") {
+		t.Fatalf("cursor after F5 = (%q, %v), want page A's address", cursor, err)
+	}
+	if err := st.SetRead(ctx, "zh:question/1002", true); err != nil {
+		t.Fatalf("set read: %v", err)
+	}
+
+	// Ctrl+N: page A appends — 1003 is new, 1002 re-served without a
+	// duplicate row and without losing its read dot.
+	res, end, err := More(ctx, st, srcs, "zhihu", "follow")
+	if err != nil || end {
+		t.Fatalf("first More = (%+v, %v, %v)", res, end, err)
+	}
+	if res.New != 1 || res.Total != 3 {
+		t.Fatalf("first More = %+v, want 1 new / 3 total", res)
+	}
+	rows, err := st.FeedItems(ctx, "zhihu", "follow", false)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows after first More = (%d, %v), want 3 — no duplicates", len(rows), err)
+	}
+	for _, r := range rows {
+		if r.Item.ID == "zh:question/1002" && !r.Read {
+			t.Fatal("the re-served question must stay read — paging never touches read state")
+		}
+	}
+
+	// Ctrl+N across the pin-streak page: zero rows land, but the page
+	// is not the end — the cursor advances past it.
+	res, end, err = More(ctx, st, srcs, "zhihu", "follow")
+	if err != nil || end {
+		t.Fatalf("pin-streak More = (%+v, %v, %v), want advance without end", res, end, err)
+	}
+	if res.New != 0 {
+		t.Fatalf("pin-streak page should add nothing, got %+v", res)
+	}
+	if cursor, _ := st.LoadCursor(ctx, "zhihu", "follow"); !strings.Contains(cursor, "after_id=C") {
+		t.Fatalf("cursor after pin streak = %q, want page C's address", cursor)
+	}
+
+	// Ctrl+N on the last page: rows land AND the end reports — the
+	// server served no next cursor.
+	res, end, err = More(ctx, st, srcs, "zhihu", "follow")
+	if err != nil || !end {
+		t.Fatalf("final More = (%+v, %v, %v), want the end with rows aboard", res, end, err)
+	}
+	if res.New != 1 || res.Total != 4 {
+		t.Fatalf("final More = %+v, want 1 new / 4 total", res)
+	}
+
+	// Ctrl+N again: the end re-reports without regressing the cursor —
+	// the walk must not restart from page 1.
+	res, end, err = More(ctx, st, srcs, "zhihu", "follow")
+	if err != nil || !end {
+		t.Fatalf("post-end More = (%+v, %v, %v), want the end again", res, end, err)
+	}
+	if res.New != 0 {
+		t.Fatalf("post-end More should re-serve nothing new, got %+v", res)
+	}
+
+	// F5 re-anchors: the fresh first page's cursor replaces the deep
+	// position (opaque cursors cannot be reconciled with a stream that
+	// shifted under them — the walk continues right after the screen).
+	results, err = Feed(ctx, st, srcs, "zhihu", "follow")
+	if err != nil || results[0].Err != nil {
+		t.Fatalf("re-F5 = (%+v, %v)", results, err)
+	}
+	if cursor, _ := st.LoadCursor(ctx, "zhihu", "follow"); !strings.Contains(cursor, "after_id=A") {
+		t.Fatalf("cursor after re-F5 = %q, want re-anchored to the first page's next", cursor)
+	}
+
+	// The restart contract, as a dial log: F5, walk A→B→C, the end's
+	// re-report, and the re-F5 — page 1 dialed exactly twice (two F5s),
+	// every known page exactly once. Nothing re-fetches a known page;
+	// every call above built a fresh source, exactly what a restart does.
+	if got, want := walkSoFar(), []string{"", "A", "B", "C", "C", ""}; !slices.Equal(got, want) {
+		t.Fatalf("the walk dialed %v, want %v (no known page re-fetched)", got, want)
 	}
 }

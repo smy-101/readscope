@@ -70,6 +70,26 @@ type PagedSource interface {
 	FetchPage(ctx context.Context, f core.Feed, page int) ([]core.Item, error)
 }
 
+// CursorPagedSource is the cursor variant of PagedSource, the same
+// probe-don't-register pattern: a source whose list pages are
+// addressed by an opaque server cursor instead of a page number
+// (zhihu's moments feed: paging.next). A source picks the shape per
+// feed — zhihu's hot board is a fixed window while its follow feed
+// pages by cursor — so callers probe CursorPagedSource first, then
+// PagedSource, landing on ErrNotPaged only when neither fits.
+type CursorPagedSource interface {
+	Source
+	// CursorPaged reports whether f pages by cursor.
+	CursorPaged(f core.Feed) bool
+	// FetchCursorPage returns the page after cursor — "" the first
+	// page — plus the cursor the server handed back for the page
+	// after it ("" = none served: the walk's end). Unlike FetchPage,
+	// an empty items slice is NOT exhaustion here: a page may filter
+	// to nothing (a pin streak) while the server still serves a next
+	// cursor; only next == "" ends the walk.
+	FetchCursorPage(ctx context.Context, f core.Feed, cursor string) (items []core.Item, next string, err error)
+}
+
 // UserAgent identifies readscope to the content hosts that don't
 // care about fingerprints — every host except zhihu's risk-controlled
 // APIs, which carry their own DesktopUA (internal/source/zhihu). One

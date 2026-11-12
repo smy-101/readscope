@@ -36,11 +36,11 @@ items 行上的 points 与评论数,取 fetched 时刻的值;列表的 "N pts ·
 _Avoid_: 热度值、统计数据、实时热度
 
 **分页源**:
-实现了 PagedSource 扩展的源——列表能按页向前翻(hn 走 Algolia page 参数,关注流走服务端游标);未实现的源(rss 全量快照)Ctrl+N 统一提示"没有更多了"。与 ConditionalSource/DetailSource 同款 probe-don't-register 模式。
+实现了 PagedSource(或其游标变体 CursorPagedSource)扩展的源——列表能按页向前翻(hn 走 Algolia page 参数,关注流走服务端游标 paging.next);未实现的源(rss 全量快照)Ctrl+N 统一提示"没有更多了"。与 ConditionalSource/DetailSource 同款 probe-don't-register 模式;一个源可按 feed 选形态(知乎热榜不翻页,关注流走游标)。
 _Avoid_: 无限滚动、下拉加载
 
 **页深**:
-feed_fetch_state.pages_fetched——某 feed 已从第 0 页起连续拉取的页数。Ctrl+N 拉当前页深的那一页,仅在有命中时前进;空页=到底且页深不动(索引增长后同页重试);F5 只保底 1 不抬高。重启后从存储页深续翻,不重拉已知页。关注流以服务端游标代替页码,游标前进语义与页深相同。
+feed_fetch_state.pages_fetched——某 feed 已从第 0 页起连续拉取的页数。Ctrl+N 拉当前页深的那一页,仅在有命中时前进;空页=到底且页深不动(索引增长后同页重试);F5 只保底 1 不抬高。重启后从存储页深续翻,不重拉已知页。关注流以服务端游标(feed_fetch_state.cursor,存下一页的 paging.next)代替页码:命中前进、到底不动,与页深相同;差异有二——到底信号是服务端不再供下一页游标(被过滤空页如整页想法不算到底,游标照常前进,否则会永久卡死在那页),且 F5 重锚到首页游标而非只保底(不透明游标无法与位移后的流对齐,重锚同时治愈过期游标)。
 _Avoid_: 翻页进度、offset
 
 **楼层**:

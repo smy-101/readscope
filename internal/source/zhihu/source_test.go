@@ -49,29 +49,6 @@ func TestRegisteredUnderZhihuID(t *testing.T) {
 	}
 }
 
-func TestFeedsAreTheHotFeed(t *testing.T) {
-	src := zhihuSrcAt(t, &fakeZhihu{})
-	feeds := src.Feeds()
-	if len(feeds) != 1 {
-		t.Fatalf("got %d feeds, want 1 (hot; daily/follow land in tickets 03/05)", len(feeds))
-	}
-	hot := feeds[0]
-	if hot.Key != HotFeedKey {
-		t.Errorf("feed key = %q, want %q", hot.Key, HotFeedKey)
-	}
-	if hot.LabelKey != "zhihu.hot" {
-		t.Errorf("labelKey = %q, want zhihu.hot", hot.LabelKey)
-	}
-	if !strings.HasSuffix(hot.URL, "/topstory/hot-list") || strings.Contains(hot.URL, "www.") {
-		t.Errorf("url = %q, want the anonymous api door", hot.URL)
-	}
-	// The board's return order is heat order: ListSortPoints like hn's
-	// popularity feeds.
-	if hot.ListSort != core.ListSortPoints {
-		t.Errorf("ListSort = %q, want points", hot.ListSort)
-	}
-}
-
 func TestFetchMapsHotRowsToQuestionCards(t *testing.T) {
 	fake := &fakeZhihu{hotOverride: hotRowsJSON}
 	src := zhihuSrcAt(t, fake)

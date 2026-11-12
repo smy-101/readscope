@@ -29,6 +29,7 @@ comments = "%d comments"
 
 [zhihu]
 hot = "Hot List"
+follow = "Following"
 heat = "%d万 heat"
 login_title = "Zhihu Login"
 login_hint = "Log in to zhihu in the browser → F12 → Network → any zhihu.com request → copy the whole Cookie line from the request headers, paste below"

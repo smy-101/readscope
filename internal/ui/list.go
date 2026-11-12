@@ -193,17 +193,19 @@ func (m Model) rowMeta(row store.ItemRow) string {
 	return m.relTime(row.Item.PublishedAt)
 }
 
-// zhihuMeta renders the hot board's heat reading "N 万热度" from the
-// folded heat snapshot ("2045 万热度" stored as 20450000 — the fold
-// lives in zhihu.heatPoints, each side pinned by its own test). The
+// zhihuMeta renders the row's zhihu meta column: hot-board rows the
+// heat reading "N 万热度" from the folded heat snapshot (the fold
+// lives in zhihu.heatPoints, each side pinned by its own test); the
 // fold only ever stores whole 万, so the division restores the exact
-// number; a row without a snapshot (a pinned card) keeps the meta
-// blank like the date-less rows always have.
+// number. Follow-feed rows carry no heat — their meta is the card's
+// author (the answerer on an answer card, the asker on a question
+// card); a row without either keeps the meta blank like the date-less
+// rows always have.
 func (m Model) zhihuMeta(it core.Item) string {
-	if it.Points == nil {
-		return ""
+	if it.Points != nil {
+		return m.cat.Get("zhihu.heat", *it.Points/10000)
 	}
-	return m.cat.Get("zhihu.heat", *it.Points/10000)
+	return it.Author
 }
 
 // hnMeta renders the heat radar "N pts · N comments · author" from the

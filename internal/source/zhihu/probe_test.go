@@ -65,6 +65,7 @@ const (
 // request is one recorded probe hit, for header-contract asserts.
 type request struct {
 	path       string
+	query      string // raw query string — the cursor pages' address
 	ua         string
 	xrw        string // x-requested-with
 	zse93      bool
@@ -82,19 +83,21 @@ type request struct {
 //   - v3 moments    : cookie required (403 without)
 //   - hot/daily     : anonymous ok
 type fakeZhihu struct {
-	t            *testing.T
-	mu           sync.Mutex
-	hits         []request
-	blockMoments bool   // simulate risk control (403 even with cookie)
-	emptyHot     bool   // serve {"data":[]} — redesign tripwire fixture
-	hotOverride  string // serve this body for /topstory/hot-list (source-test fixtures)
-	staleStatus  int    // ≠0: v4/comment_v5 answer this status despite a cookie (stale z_c0)
-	wrongVersion string // ≠"": question-meta demands exactly this x-zse-93 value (zhihu bumped it)
+	t               *testing.T
+	mu              sync.Mutex
+	hits            []request
+	blockMoments    bool   // simulate risk control (403 even with cookie)
+	emptyHot        bool   // serve {"data":[]} — redesign tripwire fixture
+	hotOverride     string // serve this body for /topstory/hot-list (source-test fixtures)
+	momentsOverride string // serve this body for /api/v3/moments (follow-feed fixtures)
+	staleStatus     int    // ≠0: v4/comment_v5 answer this status despite a cookie (stale z_c0)
+	wrongVersion    string // ≠"": question-meta demands exactly this x-zse-93 value (zhihu bumped it)
 }
 
 func (f *fakeZhihu) record(r *http.Request) request {
 	req := request{
 		path:       r.URL.Path,
+		query:      r.URL.RawQuery,
 		ua:         r.Header.Get("User-Agent"),
 		xrw:        r.Header.Get("x-requested-with"),
 		zse93:      r.Header.Get("x-zse-93") != "",
@@ -140,6 +143,10 @@ func (f *fakeZhihu) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if f.blockMoments {
 			write(403, v4ErrJSON) // pure risk control
+			return
+		}
+		if f.momentsOverride != "" {
+			write(200, f.momentsOverride)
 			return
 		}
 		write(200, momentsJSON)

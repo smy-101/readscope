@@ -87,8 +87,14 @@ func Feed(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID, fe
 // where the source can), snapshot, report. The error lands on the
 // Result, never in a return: one bad feed must not stop the others.
 // A successful cycle also floors a paged source's depth at 1 (see
-// bumpPagingFloor).
+// bumpPagingFloor). Cursor-paged feeds (zhihu's follow) fork to their
+// own path before any of the below: their first page carries the
+// next-page cursor the caller must persist alongside the snapshot,
+// which neither the conditional nor the plain items-only shape can.
 func refreshOneFeed(ctx context.Context, st *store.Store, src source.Source, f core.Feed) Result {
+	if cps, ok := src.(source.CursorPagedSource); ok && cps.CursorPaged(f) {
+		return refreshCursorFeed(ctx, st, cps, f)
+	}
 	res := Result{Source: src.ID(), Feed: f.Key, Label: f.Label}
 	// Conditional path: replay stored validators; a 304 skips parse
 	// and item writes entirely. Sources without the extension (hn,
@@ -133,6 +139,36 @@ func bumpPagingFloor(ctx context.Context, st *store.Store, src source.Source, f 
 	_ = st.SavePagesFetched(ctx, src.ID(), f.Key, 1)
 }
 
+// refreshCursorFeed is the F5 path of a cursor-paged feed: the first
+// page in, and the walk re-anchored to it. The stored cursor becomes
+// the fresh first page's paging.next whenever the server serves one —
+// an opaque cursor cannot be reconciled with a stream that shifted
+// under it (unlike a page number), so after F5 the walk continues
+// right after what's on screen; a served next of "" (the stream's
+// end) keeps the old position, never regressing to "re-fetch page 1
+// forever".
+func refreshCursorFeed(ctx context.Context, st *store.Store, cps source.CursorPagedSource, f core.Feed) Result {
+	res := Result{Source: cps.ID(), Feed: f.Key, Label: f.Label}
+	items, next, err := cps.FetchCursorPage(ctx, f, "")
+	if err != nil {
+		res.Err = err
+		return res
+	}
+	newCount, total, err := st.SaveFeedItems(ctx, cps.ID(), f.Key, items)
+	if err != nil {
+		res.Err = fmt.Errorf("store %s: %w", f.Key, err)
+		return res
+	}
+	if next != "" {
+		if err := st.SaveCursor(ctx, cps.ID(), f.Key, next); err != nil {
+			res.Err = fmt.Errorf("save cursor %s: %w", f.Key, err)
+			return res
+		}
+	}
+	res.New, res.Total = newCount, total
+	return res
+}
+
 // ErrNotPaged reports a Ctrl+N against a source that has no pages
 // behind its first (rss: the list is a full-sync snapshot). Callers
 // turn it into the "no more items" hint rather than an error line.
@@ -145,19 +181,35 @@ var ErrNotPaged = errors.New("source does not page its lists")
 // read/star state untouched — and the depth advances only when the
 // page had hits. end=true means the index served an empty page: the
 // depth stays put, so a later Ctrl+N retries the same page once the
-// index grows.
+// index grows. Cursor-paged feeds (zhihu's follow, M4 ticket 05) fork
+// to moreCursor: the walk's position is the stored opaque cursor, and
+// the end signal is the server serving no next cursor.
 func More(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID, feedKey string) (res Result, end bool, err error) {
 	src, err := source.New(sourceID, srcs)
 	if err != nil {
 		return Result{}, false, err
 	}
-	paged, ok := src.(source.PagedSource)
-	if !ok {
-		return Result{}, false, fmt.Errorf("more %s: %w", sourceID, ErrNotPaged)
+	// The unpaged verdict is about the source, not the feed key — it
+	// wins even for an unknown key (rss says "no pages" before "no
+	// such feed").
+	cursorSrc, isCursorSrc := src.(source.CursorPagedSource)
+	if !isCursorSrc {
+		if _, ok := src.(source.PagedSource); !ok {
+			return Result{}, false, fmt.Errorf("more %s: %w", sourceID, ErrNotPaged)
+		}
 	}
 	feed, ok := findFeed(src, feedKey)
 	if !ok {
 		return Result{}, false, fmt.Errorf("more %s: no feed %q", sourceID, feedKey)
+	}
+	if isCursorSrc && cursorSrc.CursorPaged(*feed) {
+		return moreCursor(ctx, st, cursorSrc, *feed)
+	}
+	paged, ok := src.(source.PagedSource)
+	if !ok {
+		// A cursor source reaches here on its non-cursor feeds (zhihu's
+		// board is a fixed window): no pages behind the first.
+		return Result{}, false, fmt.Errorf("more %s: %w", sourceID, ErrNotPaged)
 	}
 	pageNo, err := st.LoadPagesFetched(ctx, sourceID, feedKey)
 	if err != nil {
@@ -184,6 +236,47 @@ func More(ctx context.Context, st *store.Store, srcs *core.Sources, sourceID, fe
 		return Result{}, false, fmt.Errorf("save depth %s: %w", feedKey, err)
 	}
 	res.New, res.Total = newCount, total
+	return res, false, nil
+}
+
+// moreCursor is More's cursor twin (Ctrl+N on a cursor-paged feed).
+// The walk's position is the stored opaque cursor — "" on a cold
+// feed, so the first Ctrl+N bootstraps by fetching the first page,
+// exactly like depth 0 does for paged feeds. The server's next
+// cursor is the only end signal: served → the walk advances (even
+// when the page filtered to empty — a pin streak is not the end, and
+// holding the cursor there would brick Ctrl+N on it); absent → end,
+// and the stored cursor stays so the next Ctrl+N re-reports the end
+// instead of re-walking from the first page.
+func moreCursor(ctx context.Context, st *store.Store, cps source.CursorPagedSource, f core.Feed) (Result, bool, error) {
+	cursor, err := st.LoadCursor(ctx, cps.ID(), f.Key)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("load cursor %s: %w", f.Key, err)
+	}
+	items, next, err := cps.FetchCursorPage(ctx, f, cursor)
+	if err != nil {
+		return Result{}, false, err
+	}
+	res := Result{Source: cps.ID(), Feed: f.Key, Label: f.Label}
+	if len(items) == 0 {
+		total, err := st.CountFeed(ctx, cps.ID(), f.Key)
+		if err != nil {
+			return Result{}, false, fmt.Errorf("count %s: %w", f.Key, err)
+		}
+		res.Total = total
+	} else {
+		newCount, total, err := st.SaveFeedItems(ctx, cps.ID(), f.Key, items)
+		if err != nil {
+			return Result{}, false, fmt.Errorf("store %s: %w", f.Key, err)
+		}
+		res.New, res.Total = newCount, total
+	}
+	if next == "" { // the server's end: report it, keep the position
+		return res, true, nil
+	}
+	if err := st.SaveCursor(ctx, cps.ID(), f.Key, next); err != nil {
+		return Result{}, false, fmt.Errorf("save cursor %s: %w", f.Key, err)
+	}
 	return res, false, nil
 }
 

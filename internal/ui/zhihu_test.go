@@ -9,6 +9,8 @@ package ui
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -145,5 +147,100 @@ func TestF4AndCtrlAWorkOnZhihuRows(t *testing.T) {
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if view = m.View(); strings.Contains(view, "●") {
 		t.Fatalf("Ctrl+A should mark every zhihu row read:\n%s", view)
+	}
+}
+
+// followModel seeds the follow feed's rows, lands the model on the
+// zhihu source with the follow feed selected (sidebar slot 2), ready
+// for follow-layer asserts.
+func followModel(t *testing.T, items []core.Item) Model {
+	t.Helper()
+	m := seededModel(t, nil, nil)
+	if _, _, err := m.st.SaveFeedItems(context.Background(), "zhihu", "follow", items); err != nil {
+		t.Fatalf("seed follow items: %v", err)
+	}
+	m = size(m, 100, 30)
+	for range 3 { // books → rss → hn → zhihu
+		var cmd tea.Cmd
+		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
+		m = pump(t, m, cmd)
+	}
+	// sidebar: hot → follow (feedsMsg already landed via the pump)
+	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = pump(t, m, cmd)
+	if m.selectedFeedKey() != "follow" {
+		t.Fatalf("selected feed = %q, want follow", m.selectedFeedKey())
+	}
+	return m
+}
+
+// Ticket 05: the sidebar lists the follow feed with its label
+// resolved through i18n, and follow rows — question cards without a
+// heat snapshot — carry the card's author in the meta column (the
+// answerer on answer cards).
+func TestFollowFeedSidebarAndAuthorMeta(t *testing.T) {
+	m := followModel(t, []core.Item{
+		{ID: "zh:question/1001", Source: "zhihu", Feed: "follow",
+			Title: "关注的问题", URL: "https://www.zhihu.com/question/1001",
+			Author: "李四", FetchedAt: time.Now().UTC()},
+		{ID: "zh:question/1002", Source: "zhihu", Feed: "follow",
+			Title: "没有作者列的行", URL: "https://www.zhihu.com/question/1002",
+			FetchedAt: time.Now().UTC()},
+	})
+	view := m.View()
+	if !strings.Contains(view, "Following") {
+		t.Errorf("sidebar missing the follow feed label:\n%s", view)
+	}
+	if strings.Contains(view, "zhihu.follow") {
+		t.Errorf("label keys must resolve, raw key leaked:\n%s", view)
+	}
+	if !strings.Contains(view, "关注的问题") {
+		t.Errorf("list missing the follow row:\n%s", view)
+	}
+	if !strings.Contains(view, "李四") {
+		t.Errorf("follow meta column should carry the author:\n%s", view)
+	}
+}
+
+// Ticket 04's transfer to 05, now end to end: F5 on the follow feed
+// with no cookie configured runs the REAL refresh pipeline (source →
+// transport gated preflight) and the status bar answers with the
+// Ctrl+U guidance — not a raw HTTP error. The fake server behind
+// READSCOPE_ZHIHU_BASE fails every moments dial loudly, so the test
+// also pins the preflight's zero-dial contract: had the transport
+// dialed, the status would carry the 500, not the guidance.
+func TestFollowFeedF5WithoutCookieShowsLoginGuidance(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "should not be dialed", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_ZHIHU_BASE", srv.URL)
+
+	m := followModel(t, nil)
+	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyF5})
+	if !m.refreshing {
+		t.Fatal("F5 should start the refresh")
+	}
+	m = pump(t, m, cmd)
+	if !strings.Contains(m.status, "Ctrl+U") {
+		t.Fatalf("status bar should carry the login guidance, got %q", m.status)
+	}
+	if strings.Contains(m.status, "500") {
+		t.Fatalf("the preflight must refuse before any dial — a raw HTTP error leaked: %q", m.status)
+	}
+}
+
+// The board is a fixed window: zhihu carries only the cursor variant,
+// so Ctrl+N on the hot feed must land on ErrNotPaged → "no more
+// items" — the plain-PagedSource probe must not fire for it.
+func TestCtrlNOnZhihuHotBoardSaysNoMore(t *testing.T) {
+	m := zhihuModel(t, []core.Item{zhihuHeatItem("100001", "热榜问题", 0, nil)})
+	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	if !m.loadingMore {
+		t.Fatal("Ctrl+N should start the append")
+	}
+	m = pump(t, m, cmd)
+	if !strings.Contains(m.status, "no more") {
+		t.Fatalf("hot board has no pages — status should say no more, got %q", m.status)
 	}
 }

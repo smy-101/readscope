@@ -81,3 +81,31 @@ func (s *Store) SavePagesFetched(ctx context.Context, sourceID, feedKey string, 
 		sourceID, feedKey, time.Now().UTC(), pages)
 	return err
 }
+
+// LoadCursor returns one feed's cursor-paging position — the opaque
+// server cursor of the next page to fetch (zhihu's follow feed; the
+// cursor variant of LoadPagesFetched). A missing row is "": never
+// paged, so the next Ctrl+N bootstraps by fetching the first page.
+func (s *Store) LoadCursor(ctx context.Context, sourceID, feedKey string) (string, error) {
+	var cursor string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT cursor FROM feed_fetch_state
+		WHERE source = ? AND feed = ?`, sourceID, feedKey).Scan(&cursor)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return cursor, err
+}
+
+// SaveCursor upserts one feed's cursor-paging position. Like the
+// depth write it only ever touches its own column: validators and
+// depth on the same row survive untouched.
+func (s *Store) SaveCursor(ctx context.Context, sourceID, feedKey, cursor string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO feed_fetch_state
+		(source, feed, etag, last_modified, last_fetched, cursor)
+		VALUES (?, ?, '', '', ?, ?)
+		ON CONFLICT(source, feed) DO UPDATE SET
+			cursor = excluded.cursor`,
+		sourceID, feedKey, time.Now().UTC(), cursor)
+	return err
+}
