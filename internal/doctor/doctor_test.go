@@ -241,42 +241,57 @@ func TestRunDetectsBrokenDB(t *testing.T) {
 // TestHeyboxLineReportsCirclesAndLastFetch: a healthy subscription
 // with cached content renders the census note — circle count, cached
 // item count, and the age of the last fetch that moved content
-// (doctor never dials the host; the cache is the witness).
+// (doctor never dials the host; the cache is the witness). Both
+// language packs are asserted as COMPOSITIONS: the note splices the
+// time.* relative-age strings in, and a pattern like zh's
+// "%d 分钟前" colliding with a trailing 前 in the pattern itself is
+// exactly the garble this test exists to catch — key-presence parity
+// alone never would.
 func TestHeyboxLineReportsCirclesAndLastFetch(t *testing.T) {
-	writeSources(t, "enabled = [\"heybox\"]\n\n[[heybox.circles]]\nname = \"黑神话：悟空\"\ntopic_id = 568547\n")
-	path, err := store.DefaultPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if err := st.Migrate(); err != nil {
-		t.Fatal(err)
-	}
-	fetched := time.Now().UTC().Add(-5 * time.Minute)
-	items := []core.Item{
-		{ID: "hb:link/aa", Source: "heybox", Feed: "circle/568547", Title: "帖一", URL: "https://x", FetchedAt: fetched},
-		{ID: "hb:link/bb", Source: "heybox", Feed: "circle/568547", Title: "帖二", URL: "https://x", FetchedAt: fetched},
-		{ID: "hb:link/cc", Source: "heybox", Feed: "recommend", Title: "帖三", URL: "https://x", FetchedAt: fetched},
-	}
-	if _, _, err := st.SaveFeedItems(context.Background(), "heybox", "circle/568547", items[:2]); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := st.SaveFeedItems(context.Background(), "heybox", "recommend", items[2:]); err != nil {
-		t.Fatal(err)
-	}
+	for _, c := range []struct{ lang, want string }{
+		{"en", "1 circles · 3 cached items · fetched 5m"},
+		{"zh-CN", "1 圈 · 3 条快照 · 最近拉取 5 分钟前"},
+	} {
+		t.Run(c.lang, func(t *testing.T) {
+			writeSources(t, "enabled = [\"heybox\"]\n\n[[heybox.circles]]\nname = \"黑神话：悟空\"\ntopic_id = 568547\n")
+			path, err := store.DefaultPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, err := store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			if err := st.Migrate(); err != nil {
+				t.Fatal(err)
+			}
+			fetched := time.Now().UTC().Add(-5 * time.Minute)
+			items := []core.Item{
+				{ID: "hb:link/aa", Source: "heybox", Feed: "circle/568547", Title: "帖一", URL: "https://x", FetchedAt: fetched},
+				{ID: "hb:link/bb", Source: "heybox", Feed: "circle/568547", Title: "帖二", URL: "https://x", FetchedAt: fetched},
+				{ID: "hb:link/cc", Source: "heybox", Feed: "recommend", Title: "帖三", URL: "https://x", FetchedAt: fetched},
+			}
+			if _, _, err := st.SaveFeedItems(context.Background(), "heybox", "circle/568547", items[:2]); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := st.SaveFeedItems(context.Background(), "heybox", "recommend", items[2:]); err != nil {
+				t.Fatal(err)
+			}
 
-	cfg := core.Defaults()
-	cfg.Language = "en" // pin the pack: the note's wording is asserted
-	var buf bytes.Buffer
-	if ok := run(&buf, cfg, "test", nil); !ok {
-		t.Fatalf("a healthy heybox state must pass doctor:\n%s", buf.String())
-	}
-	if !strings.Contains(buf.String(), "1 circles · 3 cached items · fetched 5m") {
-		t.Errorf("heybox note wrong:\n%s", buf.String())
+			cfg := core.Defaults()
+			cfg.Language = c.lang
+			var buf bytes.Buffer
+			if ok := run(&buf, cfg, "test", nil); !ok {
+				t.Fatalf("a healthy heybox state must pass doctor:\n%s", buf.String())
+			}
+			if !strings.Contains(buf.String(), c.want) {
+				t.Errorf("heybox note wrong:\n%s", buf.String())
+			}
+			if strings.Contains(buf.String(), "前 前") {
+				t.Errorf("double suffix garble in the note:\n%s", buf.String())
+			}
+		})
 	}
 }
 

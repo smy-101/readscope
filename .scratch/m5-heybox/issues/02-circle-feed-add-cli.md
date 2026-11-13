@@ -26,3 +26,5 @@
   - **doctor**:第 8 项检查「小黑盒源」= 圈数(经校验)+ 快照条数 + 最近拉取相对时间(store 新增 `LastFetched`:ORDER BY fetched_at DESC LIMIT 1,聚合并丢 TIMESTAMP decltype 会让驱动回 string——注释记录了这一坑);恒离线不拨号,「从未拉取」是装机初态的诚实注记而非失败;坏圈表失败并点名条目。
   - **i18n**:heybox.cli_* 与 doctor.heybox* 双语齐备,parity 测试过。
 - 待 04 票:真网加圈一次冒烟(搜索/圈流/doctor 行)、20 帖页量级与热度串文案实勘。
+
+**评审(2026-11-13,Standards+Spec 双轴,并行子代理,68552f1..fe8ac6a)**:Spec 轴 **P1 已修**——zh `doctor.heybox_state` 自带尾部「前」与 `time.minutes` 的「%d 分钟前」组合出「最近拉取 5 分钟前 前」;原测试只钉 en、parity 只查键存在,故漏网。修法:去掉尾部前缀,doctor 测试改为 en/zh 双语**组合**断言(含「前 前」garble 守卫)——组合才测得出这类拼接错,键存在测不出。Spec P2 已修:加圈测试补上仪式最后一环链路断言(LoadSources→heybox.New→Feeds() 含 circle/568547 且标签对)。P2 保留:doctor「最近拉取结果」实现为「最近内容落地时间」(失败不动),代码注释已论证;若要成败语义,feed_fetch_state 是自然来源,留待有真实需求再说。Standards 轴(全 P2 判断项,无硬违规):已修——`Topic.Hot` 删字段(解析无人读,Speculative)、Get/GetUnsigned 共享 `pace` 前奏(去重)、还原 zh 包两个既有串的顺手标点变更(risk_later/cookie_perms,diff 聚焦);保留——doctor relTime 与 ui Model.relTime 双胞胎(doctor 不能 import ui,注释自认;若再添第三处消费者则提炼 Catalog.RelTime)、cmd 测试与包内测试的搜索夹具重复(跨包可辩护)、CLI 的 `.(*heybox.Source)` 断言式门(注释论证,与 zhihu 包级门分歧已知)。

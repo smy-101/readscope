@@ -34,7 +34,6 @@ type Topic struct {
 	TopicID  int64
 	Name     string
 	ShowDesc string
-	Hot      int64 // raw heat, the sort the host already applied
 }
 
 // SearchTopics runs one circle-name search. The result rides the
@@ -56,9 +55,6 @@ func (s *Source) SearchTopics(ctx context.Context, q string) ([]Topic, error) {
 			TopicID  int64  `json:"topic_id"`
 			Name     string `json:"name"`
 			ShowDesc string `json:"show_desc"`
-			Hot      struct {
-				RawHotValue int64 `json:"raw_hot_value"`
-			} `json:"hot"`
 		} `json:"topics"`
 	}
 	if err := json.Unmarshal(res.Result, &found); err != nil {
@@ -73,7 +69,6 @@ func (s *Source) SearchTopics(ctx context.Context, q string) ([]Topic, error) {
 			TopicID:  t.TopicID,
 			Name:     t.Name,
 			ShowDesc: t.ShowDesc,
-			Hot:      t.Hot.RawHotValue,
 		})
 	}
 	return topics, nil

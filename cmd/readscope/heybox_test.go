@@ -16,6 +16,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/smy-101/readscope/internal/core"
+	"github.com/smy-101/readscope/internal/source/heybox"
 )
 
 const addSearchFixture = `{"msg":"","result":{"topics":[
@@ -103,6 +106,35 @@ func TestHeyboxAddPicksAndWrites(t *testing.T) {
 	}
 	if *dials != 1 {
 		t.Errorf("search dialed %d times, want 1", *dials)
+	}
+
+	// The ceremony's last leg, as one chain: the written TOML
+	// rebuilds into a source whose sidebar lists the new circle —
+	// restart is the TUI's pickup, LoadSources→New is its substance.
+	// (heybox.New mints nothing here: the device env pin above holds
+	// and the config dir is this test's tempdir.)
+	reloaded, err := core.LoadSources()
+	if err != nil {
+		t.Fatalf("LoadSources after add: %v", err)
+	}
+	rebuilt, err := heybox.New(reloaded)
+	if err != nil {
+		t.Fatalf("source rebuild from the written TOML: %v", err)
+	}
+	var circle *core.Feed
+	for i, f := range rebuilt.Feeds() {
+		if f.Key == "circle/568547" {
+			circle = &rebuilt.Feeds()[i]
+		}
+	}
+	if circle == nil {
+		t.Fatalf("rebuilt source lists no circle/568547: %+v", rebuilt.Feeds())
+	}
+	if circle.Label != "黑神话：悟空" {
+		t.Errorf("rebuilt circle label = %q, want the TOML name", circle.Label)
+	}
+	if feeds := rebuilt.Feeds(); feeds[0].Key != "recommend" {
+		t.Errorf("rebuilt feed order starts with %q, want the recommend feed first", feeds[0].Key)
 	}
 }
 

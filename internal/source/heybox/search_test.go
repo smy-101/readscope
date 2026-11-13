@@ -74,7 +74,7 @@ func TestSearchTopicsUnsignedShape(t *testing.T) {
 		t.Fatalf("got %d topics, want 2 (degenerate rows skipped)", len(topics))
 	}
 	first := topics[0]
-	if first.TopicID != 568547 || first.Name != "黑神话：悟空" || first.ShowDesc != "热度: 298.4万" || first.Hot != 2984176 {
+	if first.TopicID != 568547 || first.Name != "黑神话：悟空" || first.ShowDesc != "热度: 298.4万" {
 		t.Errorf("topics[0] = %+v, want the host's own row", first)
 	}
 	if topics[1].TopicID != 709226 {

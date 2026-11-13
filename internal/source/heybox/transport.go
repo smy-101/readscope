@@ -134,12 +134,9 @@ type envelope struct {
 // non-ok answer is a plain error carrying the server's own msg; a
 // 200/ok rides home for the caller to parse.
 func (t *Transport) Get(ctx context.Context, name, path string, extra url.Values) Response {
-	if err := t.wait(ctx); err != nil {
-		return Response{Err: fmt.Errorf("%s: %w", name, err)}
+	if err := t.pace(ctx, name); err != nil {
+		return Response{Err: err}
 	}
-	dialLedger.mu.Lock()
-	dialLedger.last[t.base] = time.Now()
-	dialLedger.mu.Unlock()
 	params := url.Values{}
 	for k, vs := range extra {
 		params[k] = vs
@@ -180,13 +177,23 @@ func (t *Transport) Get(ctx context.Context, name, path string, extra url.Values
 // cap, same envelope sentinel, same politeness gap (still a dial to
 // the same host); only the parameter dressing differs.
 func (t *Transport) GetUnsigned(ctx context.Context, name, path string, extra url.Values) Response {
+	if err := t.pace(ctx, name); err != nil {
+		return Response{Err: err}
+	}
+	return t.roundTrip(ctx, name, path, extra)
+}
+
+// pace is every dial's front half, shared by the signed and
+// unsigned doors alike: wait out the politeness gap, then book this
+// dial in the cross-transport ledger.
+func (t *Transport) pace(ctx context.Context, name string) error {
 	if err := t.wait(ctx); err != nil {
-		return Response{Err: fmt.Errorf("%s: %w", name, err)}
+		return fmt.Errorf("%s: %w", name, err)
 	}
 	dialLedger.mu.Lock()
 	dialLedger.last[t.base] = time.Now()
 	dialLedger.mu.Unlock()
-	return t.roundTrip(ctx, name, path, extra)
+	return nil
 }
 
 // roundTrip is the wire half every GET shares: build the request
