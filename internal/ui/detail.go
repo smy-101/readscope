@@ -999,6 +999,12 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 				m.moveFloor(-1)
 			} else {
 				m.moveFloor(1)
+				// → pinned at the loaded tail with a page still spendable
+				// points at Ctrl+N instead of dead-ending silently
+				// (ticket 10).
+				if d.floorIdx >= len(d.floors)-1 && m.floorsPageRemain() {
+					m.status = m.cat.Get("zhihu.answers_tail")
+				}
 			}
 		}
 		return true, nil
@@ -1018,7 +1024,16 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 			}
 			return true, nil
 		case layerFloors:
-			m.moveFloor(floorSkip) // the answer layer pages nothing (回答层无翻页)
+			// The zhihu answer layer rides the reply layer's hop-then-fetch
+			// (ticket 10): floors still loaded beyond this one → the
+			// in-memory hop; at the loaded tail the next answers page loads
+			// in place — or the spent cursor says no more, which is
+			// moreFloorsCmd's own gate. hn floors carry no pager and keep
+			// the pure hop.
+			if d.pager != nil && d.floorIdx >= len(d.floors)-1 {
+				return true, m.moreFloorsCmd()
+			}
+			m.moveFloor(floorSkip) // mid-list: the in-memory hop
 			return true, nil
 		case layerReplies:
 			if d.pager == nil {
@@ -1140,6 +1155,16 @@ func (m *Model) enterArticleComments() (bool, tea.Cmd) {
 }
 
 // --- the paging detail's loads (zhihu, ticket 06) ------------------------
+
+// floorsPageRemain reports whether another answers page is still
+// spendable from the answer layer — the tail Ctrl+N fetch and the →
+// hint share this gate; the busy and end-status halves stay inside
+// moreFloorsCmd.
+func (m Model) floorsPageRemain() bool {
+	d := m.reader
+	return d != nil && d.pager != nil && d.feedsCursor != "" &&
+		(d.floorsTotal <= 0 || int64(len(d.floors)) < d.floorsTotal)
+}
 
 // moreFloorsCmd fetches the next answers page along the session's
 // feeds cursor (the question layer's Ctrl+N). No cursor left — or a

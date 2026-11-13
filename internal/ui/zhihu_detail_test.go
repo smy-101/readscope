@@ -5,8 +5,8 @@ package ui
 // description, answer floor list, load-more footer), the answer layer
 // (one answer per screen, ←→ between answers), the comment layer
 // (roots as rows, children flattened with @parent), the per-layer
-// Ctrl+N semantics (question = feeds cursor, answer = in-memory hop,
-// comments = offset), the failure translations (404 / session), and
+// Ctrl+N semantics (question = feeds cursor, answer = hop-then-fetch
+// like the comment layer, comments = hop rows then the offset page), the failure translations (404 / session), and
 // the offline re-open rendering the cache with zero requests. The
 // fake plane mirrors the measured matrix; the real-network run is
 // ticket 07's smoke.
@@ -286,7 +286,9 @@ func TestZhihuCtrlNPerLayer(t *testing.T) {
 		t.Fatalf("the walk's end should say so, status = %q", m.status)
 	}
 
-	// Answer layer: the in-memory hop (回答层无翻页) skips to 丙.
+	// Answer layer: the in-memory hop mid-list (ticket 10: floors
+	// remain beyond this one, so Ctrl+N skips to 丙; at the tail it
+	// would fetch instead — TestZhihuAnswerLayerLoadsMoreAtTail).
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN})
 	if got := m.reader.floors[m.reader.floorIdx].cm.ID; got != "9003" {
@@ -321,6 +323,62 @@ func TestZhihuCtrlNPerLayer(t *testing.T) {
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN})
 	if !strings.Contains(m.status, "no more") {
 		t.Fatalf("the comments walk's end should say so, status = %q", m.status)
+	}
+}
+
+// Ticket 10: the answer layer's Ctrl+N mirrors the reply layer's
+// hop-then-fetch — mid-list it hops in memory (unchanged), at the
+// loaded tail with a cursor to spend it loads the next answers page
+// in place (the floor stays, the list grows), → at the tail points
+// at Ctrl+N instead of dead-ending, and the spent cursor says so.
+func TestZhihuAnswerLayerLoadsMoreAtTail(t *testing.T) {
+	srv, p := zhihuPlane(t)
+	m := openQuestion(t, srv)
+
+	// Answer layer on floor 0 (甲): two floors loaded, cursor pending.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := m.reader.floors[m.reader.floorIdx].cm.ID; got != "9001" {
+		t.Fatalf("Enter should open 甲, on %s", got)
+	}
+
+	// Mid-list: Ctrl+N still hops in memory (to 乙, the loaded tail).
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	if got := m.reader.floors[m.reader.floorIdx].cm.ID; got != "9002" {
+		t.Fatalf("mid-list Ctrl+N should hop, on %s", got)
+	}
+
+	// → at the loaded tail hints at Ctrl+N (discoverability).
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	if !strings.Contains(m.status, "Ctrl+N") {
+		t.Fatalf("→ at the loaded tail should hint Ctrl+N, status = %q", m.status)
+	}
+
+	// Tail Ctrl+N loads page two in place: exactly one feeds dial,
+	// 丙 appended, the reader stays on 乙, the status counts the grown list.
+	before := p.count()
+	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = pump(t, m, cmd)
+	if got := m.reader.floors[m.reader.floorIdx].cm.ID; got != "9002" {
+		t.Fatalf("the landing must not move floors, on %s", got)
+	}
+	if len(m.reader.floors) != 3 || m.reader.floors[2].cm.ID != "9003" {
+		t.Fatalf("page two should append 丙 in place, floors = %d", len(m.reader.floors))
+	}
+	if n := p.count(); n != before+1 {
+		t.Fatalf("exactly one feeds page should be dialed, %d → %d", before, n)
+	}
+	if !strings.Contains(m.status, "3") {
+		t.Fatalf("the status should count the loaded answers, status = %q", m.status)
+	}
+
+	// The cursor is spent: → walks into 丙, a tail Ctrl+N says no more.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	if got := m.reader.floors[m.reader.floorIdx].cm.ID; got != "9003" {
+		t.Fatalf("→ should walk into the freshly loaded tail, on %s", got)
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	if !strings.Contains(m.status, "no more") {
+		t.Fatalf("the spent cursor should say no more, status = %q", m.status)
 	}
 }
 
