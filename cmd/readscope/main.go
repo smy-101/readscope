@@ -34,6 +34,7 @@ Usage:
   readscope render     Render a local HTML file or URL to terminal text
   readscope zhihu probe  Probe zhihu API endpoints and save raw samples (M4 tracer)
   readscope zhihu login  Paste a browser Cookie header (zhihu login ceremony)
+  readscope heybox add <关键词…>  Search heybox circles and subscribe one into sources.toml
   readscope version    Print version
 
 Environment:
@@ -70,6 +71,8 @@ func main() {
 		os.Exit(runRss(args[1:]))
 	case "zhihu":
 		os.Exit(runZhihu(args[1:]))
+	case "heybox":
+		os.Exit(runHeybox(args[1:]))
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:

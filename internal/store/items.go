@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/smy-101/readscope/internal/core"
 )
@@ -261,6 +262,30 @@ func (s *Store) CountFeed(ctx context.Context, sourceID, feedKey string) (int, e
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM items WHERE source = ? AND feed = ?`, sourceID, feedKey).Scan(&n)
 	return n, err
+}
+
+// LastFetched reports when content last landed for one source —
+// MAX(fetched_at) over its cached rows; ok=false means nothing
+// cached yet (doctor's "never fetched"). Every refresh that serves
+// a row rewrites its fetched_at, so this is the last fetch that
+// moved content, not the last attempt — a failed fetch (risk
+// control, network) leaves it where it was, which is exactly the
+// honest signal doctor wants to show.
+func (s *Store) LastFetched(ctx context.Context, sourceID string) (time.Time, bool, error) {
+	var last sql.NullTime
+	// ORDER BY/LIMIT rather than MAX(): an aggregate drops the
+	// column's declared type, and the driver then hands back a string
+	// no *time.Time can Scan. The sorted single row keeps it a
+	// timestamp, and no row is the never-fetched verdict.
+	err := s.db.QueryRowContext(ctx,
+		`SELECT fetched_at FROM items WHERE source = ? ORDER BY fetched_at DESC LIMIT 1`, sourceID).Scan(&last)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return last.Time, last.Valid, nil
 }
 
 // ftsText converts an HTML snapshot (or plain title) to indexable text:

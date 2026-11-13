@@ -169,7 +169,30 @@ func (t *Transport) Get(ctx context.Context, name, path string, extra url.Values
 	params.Set("hkey", hkey)
 	params.Set("_time", strconv.FormatInt(ts, 10))
 	params.Set("nonce", nonce)
+	return t.roundTrip(ctx, name, path, params)
+}
 
+// GetUnsigned performs one plain GET — the smoke's search family
+// (07): /bbs/app/api/search/topic answered carrying ONLY its own
+// q/offset/limit params, no signature and no common web set, so the
+// unsigned shape is the measured one and a signed attempt would be
+// a different, unmeasured request. Same browser headers, same body
+// cap, same envelope sentinel, same politeness gap (still a dial to
+// the same host); only the parameter dressing differs.
+func (t *Transport) GetUnsigned(ctx context.Context, name, path string, extra url.Values) Response {
+	if err := t.wait(ctx); err != nil {
+		return Response{Err: fmt.Errorf("%s: %w", name, err)}
+	}
+	dialLedger.mu.Lock()
+	dialLedger.last[t.base] = time.Now()
+	dialLedger.mu.Unlock()
+	return t.roundTrip(ctx, name, path, extra)
+}
+
+// roundTrip is the wire half every GET shares: build the request
+// with the site's browser identity, send it, cap the body, and run
+// the envelope sentinel over the answer.
+func (t *Transport) roundTrip(ctx context.Context, name, path string, params url.Values) Response {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.base+path+"?"+params.Encode(), nil)
 	if err != nil {
 		return Response{Err: fmt.Errorf("%s: %w", name, err)}

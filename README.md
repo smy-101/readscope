@@ -39,6 +39,7 @@ readscope doctor          # environment self-check, incl. per-feed reachability
 readscope rss refresh     # fetch every subscription into the offline cache
 readscope rss import F    # merge OPML subscriptions into sources.toml
 readscope rss export F    # write subscriptions as OPML 2.0 for other readers
+readscope heybox add <关键词…>  # search heybox circles, pick one, subscribe it
 readscope render <file|url>  # render HTML to terminal text (pipeline debug)
 readscope version         # print version
 ```
@@ -147,6 +148,33 @@ land in the same offline cache as every other source: unread dot, read/star, `Ct
 (opens the post's share page) all work identically, and everything stays readable
 offline. Post cards carry the award count and comment count in the meta column; ad cards
 never enter the list.
+
+Each **circle** (圈 — a game's discussion board) you subscribe is one more sidebar feed,
+the same shape as an RSS subscription: its own `F5` refresh, its own `Ctrl+N` paging depth,
+the same offline cache. To add one, search by name from the terminal:
+
+```bash
+readscope heybox add 黑神话
+# 1. 黑神话：悟空 · 热度: 298.4万
+# 2. 黑神话：钟馗 · 热度: 5.1万
+# …pick a number, q cancels
+```
+
+The pick lands in `sources.toml` and the circle appears in the sidebar after a restart:
+
+```toml
+[[heybox.circles]]
+name = "黑神话：悟空"
+topic_id = 568547
+```
+
+The file is the fallback door, always: hand-edit to rename, reorder (declaration order is
+sidebar order), or delete a circle, restart, done. A broken entry (missing name or
+`topic_id`) fails loudly at startup and in `readscope doctor` instead of silently
+skipping. `doctor` also reports the circle count and when content last landed in the
+cache. A post that shows up in both the recommend feed and a circle keeps one row that
+re-homes between them — read state riding along — exactly like an HN story roaming
+between Front and New.
 
 Refreshes speak the website's own signed-parameters dialect (the `hkey` request
 signature), read-only, at a polite per-request pace. If risk control ever pushes back

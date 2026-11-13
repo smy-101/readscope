@@ -11,10 +11,12 @@ import (
 // Sources is the subscription file (sources.toml, next to config.toml):
 // which sources are enabled — the list order is the source rail order in
 // the TUI — and their per-source subscription config. Feeds for sources
-// beyond RSS grow their own tables here as they land (hn in M3).
+// beyond RSS grow their own tables here as they land (hn in M3, heybox
+// circles in M5).
 type Sources struct {
-	Enabled []string  `toml:"enabled"`
-	RSS     RSSConfig `toml:"rss"`
+	Enabled []string      `toml:"enabled"`
+	RSS     RSSConfig     `toml:"rss"`
+	Heybox  *HeyboxConfig `toml:"heybox"` // nil = no circles yet; absent from the marshaled file
 }
 
 // RSSConfig holds the RSS/Atom subscriptions: map key = feed key (stable
@@ -27,6 +29,35 @@ type RSSConfig struct {
 type RSSFeed struct {
 	Label string `toml:"label"` // display name; empty → the key is shown
 	URL   string `toml:"url"`   // feed address (RSS or Atom; auto-detected)
+}
+
+// HeyboxConfig holds the heybox (小黑盒) circle subscriptions (M5
+// ticket 02). Circles ride an array-of-tables, not a map, for one
+// reason: declaration order is the sidebar order, and a hand edit of
+// the list (reorder, delete, comment out) must keep working — the
+// GLOSSARY's “TOML 手改永远兜底” promise.
+type HeyboxConfig struct {
+	Circles []HeyboxCircle `toml:"circles"`
+}
+
+// HeyboxCircle is one circle (圈) subscription. TopicID is the
+// circle's identity on the host and the feed key's spine
+// ("circle/<topic_id>") — stable across renames; Name is display
+// only. The search CLI fills both; a hand edit may fix either.
+type HeyboxCircle struct {
+	Name    string `toml:"name"`
+	TopicID int64  `toml:"topic_id"`
+}
+
+// HeyboxCircles returns the subscribed circles in declaration order,
+// empty when no [heybox] table exists — the nil-safe read every
+// consumer (source construction, the add CLI, doctor's census)
+// starts from.
+func (s *Sources) HeyboxCircles() []HeyboxCircle {
+	if s == nil || s.Heybox == nil {
+		return nil
+	}
+	return s.Heybox.Circles
 }
 
 // SourcesPath returns the subscription file location (for messages and
@@ -43,10 +74,11 @@ func SourcesPath() (string, error) {
 // every list source enabled, in rail order — rss starts with no
 // feeds (add some), hn, zhihu and heybox need none (their feeds are
 // fixed; zhihu's hot board and digest are anonymous, heybox's
-// recommend feed too). A fresh install therefore renders the TUI
-// happily, reads HN, the zhihu hot board and the heybox recommend
-// feed after one F5, and `rss refresh` says "no feeds" instead of
-// erroring.
+// recommend feed too — circles arrive via `heybox add` into the
+// [heybox] table, absent until then). A fresh install therefore
+// renders the TUI happily, reads HN, the zhihu hot board and the
+// heybox recommend feed after one F5, and `rss refresh` says "no
+// feeds" instead of erroring.
 func DefaultSources() *Sources {
 	return &Sources{Enabled: []string{"rss", "hn", "zhihu", "heybox"}}
 }

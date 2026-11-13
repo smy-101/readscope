@@ -1,0 +1,290 @@
+{
+ "msg": "",
+ "version": "",
+ "result": {
+  "lastval": "",
+  "sort_filter": [
+   {
+    "text": "智能排序",
+    "key": "hot-rank"
+   },
+   {
+    "text": "回复时间",
+    "key": "reply"
+   },
+   {
+    "text": "发布时间",
+    "key": "create"
+   }
+  ],
+  "links": [
+   {
+    "linkid": 196586004,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=c8dc72cd5cf1",
+    "title": "",
+    "description": "成功忽悠两个入坑[cube_滑稽]",
+    "link_award_num": 49,
+    "comment_num": 18,
+    "create_at": 1794462009,
+    "modify_at": 1794462009,
+    "user": {
+     "medal": [],
+     "is_blacklist": false,
+     "userid": "101992933",
+     "username": "白素贞",
+     "avatar": "https://imgheybox1.max-c.com/avatar/2026/10/28/ecc562c6b757b40c7f57f4eee335c2ec.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://imgheybox1.max-c.com/avatar/2026/10/28/ecc562c6b757b40c7f57f4eee335c2ec.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 8,
+      "status": 1
+     },
+     "medals": [
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 55,
+       "name": "新人作者",
+       "description": "达到作者等级 1 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 47,
+       "name": "小试牛刀",
+       "description": "累计消费 10 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "has_video": 1,
+    "content_type": 44,
+    "up": 0,
+    "down": 0
+   },
+   {
+    "linkid": 196602471,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=1db372cd9d44",
+    "title": "三遍就过了感觉小黄龙也没那么难打",
+    "description": "加点加满攻击和劈棍，带百目真人定风珠和广志，开局吃力药+棍势药+免伤药，走到boss附近开百目，蓄力三层过去劈他，劈完金身接分身，离远点蓄力四层劈一下，轻棍打一套接定风珠。这时候他差不多半血，和他拉远距离，蓄力三层上前劈，劈完继续拉开蓄力，就这样循环打他。",
+    "link_award_num": 3,
+    "comment_num": 3,
+    "create_at": 1794541329,
+    "modify_at": 1794541329,
+    "user": {
+     "medal": [],
+     "is_blacklist": false,
+     "userid": "83471993",
+     "username": "Wander928",
+     "avatar": "https://imgheybox1.max-c.com/avatar/2025/08/31/ea9c82e1b2e3964b315d31a7671a7a10.png?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://imgheybox1.max-c.com/avatar/2025/08/31/ea9c82e1b2e3964b315d31a7671a7a10.png?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 16,
+      "status": 1
+     },
+     "medals": [
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 55,
+       "name": "新人作者",
+       "description": "达到作者等级 1 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 47,
+       "name": "小试牛刀",
+       "description": "累计消费 10 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "has_video": 0,
+    "content_type": 44,
+    "up": 0,
+    "down": 0
+   },
+   {
+    "linkid": 196664961,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=375572ce915e",
+    "title": "",
+    "description": "两年前的游戏，自己配的电脑2年没有动过[cube_感动][cube_感动][cube_感动]",
+    "link_award_num": 10,
+    "comment_num": 5,
+    "create_at": 1794410828,
+    "modify_at": 1794410828,
+    "user": {
+     "medal": [],
+     "is_blacklist": false,
+     "userid": "6069744",
+     "username": "锦鲤未归",
+     "avatar": "https://imgheybox1.max-c.com/avatar/2022/01/01/33cfa69fa5452bde02bf0a4c9d0721bd.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://imgheybox1.max-c.com/avatar/2022/01/01/33cfa69fa5452bde02bf0a4c9d0721bd.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 16,
+      "status": 1
+     },
+     "medals": [
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 55,
+       "name": "新人作者",
+       "description": "达到作者等级 1 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 47,
+       "name": "小试牛刀",
+       "description": "累计消费 10 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "has_video": 0,
+    "content_type": 44,
+    "up": 0,
+    "down": 1
+   },
+   {
+    "linkid": 196664650,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=5bcc72ce9027",
+    "title": "时隔两年重新玩了一遍，感觉水平上升了不少[cube_doge]",
+    "description": "两年前通关花了80多个小时，这次就花了30多小时，不错不错[cube_耶][cube_耶][cube_耶]",
+    "link_award_num": 7,
+    "comment_num": 0,
+    "create_at": 1794389354,
+    "modify_at": 1794389354,
+    "user": {
+     "is_blacklist": false,
+     "userid": "99885077",
+     "username": "无忧无虑的小时候",
+     "avatar": "https://cdn.max-c.com/heybox/profile/avatar/heygirl_2.png?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://cdn.max-c.com/heybox/profile/avatar/heygirl_2.png?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 10,
+      "status": 1
+     },
+     "medal": [
+      {
+       "level": 0,
+       "medal_id": 47,
+       "name": "壕气冲天",
+       "description": "累计消费 2000 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png",
+       "achieved": 1,
+       "wear": 1
+      }
+     ],
+     "medals": [
+      {
+       "level": 0,
+       "medal_id": 47,
+       "name": "壕气冲天",
+       "description": "累计消费 2000 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png",
+       "achieved": 1,
+       "wear": 1
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 55,
+       "name": "新人作者",
+       "description": "达到作者等级 1 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "has_video": 0,
+    "content_type": 44,
+    "up": 0,
+    "down": 0
+   }
+  ]
+ },
+ "status": "ok"
+}

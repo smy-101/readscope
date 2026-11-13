@@ -1,14 +1,15 @@
 package heybox
 
-// source.go — the Source registration and the recommendation feed
-// (ticket 01): one anonymous, offset-paged feed of post cards
-// (GLOSSARY: 帖子卡). Every card carries the hex link_id in its
-// share_url — the detail layer's key (ticket 03) and this row's
-// identity; ad cards have no linkid and drop here. The heat snapshot
-// folds the award count and comment count (the web endpoints serve
-// `up` as a constant 0 — the smoke's fixtures pin `link_award_num`
-// as the live signal). Circle feeds (ticket 02) and the two-layer
-// detail (ticket 03) land on this same skeleton.
+// source.go — the Source registration and the list feeds: the
+// anonymous recommendation feed (ticket 01) and, one per
+// subscription, the circle feeds (ticket 02, circle.go) — both
+// offset-paged feeds of post cards (GLOSSARY: 帖子卡). Every card
+// carries the hex link_id in its share_url — the detail layer's key
+// (ticket 03) and this row's identity; ad cards have no linkid and
+// drop here. The heat snapshot folds the award count and comment
+// count (the web endpoints serve `up` as a constant 0 — the smoke's
+// fixtures pin `link_award_num` as the live signal). The two-layer
+// detail (ticket 03) lands on this same skeleton.
 
 import (
 	"context"
@@ -47,25 +48,36 @@ func init() { source.Register(ID, New) }
 
 // Source is the heybox implementation of source.Source and its
 // offset-paged extension (PagedSource — the recommend feed walks
-// /bbs/app/feeds by offset, the topic feeds of ticket 02 will join
-// it). The detail extension arrives with ticket 03; callers probe
-// with type assertions, so its absence is a non-feature.
+// /bbs/app/feeds by offset, the circle feeds of ticket 02 walk
+// /bbs/app/topic/feeds the same way). The detail extension arrives
+// with ticket 03; callers probe with type assertions, so its absence
+// is a non-feature.
 type Source struct {
 	tr *Transport
+	// feeds is the sidebar's truth: the recommend feed first, then
+	// one feed per subscribed circle in sources.toml's declaration
+	// order (the TOML order IS the sidebar order — the hand-edit
+	// promise). Built once at construction; Feeds hands out copies.
+	feeds []core.Feed
+	// topics indexes each circle feed key to its topic_id — the
+	// FetchPage dispatch's authority (a key not here and not the
+	// recommend feed is not ours).
+	topics map[string]int64
 }
 
 // The optional extensions heybox carries, pinned at compile time.
 var _ source.PagedSource = (*Source)(nil)
 
-// New builds the heybox source. The subscription config goes unused
-// today (the recommend feed is fixed; circles arrive with ticket
-// 02's [heybox] table). READSCOPE_HEYBOX_BASE overrides the API root
-// — the same override pattern zhihu honors, so tests point one fake
-// server at the transport and a proxy debug run can too. The device
-// fingerprint loads-or-mints here: a broken device file is a loud
-// error, never a silent re-mint (every refresh would otherwise greet
-// the host as a brand-new device).
-func New(*core.Sources) (source.Source, error) {
+// New builds the heybox source. The subscription config carries the
+// circle list ([heybox] table, ticket 02): every circle validates
+// here — a hand edit that breaks it fails loudly before any dial.
+// READSCOPE_HEYBOX_BASE overrides the API root — the same override
+// pattern zhihu honors, so tests point one fake server at the
+// transport and a proxy debug run can too. The device fingerprint
+// loads-or-mints here: a broken device file is a loud error, never a
+// silent re-mint (every refresh would otherwise greet the host as a
+// brand-new device).
+func New(srcs *core.Sources) (source.Source, error) {
 	base := ProdBase
 	if v := os.Getenv("READSCOPE_HEYBOX_BASE"); v != "" {
 		base = v
@@ -92,54 +104,83 @@ func New(*core.Sources) (source.Source, error) {
 			return nil, err
 		}
 	}
-	return &Source{tr: NewTransport(base, device, WithMinGap(minGap))}, nil
+	s := newSource(NewTransport(base, device, WithMinGap(minGap)))
+	if err := s.loadCircles(srcs); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// newSource seeds one source with its fixed recommend feed — the
+// constructor both New and the test builder funnel through, so the
+// feed list is never empty by accident.
+func newSource(tr *Transport) *Source {
+	s := &Source{tr: tr, topics: map[string]int64{}}
+	s.feeds = []core.Feed{{
+		Key:      RecommendFeedKey,
+		LabelKey: recommendLabelKey,
+		URL:      tr.base + recommendPath,
+		// The algorithmic stream orders by the card's own clock
+		// (modify/create, newest first) — ListSortTime, the zero
+		// value, the same call the zhihu follow feed makes.
+	}}
+	return s
 }
 
 // newSourceAt is the test constructor: a transport pinned to one base
-// with explicit options (fake server, zero delay).
+// with explicit options (fake server, zero delay). Tests grow circles
+// on top via loadCircles or the field itself.
 func newSourceAt(base string, opts ...TransportOpt) *Source {
-	return &Source{tr: NewTransport(base, "0123456789abcdef0123456789abcdef", opts...)}
+	return newSource(NewTransport(base, "0123456789abcdef0123456789abcdef", opts...))
 }
 
 // ID implements source.Source.
 func (s *Source) ID() string { return ID }
 
-// Feeds implements source.Source: the recommendation feed alone
-// until ticket 02's circles join (each circle one feed, sidebar
-// order).
+// Feeds implements source.Source: the recommendation feed first,
+// then one feed per subscribed circle in sources.toml's declaration
+// order (sidebar order). With no circles subscribed the recommend
+// feed stands alone — the spec's "无圈时源仍可用".
 func (s *Source) Feeds() []core.Feed {
-	return []core.Feed{
-		{
-			Key:      RecommendFeedKey,
-			LabelKey: recommendLabelKey,
-			URL:      s.tr.base + recommendPath,
-			// The algorithmic stream orders by the card's own clock
-			// (modify/create, newest first) — ListSortTime, the zero
-			// value, the same call the zhihu follow feed makes.
-		},
-	}
+	out := make([]core.Feed, len(s.feeds))
+	copy(out, s.feeds)
+	return out
 }
 
-// Fetch implements source.Source: the recommend feed's first page —
+// Fetch implements source.Source: the given feed's first page —
 // FetchPage's page 0 under the plain-Source contract (a plain Fetch
 // is what the doctor-style single pulls ride).
 func (s *Source) Fetch(ctx context.Context, f core.Feed) ([]core.Item, error) {
 	return s.FetchPage(ctx, f, 0)
 }
 
-// FetchPage implements source.PagedSource: one recommend-feed page,
-// offset == page (P15's measured paging — offset 1 served page two
-// with zero overlap). An empty page is the feed's end signal, per
-// the interface contract.
+// FetchPage implements source.PagedSource: one page of the recommend
+// feed or a circle feed, offset == page (P15's measured paging —
+// offset 1 served page two with zero overlap, measured on the topic
+// endpoint the circles ride). An empty page is the feed's end signal,
+// per the interface contract.
 func (s *Source) FetchPage(ctx context.Context, f core.Feed, page int) ([]core.Item, error) {
-	if f.Key != RecommendFeedKey {
-		return nil, fmt.Errorf("fetch %s: unknown heybox feed", f.Key)
+	if f.Key == RecommendFeedKey {
+		return s.fetchCards(ctx, f, "recommend-feed", recommendPath, url.Values{
+			"offset": {strconv.Itoa(page)},
+			"pull":   {"0"},
+			"dw":     {"800"},
+		})
 	}
-	res := s.tr.Get(ctx, "recommend-feed", recommendPath, url.Values{
-		"offset": {strconv.Itoa(page)},
-		"pull":   {"0"},
-		"dw":     {"800"},
-	})
+	if _, ok := s.topics[f.Key]; ok {
+		return s.fetchCirclePage(ctx, f, page)
+	}
+	return nil, fmt.Errorf("fetch %s: unknown heybox feed", f.Key)
+}
+
+// fetchCards runs one list page through the shared pipeline — dial,
+// peel the envelope, map cards to rows, drop ads and the page's own
+// repeats. Both list endpoints (/bbs/app/feeds P14, /bbs/app/
+// topic/feeds P15/08) serve the same link array, which is why the
+// recommend feed and the circle feeds differ in nothing but their
+// parameters (circle.go).
+func (s *Source) fetchCards(ctx context.Context, f core.Feed, name, path string, extra url.Values) ([]core.Item, error) {
+	res := s.tr.Get(ctx, name, path, extra)
 	if res.Err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", f.Key, res.Err)
 	}
@@ -152,7 +193,7 @@ func (s *Source) FetchPage(ctx context.Context, f core.Feed, page int) ([]core.I
 	now := time.Now().UTC()
 	items, seen := make([]core.Item, 0, len(pageResult.Links)), map[string]bool{}
 	for _, card := range pageResult.Links {
-		it, ok := cardItem(card, now)
+		it, ok := cardItem(card, f.Key, now)
 		if !ok || seen[it.ID] {
 			continue // ad card / degenerate card, or the page's own repeat
 		}
@@ -189,14 +230,17 @@ const itemIDPrefix = "hb:link/"
 // the detail-layer key are the same string however the card arrived.
 func ItemID(hexID string) string { return itemIDPrefix + hexID }
 
-// cardItem maps one list card to its row (GLOSSARY: 帖子卡). Ad cards
-// (no linkid — content_type 23's banners) and cards without a hex id
-// in share_url are not rows, not errors: no hex id means no detail
-// key and no stable identity, and half a row is worse than none.
-// Text posts ride the description as title excerpt and full body
-// snapshot; the heat snapshot folds award + comment counts; the card
-// clock (modify wins — an edited post re-surfaces) orders the feed.
-func cardItem(c linkCard, now time.Time) (core.Item, bool) {
+// cardItem maps one list card to its row (GLOSSARY: 帖子卡) under
+// the feed it arrived in — the row carries the circle's feed key so
+// the store's ownership check passes and the sidebar counts land on
+// the right circle. Ad cards (no linkid — content_type 23's banners)
+// and cards without a hex id in share_url are not rows, not errors:
+// no hex id means no detail key and no stable identity, and half a
+// row is worse than none. Text posts ride the description as title
+// excerpt and full body snapshot; the heat snapshot folds award +
+// comment counts; the card clock (modify wins — an edited post
+// re-surfaces) orders the feed.
+func cardItem(c linkCard, feedKey string, now time.Time) (core.Item, bool) {
 	hexID := hexIDFromShareURL(c.ShareURL)
 	if hexID == "" {
 		return core.Item{}, false
@@ -212,7 +256,7 @@ func cardItem(c linkCard, now time.Time) (core.Item, bool) {
 	it := core.Item{
 		ID:          ItemID(hexID),
 		Source:      ID,
-		Feed:        RecommendFeedKey,
+		Feed:        feedKey,
 		Title:       title,
 		URL:         c.ShareURL,
 		Author:      c.User.Username,

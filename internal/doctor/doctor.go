@@ -18,6 +18,7 @@ import (
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/i18n"
 	"github.com/smy-101/readscope/internal/refresh"
+	"github.com/smy-101/readscope/internal/source/heybox"
 	"github.com/smy-101/readscope/internal/source/rss"
 	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
@@ -63,6 +64,7 @@ func run(w io.Writer, cfg *core.Config, version string, probe Probe) bool {
 		named(cat, "doctor.i18n_load", checkI18n),
 		named(cat, "doctor.theme_load", checkThemes),
 		zhihuCookieCheck(cat),
+		heyboxCheck(cat),
 	}
 	okCount := 0
 	for _, c := range checks {
@@ -234,6 +236,70 @@ func checkThemes() error {
 		}
 	}
 	return nil
+}
+
+// heyboxCheck reports the heybox source's subscription-and-cache
+// state — the spec's "doctor 报圈数与最近拉取结果": how many circles
+// sources.toml carries (the table validating cleanly on the way in)
+// and when content last landed in the offline cache. It never dials
+// the host (CI runs offline; reachability is what the feeds section
+// below is for), so "never fetched" is the honest fresh-install
+// note, not a failure. A broken [heybox] table — the one thing a
+// user can break by hand — fails the check naming the entry.
+func heyboxCheck(cat *i18n.Catalog) check {
+	label := cat.Get("doctor.heybox")
+	srcs, err := core.LoadSources()
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	circles, err := heybox.ValidateCircles(srcs)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	path, err := store.DefaultPath()
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	defer st.Close()
+	ctx := context.Background()
+	last, ok, err := st.LastFetched(ctx, heybox.ID)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	if !ok {
+		return check{label: label, note: cat.Get("doctor.heybox_never", len(circles))}
+	}
+	counted, err := st.FeedCounts(ctx, heybox.ID)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	total := 0
+	for _, c := range counted {
+		total += c.Total
+	}
+	return check{label: label, note: cat.Get("doctor.heybox_state", len(circles), total, relTime(cat, last))}
+}
+
+// relTime renders a coarse relative age through the same time.*
+// keys the UI's list column rides — doctor speaks the app's
+// language packs instead of inventing its own clock strings (the
+// ui Model.relTime twin, one package shallower).
+func relTime(cat *i18n.Catalog, t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return cat.Get("time.now")
+	case d < time.Hour:
+		return cat.Get("time.minutes", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return cat.Get("time.hours", int(d.Hours()))
+	default:
+		return cat.Get("time.days", int(d.Hours()/24))
+	}
 }
 
 // zhihuCookieCheck reports the zhihu cookie file's state. 未配置 is

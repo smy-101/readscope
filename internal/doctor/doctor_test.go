@@ -15,6 +15,7 @@ import (
 
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/source/zhihu"
+	"github.com/smy-101/readscope/internal/store"
 )
 
 func runDoctor(t *testing.T) (string, bool) {
@@ -95,18 +96,24 @@ func TestRunAllPass(t *testing.T) {
 	for _, label := range []string{
 		"config directory", "state directory", "open database",
 		"database schema", "language packs", "themes", "zhihu cookie",
+		"heybox source",
 	} {
 		if !strings.Contains(out, label) {
 			t.Errorf("report missing check %q:\n%s", label, out)
 		}
 	}
-	if !strings.Contains(out, "7 checks: 7 ok, 0 failed") {
+	if !strings.Contains(out, "8 checks: 8 ok, 0 failed") {
 		t.Errorf("summary line wrong:\n%s", out)
 	}
 	// No cookie file is the anonymous mode: a pass with a note, not a
 	// failure — hot/daily work without a session.
 	if !strings.Contains(out, "not configured") {
 		t.Errorf("anonymous cookie state should carry its note:\n%s", out)
+	}
+	// A fresh install carries no circles and no cache: the heybox
+	// line's honest note, a pass never a failure.
+	if !strings.Contains(out, "0 circles · never fetched") {
+		t.Errorf("fresh heybox state should carry its note:\n%s", out)
 	}
 }
 
@@ -228,5 +235,61 @@ func TestRunDetectsBrokenDB(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "✗") {
 		t.Errorf("expected a failure marker:\n%s", buf.String())
+	}
+}
+
+// TestHeyboxLineReportsCirclesAndLastFetch: a healthy subscription
+// with cached content renders the census note — circle count, cached
+// item count, and the age of the last fetch that moved content
+// (doctor never dials the host; the cache is the witness).
+func TestHeyboxLineReportsCirclesAndLastFetch(t *testing.T) {
+	writeSources(t, "enabled = [\"heybox\"]\n\n[[heybox.circles]]\nname = \"黑神话：悟空\"\ntopic_id = 568547\n")
+	path, err := store.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	fetched := time.Now().UTC().Add(-5 * time.Minute)
+	items := []core.Item{
+		{ID: "hb:link/aa", Source: "heybox", Feed: "circle/568547", Title: "帖一", URL: "https://x", FetchedAt: fetched},
+		{ID: "hb:link/bb", Source: "heybox", Feed: "circle/568547", Title: "帖二", URL: "https://x", FetchedAt: fetched},
+		{ID: "hb:link/cc", Source: "heybox", Feed: "recommend", Title: "帖三", URL: "https://x", FetchedAt: fetched},
+	}
+	if _, _, err := st.SaveFeedItems(context.Background(), "heybox", "circle/568547", items[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.SaveFeedItems(context.Background(), "heybox", "recommend", items[2:]); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := core.Defaults()
+	cfg.Language = "en" // pin the pack: the note's wording is asserted
+	var buf bytes.Buffer
+	if ok := run(&buf, cfg, "test", nil); !ok {
+		t.Fatalf("a healthy heybox state must pass doctor:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "1 circles · 3 cached items · fetched 5m") {
+		t.Errorf("heybox note wrong:\n%s", buf.String())
+	}
+}
+
+// TestHeyboxBrokenCircleTableFails: the one thing a hand edit can
+// break — a circle row without a usable topic_id — fails the check
+// naming the entry instead of passing silently.
+func TestHeyboxBrokenCircleTableFails(t *testing.T) {
+	writeSources(t, "enabled = [\"heybox\"]\n\n[[heybox.circles]]\nname = \"坏圈\"\ntopic_id = 0\n")
+	var buf bytes.Buffer
+	if ok := run(&buf, core.Defaults(), "test", nil); ok {
+		t.Fatalf("a broken circle table must fail doctor:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "topic_id must be positive") {
+		t.Errorf("failure should name the broken entry:\n%s", buf.String())
 	}
 }

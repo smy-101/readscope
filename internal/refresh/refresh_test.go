@@ -1245,3 +1245,148 @@ func TestRefreshHeyboxTracerBullet(t *testing.T) {
 		t.Fatalf("offline cache: %d rows, %v — the snapshot must outlive the host", len(rows), err)
 	}
 }
+
+// TestRefreshHeyboxCirclesTracerBullet: two subscribed circles on
+// one fake host — the multi-circle contract of ticket 02. Each
+// circle's feed keys its own paging depth (a Ctrl+N on one never
+// advances the other), and a card served in both the recommend feed
+// and a circle re-homes its single row between them — the HN
+// Front/New roaming semantic, pinned here so nobody "fixes" it into
+// a duplicate.
+func TestRefreshHeyboxCirclesTracerBullet(t *testing.T) {
+	card := func(hex string, ts int64) string {
+		return fmt.Sprintf(`{"linkid":%d,"share_url":"https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=%s",`+
+			`"title":"帖子 %s","description":"正文","link_award_num":1,"comment_num":2,`+
+			`"create_at":%d,"modify_at":%d,"user":{"username":"玩家"}}`, 1000+len(hex), hex, hex, ts, ts)
+	}
+	page := func(hexes ...string) string {
+		links := make([]string, 0, len(hexes))
+		for _, hex := range hexes {
+			links = append(links, card(hex, 1794500000))
+		}
+		return fmt.Sprintf(`{"msg":"","result":{"links":[%s]},"status":"ok"}`, strings.Join(links, ","))
+	}
+	// The host serves by (topic_id, offset): circle 1 pages
+	// aa→bb→end, circle 2 one full page then an empty one,
+	// recommend one page of dd.
+	pages := map[string]map[string]string{
+		"111": {"0": page("aaaa00000001", "aaaa00000002"), "1": page("bbbb00000001"), "2": `{"msg":"","result":{"links":[]},"status":"ok"}`},
+		"222": {"0": page("cccc00000001"), "1": `{"msg":"","result":{"links":[]},"status":"ok"}`},
+		"":    {"0": page("dddd00000001")}, // recommend: no topic_id param
+	}
+	var mu sync.Mutex
+	var dialed []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		dialed = append(dialed, r.URL.Query().Get("topic_id")+"@"+r.URL.Query().Get("offset"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, pages[r.URL.Query().Get("topic_id")][r.URL.Query().Get("offset")])
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_HEYBOX_BASE", srv.URL)
+	t.Setenv("READSCOPE_HEYBOX_MINGAP", "0")
+	t.Setenv("READSCOPE_HEYBOX_DEVICE", "0123456789abcdef0123456789abcdef")
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "heybox.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srcs := core.DefaultSources()
+	srcs.Heybox = &core.HeyboxConfig{Circles: []core.HeyboxCircle{
+		{Name: "圈一", TopicID: 111},
+		{Name: "圈二", TopicID: 222},
+	}}
+
+	// F5 the whole source: every feed refreshes, one Result each.
+	results, err := Source(context.Background(), st, srcs, "heybox")
+	if err != nil {
+		t.Fatalf("Source: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("got %d results, want 3 feeds (recommend + 2 circles)", len(results))
+	}
+	for _, r := range results {
+		if r.Err != nil || r.New == 0 {
+			t.Fatalf("feed %s: %+v — every feed should land its first page", r.Feed, r)
+		}
+	}
+
+	// Ctrl+N on circle one only: it walks 111@1 (bb lands), then
+	// 111@2 reports the end. Circle two's depth never moved: its
+	// own Ctrl+N dials 222@1 (empty, end) — F5 floored it at 1, so
+	// the walk starts after the cached page. The recommend feed's
+	// depth is its own as well.
+	if _, end, err := More(context.Background(), st, srcs, "heybox", "circle/111"); err != nil || end {
+		t.Fatalf("circle/111 first More: end=%v err=%v", end, err)
+	}
+	if _, end, err := More(context.Background(), st, srcs, "heybox", "circle/111"); err != nil || !end {
+		t.Fatalf("circle/111 second More should report the end: end=%v err=%v", end, err)
+	}
+	if _, end, err := More(context.Background(), st, srcs, "heybox", "circle/222"); err != nil || !end {
+		t.Fatalf("circle/222 More should hit its empty page 1 and report the end: end=%v err=%v", end, err)
+	}
+	mu.Lock()
+	got := slices.Clone(dialed)
+	mu.Unlock()
+	// F5×3 (recommend @0 first, then circles in order), the three
+	// walks: 111@1, 111@2, 222@1 — depths never crossed.
+	if want := []string{"@0", "111@0", "222@0", "111@1", "111@2", "222@1"}; !slices.Equal(got, want) {
+		t.Fatalf("the host saw dials %v, want %v — per-circle paging depth must not cross", got, want)
+	}
+
+	// Circle one holds its three rows; circle two its one.
+	for feed, want := range map[string]int{"circle/111": 3, "circle/222": 1, "recommend": 1} {
+		n, err := st.CountFeed(context.Background(), "heybox", feed)
+		if err != nil || n != want {
+			t.Fatalf("count %s = %d (%v), want %d", feed, n, err, want)
+		}
+	}
+
+	// Re-homing: a card that shows up in the recommend feed after
+	// living in a circle moves its single row — no duplicate, read
+	// state riding along (the HN Front/New semantic). Rows the page
+	// no longer serves stay cached where they were (dd remains in
+	// recommend — a refresh upserts, it never prunes).
+	if err := st.SetRead(context.Background(), "hb:link/cccc00000001", true); err != nil {
+		t.Fatalf("SetRead: %v", err)
+	}
+	mu.Lock()
+	dialed = nil
+	mu.Unlock()
+	pages[""]["0"] = page("cccc00000001") // recommend now serves circle two's card
+	if _, err := Feed(context.Background(), st, srcs, "heybox", "recommend"); err != nil {
+		t.Fatalf("recommend re-fetch: %v", err)
+	}
+	if n, _ := st.CountFeed(context.Background(), "heybox", "recommend"); n != 2 {
+		t.Fatalf("recommend count = %d, want 2 — dd stays cached, cc re-homes in", n)
+	}
+	if n, _ := st.CountFeed(context.Background(), "heybox", "circle/222"); n != 0 {
+		t.Fatalf("circle/222 count = %d, want 0 — the row moved, not copied", n)
+	}
+	rows, err := st.FeedItems(context.Background(), "heybox", "recommend", false)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("recommend rows: %d, %v", len(rows), err)
+	}
+	if !slices.ContainsFunc(rows, func(r store.ItemRow) bool {
+		return r.Item.ID == "hb:link/cccc00000001" && r.Read
+	}) {
+		t.Fatal("the re-homed row must keep its read state")
+	}
+
+	// The sidebar's census sees both circles (doctor and the TUI
+	// read the same shape).
+	counts, err := st.FeedCounts(context.Background(), "heybox")
+	if err != nil {
+		t.Fatalf("FeedCounts: %v", err)
+	}
+	for _, feed := range []string{"recommend", "circle/111"} {
+		if _, ok := counts[feed]; !ok {
+			t.Errorf("FeedCounts missing %s: %v", feed, counts)
+		}
+	}
+}
