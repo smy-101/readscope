@@ -311,20 +311,31 @@ func TestReopenIsCacheFirstThenSilentRefresh(t *testing.T) {
 	m, cmd := openHNDetailCmd(t, fewerFloors, base)
 
 	// The open fans out [comments load, silent mark-read] as one
-	// batch; the comments leg (first member) carries the cache-first
-	// sequencing this test pins. Only the cache leg has run so far:
-	// 2 cached floors, no server hit yet.
+	// batch; member order is an implementation detail, so dispatch on
+	// the message each leg returns. Only the cache leg has run so
+	// far: 2 cached floors, no server hit yet.
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok {
 		t.Fatalf("open should batch comments+mark, got %T", cmd())
 	}
-	msg := batch[0]()
-	res, next := m.Update(msg)
-	m = res.(Model)
+	var next tea.Cmd
+	for _, leg := range batch {
+		msg := leg()
+		switch msg.(type) {
+		case commentsMsg: // the cache-first comments leg this test pins
+			res, n := m.Update(msg)
+			m = res.(Model)
+			next = n // the background refresh fetch
+		case stateSavedMsg: // the silent mark; its reload chain follows
+			res, n := m.Update(msg)
+			m = pump(t, res.(Model), n)
+		default:
+			t.Fatalf("unexpected batch member: %T", msg)
+		}
+	}
 	if !strings.Contains(m.View(), "2 floors") || *hits != 0 {
 		t.Fatalf("cache leg must render before any network: hits=%d\n%s", *hits, m.View())
-	}
-	m = pump(t, m, batch[1]) // the silent mark lands too
+		}
 
 	// The refresh leg lands silently: 3 floors, no status noise.
 	m = pump(t, m, next)

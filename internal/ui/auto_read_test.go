@@ -38,8 +38,10 @@ func TestOpenMarksReadSilently(t *testing.T) {
 	m = openFirstRSS(t, m)
 
 	// Silent: the auto mark must not flash "marked read" — that is the
-	// manual toggles' feedback, and every Enter would be noise.
-	if strings.Contains(m.status, "marked read") {
+	// manual toggles' feedback, and every Enter would be noise. The
+	// assertion reads the string through the i18n catalog, not hardcoded
+	// English (decision #8).
+	if strings.Contains(m.status, m.cat.Get("status.marked_read")) {
 		t.Fatalf("auto mark should be silent, status = %q", m.status)
 	}
 	// Esc back: the opened row lost its dot, sidebar count dropped.
@@ -48,7 +50,7 @@ func TestOpenMarksReadSilently(t *testing.T) {
 	if n := strings.Count(view, "●"); n != 2 {
 		t.Fatalf("after open+Esc: unread dots = %d, want 2:\n%s", n, view)
 	}
-	if !strings.Contains(view, "2 new") {
+	if !strings.Contains(view, m.cat.Get("status.new", 2)) {
 		t.Fatalf("sidebar count should read 2 new:\n%s", view)
 	}
 }
@@ -101,7 +103,7 @@ func TestOpenThenCtrlRInDetailMarksUnreadAgain(t *testing.T) {
 	// The manual toggle still talks: Ctrl+R in the detail flips the
 	// auto-marked item back to unread, with its status flash intact.
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
-	if !strings.Contains(m.status, "marked unread") {
+	if !strings.Contains(m.status, m.cat.Get("status.marked_unread")) {
 		t.Fatalf("manual Ctrl+R should keep its status, got %q", m.status)
 	}
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEsc})
@@ -133,7 +135,7 @@ func TestOpenMarksReadOnHN(t *testing.T) {
 	// feeds — the single HN story loses its dot after one open.
 	base, _ := hnDetailServer(t, hnDetailJSON())
 	m := openHNDetail(t, nil, base)
-	if strings.Contains(m.status, "marked read") {
+	if strings.Contains(m.status, m.cat.Get("status.marked_read")) {
 		t.Fatalf("auto mark should be silent, status = %q", m.status)
 	}
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEsc})

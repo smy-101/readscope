@@ -30,3 +30,6 @@ GLOSSARY「未读点」词条早已写明"打开即消,Ctrl+R 可恢复"——�
 - 实现落点:`openDetail` 对未读条目翻转详情副本 `Read` 并批 `markOpenedReadCmd`(app.go,静默变体,空 status 走同一条 stateSavedMsg 重载链);已读条目零命令。副本翻转是详情内 Ctrl+R 语义正确的前提(否则切出"再标已读")。
 - 测试基建:pump/hn 中途态驱动补了 tea.BatchMsg 递归展开(镜像运行时并发展开)——打开详情现在天然是[评论拉取+静默标读]双命令,单命令时代"Batch 压缩回原命令"的偶然依赖不再成立。
 - 语义翻转波及三条旧测:详情内 Ctrl+R 从"标已读"变"切回未读"(TestDetailCtrlRCtrlF / TestReadAndStarFromCommentLayers),TestReopenIsCacheFirstThenSilentRefresh 手动展开批取评论腿保序。
+- **Review 轮(2026-11-13,两轴均 OK 后修复)**:
+  - Standards:①markOpenedReadCmd 与 setReadCmd 形状重复 → 抽出共享 writeReadCmd,两个策略包装(手动带状态、打开即读静默);②改名 markReadOnOpenCmd,消除与 GLOSSARY「开帖标记」avoid 词"opened 位"的擦边;③批解包改按消息类型分发(commentsMsg/stateSavedMsg),不再钉 Batch 成员顺序;④新测试断言改走 i18n 目录(cat.Get),不再硬编码英文串(决策 #8;旧套件的同类硬编码是全局惯例,留待专项清扫);⑤PLAN §7 键位表 Enter 行同步补注。
+  - Spec:写失败腿也触发重载(stateSavedMsg 错误分支返回 loadFeedsCmd),库为真、列表收敛,不再与乐观翻转的副本分歧。

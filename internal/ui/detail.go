@@ -196,7 +196,7 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 	var markCmd tea.Cmd
 	if !d.item.Read {
 		d.item.Read = true
-		markCmd = m.markOpenedReadCmd(d.item.Item.ID)
+		markCmd = m.markReadOnOpenCmd(d.item.Item.ID)
 	}
 	if d.hasDetail {
 		return true, tea.Batch(m.readCommentsCmd(d.item.Item), bodyCmd, markCmd)

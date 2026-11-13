@@ -188,15 +188,31 @@ func (m Model) loadItemsCmd() tea.Cmd {
 	}
 }
 
-// setReadCmd writes one item's read flag; the reload chain (started by
-// stateSavedMsg) refreshes the list row, dimming and sidebar counts.
+// setReadCmd writes one item's read flag with the manual toggle's
+// status flash; the reload chain (started by stateSavedMsg) refreshes
+// the list row, dimming and sidebar counts.
 func (m Model) setReadCmd(id string, read bool) tea.Cmd {
-	if m.st == nil {
-		return nil
-	}
 	status := m.cat.Get("status.marked_read")
 	if !read {
 		status = m.cat.Get("status.marked_unread")
+	}
+	return m.writeReadCmd(id, read, status)
+}
+
+// markReadOnOpenCmd writes the open-as-read mark with no status
+// flash: opening the item is its own feedback, and every Enter
+// flashing "marked read" would be noise. Same write, same reload
+// chain as the manual toggles — dots, dimming and sidebar counts
+// follow for free.
+func (m Model) markReadOnOpenCmd(id string) tea.Cmd {
+	return m.writeReadCmd(id, true, "")
+}
+
+// writeReadCmd is the one SetRead write both read-flag paths share;
+// an empty status lands silent (the stateSavedMsg handler skips it).
+func (m Model) writeReadCmd(id string, read bool, status string) tea.Cmd {
+	if m.st == nil {
+		return nil
 	}
 	st := m.st
 	return func() tea.Msg {
@@ -204,24 +220,6 @@ func (m Model) setReadCmd(id string, read bool) tea.Cmd {
 			return stateSavedMsg{err: err}
 		}
 		return stateSavedMsg{status: status}
-	}
-}
-
-// markOpenedReadCmd writes the open-as-read mark with no status
-// flash: opening the item is its own feedback, and every Enter
-// flashing "marked read" would be noise. It lands in the same
-// stateSavedMsg reload chain as the manual toggles — dots, dimming
-// and sidebar counts follow for free.
-func (m Model) markOpenedReadCmd(id string) tea.Cmd {
-	if m.st == nil {
-		return nil
-	}
-	st := m.st
-	return func() tea.Msg {
-		if err := st.SetRead(context.Background(), id, true); err != nil {
-			return stateSavedMsg{err: err}
-		}
-		return stateSavedMsg{} // status stays untouched (silent)
 	}
 }
 
@@ -422,7 +420,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stateSavedMsg:
 		if msg.err != nil {
 			m.status = m.cat.Get("errors.db_write", msg.err)
-			return m, nil
+			// A failed write still reloads: the store is the truth the
+			// list must converge on even when a reader's copy flipped
+			// optimistically (the open-as-read path does exactly that).
+			return m, m.loadFeedsCmd()
 		}
 		if msg.status != "" {
 			m.status = msg.status
