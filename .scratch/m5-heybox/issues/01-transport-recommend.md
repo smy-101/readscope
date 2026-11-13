@@ -4,7 +4,7 @@
 
 **Blocked by:** 无(可立即开始)。
 
-**Status:** ready-for-review
+**Status:** done (2026-11-13,agent 侧;双轴评审已过——P1 页间隙账本提为包级 dialLedger 跨 transport 生效,真网文案校准与手感查走归 04 号票)
 
 - [x] 启用 heybox 后源栏出现小黑盒,推荐流 F5 拉取成功,条目显示标题/摘要/作者/赞数/评论数(摘要落 Body 快照,标题列照全源惯例;02 票前无 doctor 行)
 - [x] 签名器对 4 组参考向量(原版 JS 固定输入生成)恒测通过;签名只依赖 canonical path(另有 B 变体随版本开关一并入册,同样恒测)
@@ -15,3 +15,7 @@
 - [x] 断网重启后列表即现、条目可读;页间延时可观察(无 429)(传输层 1.5s 预间隙,账本跨 transport 按基址共享——F5/Ctrl+N 各自新建 source 也能起效,可观察测试入 transport_test)
 - [x] 新增 UI 文案 zh-CN/en 双语齐备,语言包完整性测试过
 - [x] httptest 假小黑盒 + 冒烟样本 fixtures 覆盖传输矩阵与列表解析;CI 恒离线(P14 裁剪样本转正 testdata/recommend-page.json)
+
+## Comments
+
+**评审(2026-11-13,Standards+Spec 双轴,并行子代理,044a24f..fab11c5)**:Spec 轴 P1 已修——页间延时原是死代码(运行时每次 F5/Ctrl+N 新建 source/transport,per-transport lastReq 永不触发,README 礼貌限速承诺为假):账本提为包级 dialLedger 按基址共享、跨 transport 生效(仅进程内,重启即空窗);TestTransportGapSpansTransports 钦住;READSCOPE_HEYBOX_MINGAP(ms)可缩放间隙,测试归零、真网 smoke 可调。P2 保留:heybox 默认开启随 zhihu 滚动先例(F5 是用户意图,无后台拨号);cookie 钩子 spec 预留未建,transport 头注释标明将来挂点。Standards 轴:WithClient 删除(零调用者,注释谎称有测试用例);两处小写十六进制 rune 循环合并为 isLowerHex;heyboxMeta/hnMeta 近重复按全源 meta 路由的房屋风格保留;sign.go 不透明命名(zA/jA/oA)保持原实现拼写,端口可逐行对照、参考向量钦住。

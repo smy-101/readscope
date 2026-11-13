@@ -4,7 +4,7 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done (2026-11-11,agent 侧;实现+双轴评审同日落地,真网 smoke 归 M3 收尾票)
 
 - [x] 三层进出:Enter 进下一层(有内容时)、Esc 逐层退;层间焦点与滚动状态不丢
 - [x] 楼层头 `author · score · N replies`;无回复的楼层按 Enter 不进入

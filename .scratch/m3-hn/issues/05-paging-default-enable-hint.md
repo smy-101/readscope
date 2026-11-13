@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done (2026-11-11,agent 侧;实现+双轴评审同日落地,真网 smoke 归 M3 收尾票)
 
 - [x] Ctrl+N 追加下一页:不产生重复行、已读状态保持;状态栏反馈加载/失败/到底
 - [x] F5 仍刷第一页;Ctrl+N 追加与 F5 刷新语义互不破坏 → review 转入(spec 决策:F5 = 重拉**当前 feed** 第一页):当前 F5 走 refresh.Source 刷全源四 feed(源无关机制,可见需求成立,代价 3 个多余 GET);本票做页感知拉取时一并改作 feed 级刷新

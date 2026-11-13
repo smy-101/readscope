@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done (2026-11-12,agent 侧;真网判定全绿——免签直连成立,止损阶梯未动用,评审 d4e8bd4)
 
 - [x] `readscope zhihu probe` 逐端点探测:HTTP 状态 + 结构解析摘要,原始样本落盘 `.scratch/m4-zhihu/samples/`(目录已 gitignore,关注流含个人数据)
 - [x] cookie 文件读取与注入(缺失时免登录端点照跑,登录端点 SKIPPED-NO-COOKIE)→ 多行粘贴规范化拼接,z_c0/d_c0 判活,cookie 值永不进输出

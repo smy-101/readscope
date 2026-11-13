@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done (2026-11-11,agent 侧;实现+双轴评审同日落地,真网 smoke 归 M3 收尾票)
 
 - [x] Tab 切到 HN:边栏四类 feed,标签双语(zh-CN / en),i18n 键树一致
 - [x] 四类 feed 分别映射 `front_page` / `search_by_date` / `ask_hn` / `show_hn`,列表按返回序渲染 →映射与入库已落地;front/ask/show 的返回序=points 序排序已随 02 交付(feedDefs 声明 ListSortPoints,列表按快照列稳定排序;02 号票测试覆盖)
