@@ -1,0 +1,1051 @@
+{
+ "msg": "",
+ "result": {
+  "links": [
+   {
+    "has_video": 0,
+    "use_concept_type": 0,
+    "up": 0,
+    "act_hashtags": [],
+    "hb_rich_texts": [],
+    "content_tags": [],
+    "list_content_tags": [],
+    "linkid": 196692736,
+    "userid": 55409690,
+    "title": "背刺拉满！Steam新一轮史低疯跌，闭眼入不亏",
+    "description": "懂的都懂，Steam玩家最大的痛就是原价入手转头就被背刺。这次我筛了一批实打实的史低游戏，没有凑数，也不玩虚标折扣那套。想买的先别急着掏钱，点开看看有没有你一直放愿望单的那一款，毕竟真史低不是天天有。epic喜加一近月少女的礼仪系列仙剑奇侠传系列真探系列A",
+    "link_type": 1,
+    "link_tag": 1,
+    "is_web": 1,
+    "comment_num": 102,
+    "link_award_num": 2108,
+    "down": 21,
+    "create_at": 1794410349,
+    "modify_at": 1794546228,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=236172cefddd",
+    "vertical": 0,
+    "topics": [
+     {
+      "topic_id": 425422,
+      "name": "Steam",
+      "pic_url": "https://cdn.max-c.com/mobile/app/icon/ccb3c23e275bef48aa7863ac5609ce8b.png",
+      "app_id": 99928013,
+      "game_type": "mobile",
+      "hot_value_v2": 97464599.6
+     }
+    ],
+    "hashtags": [
+     {
+      "name": "steam游戏",
+      "hashtag_id": 3856
+     },
+     {
+      "name": "单机游戏",
+      "hashtag_id": 1936
+     },
+     {
+      "name": "单机游戏专项创作计划",
+      "hashtag_id": 266572
+     },
+     {
+      "name": "游戏推荐",
+      "hashtag_id": 687
+     }
+    ],
+    "imgs": [
+     "https://imgheybox1.max-c.com/bbs/2026/11/11/a27f85442ae39a67e9f05b664a94920b/thumb.jpeg?imageMogr2/auto-orient/ignore-error/1/format/jpg"
+    ],
+    "thumbs": [
+     "https://imgheybox1.max-c.com/bbs/2026/11/11/a27f85442ae39a67e9f05b664a94920b/thumb.jpeg?imageMogr2/auto-orient/ignore-error/1/format/jpg/thumbnail/850x1450%3E"
+    ],
+    "positions": {
+     "imgs": [
+      {
+       "top": 0,
+       "left": 0,
+       "width": 459,
+       "height": 287
+      }
+     ],
+     "img_cnt": 1
+    },
+    "img_text_margin": 8,
+    "content_type": 44,
+    "top_view_type": 4,
+    "content_view_type": 1,
+    "bottom_view_type": 3,
+    "hide_comment": 0,
+    "forward_num": 6,
+    "bottom_rich_text": {
+     "type": "stack",
+     "height": 18,
+     "models": [
+      {
+       "type": "stack",
+       "inset": {
+        "top": 0,
+        "bottom": 0,
+        "left": 2,
+        "right": 6
+       },
+       "height": 18,
+       "corner_radius": 2,
+       "background_color": "#F3F4F5#232526",
+       "models": [
+        {
+         "protocol": "heybox://{\"protocol_type\":\"openRouterPath\",\"path\":\"/bbs/topic\",\"params\":{\"h_src\":\"YmJzX3dlYl9mZWVkc19fcmVjYWxsX18yNV9fdHlwZV92Ml9fMV9fc2hvd190eXBlX19zaG93X3dpdGhvdXRfdGh1bWJfX3NlbmRfbGlzdF9pbmRleF9fMF9fYWxfX1JFQzAwMV9fbGlua19pZF9fMTk2NjkyNzM2X19yZXF1ZXN0X2lkX19BQkIyRDE3MTdDQjdENEEzN0JENEM2NkNGNkQ1MkZGN19fZmVlZF9zaG93X3R5cGVfXzFfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMF9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMV9fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAwMzkxNzMwNTI2NDYyMTk3M19fZmxvd190aWNrZXRfaWRfXzBfX2FwcF9mZWVkc19leHBvc3VyZV9jb3VudF9fMTE3MjA0Nl9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMA==\",\"page\":\"link\",\"topic_id\":\"425422\"}}",
+         "text_alignment": 0,
+         "attrs": [
+          {
+           "type": "image",
+           "image": "https://cdn.max-c.com/mobile/app/icon/ccb3c23e275bef48aa7863ac5609ce8b.png",
+           "width": 14,
+           "height": 14,
+           "corner_radius": 2
+          }
+         ]
+        },
+        {
+         "protocol": "heybox://{\"protocol_type\":\"openRouterPath\",\"path\":\"/bbs/topic\",\"params\":{\"h_src\":\"YmJzX3dlYl9mZWVkc19fcmVjYWxsX18yNV9fdHlwZV92Ml9fMV9fc2hvd190eXBlX19zaG93X3dpdGhvdXRfdGh1bWJfX3NlbmRfbGlzdF9pbmRleF9fMF9fYWxfX1JFQzAwMV9fbGlua19pZF9fMTk2NjkyNzM2X19yZXF1ZXN0X2lkX19BQkIyRDE3MTdDQjdENEEzN0JENEM2NkNGNkQ1MkZGN19fZmVlZF9zaG93X3R5cGVfXzFfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMF9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMV9fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAwMzkxNzMwNTI2NDYyMTk3M19fZmxvd190aWNrZXRfaWRfXzBfX2FwcF9mZWVkc19leHBvc3VyZV9jb3VudF9fMTE3MjA0Nl9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMA==\",\"page\":\"link\",\"topic_id\":\"425422\"}}",
+         "text_alignment": 1,
+         "attrs": [
+          {
+           "type": "spacer",
+           "width": 4
+          },
+          {
+           "type": "text",
+           "text": "Steam",
+           "color": "#64696E#C5C6C7",
+           "font_name": "PingFangSC-Regular",
+           "font_size": 11,
+           "line_height": 16
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "feedback": [
+     {
+      "cate": "favour",
+      "text": "不感兴趣（选择后将减少相似推荐）",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 3,
+        "text": "不喜欢该社区: Steam",
+        "topic_id": 425422,
+        "topic_name": "Steam",
+        "event_id": "425422"
+       },
+       {
+        "reason": 8,
+        "text": "不喜欢该作者: 知许。",
+        "user_id": 55409690,
+        "user_name": "知许。",
+        "event_id": "55409690"
+       },
+       {
+        "reason": 25,
+        "text": "不喜欢: steam相关",
+        "interest_tag_id": 784,
+        "interest_tag_name": "steam",
+        "event_id": "784"
+       },
+       {
+        "reason": 26,
+        "text": "不喜欢: 价格变动相关",
+        "interest_tag_id": 4,
+        "interest_tag_name": "价格变动",
+        "event_id": "4"
+       }
+      ]
+     },
+     {
+      "cate": "report",
+      "text": "内容反馈",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 23,
+        "text": "软文广告",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 27,
+        "text": "标题党",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 28,
+        "text": "不实炒作",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 29,
+        "text": "AI生成",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 24,
+        "text": "内容低俗",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 30,
+        "text": "分区错误",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 10,
+        "text": "内容质量差",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 22,
+        "text": "内容不适",
+        "event_id": "196692736"
+       }
+      ]
+     }
+    ],
+    "feedback_config": {
+     "extra": {},
+     "disable_report": 0,
+     "ad_report": 0,
+     "keyword_block_config": {
+      "manage_text": "管理已屏蔽词条",
+      "input_hint": "添加后，含关键词的内容将减少推荐",
+      "max_keyword_length": 20
+     }
+    },
+    "user": {
+     "medal": [],
+     "is_blacklist": false,
+     "userid": "55409690",
+     "username": "知许。",
+     "avatar": "https://imgheybox1.max-c.com/avatar/2026/05/17/3560b5a1f9ea4ae1392522d34dc587dc.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://imgheybox1.max-c.com/avatar/2026/05/17/3560b5a1f9ea4ae1392522d34dc587dc.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 11,
+      "status": 1
+     },
+     "medals": [
+      {
+       "wear": 0,
+       "level": 0,
+       "medal_id": 55,
+       "name": "高级作者",
+       "description": "达到作者等级 4 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png",
+       "achieved": 1
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 47,
+       "name": "小试牛刀",
+       "description": "累计消费 10 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "img_show_type": 1,
+    "h_src": "YmJzX3dlYl9mZWVkc19fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMV9fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAwMzkxNzMwNTI2NDYyMTk3M19fZmxvd190aWNrZXRfaWRfXzBfX2FwcF9mZWVkc19leHBvc3VyZV9jb3VudF9fMTE3MjA0Nl9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMF9fcmVjYWxsX18yNV9fdHlwZV92Ml9fMV9fc2hvd190eXBlX19zaG93X3dpdGhvdXRfdGh1bWJfX3NlbmRfbGlzdF9pbmRleF9fMF9fY29tbWVudF9udW1fXzEwMl9fYWxfX1JFQzAwMV9fbGlua19pZF9fMTk2NjkyNzM2X19yZXF1ZXN0X2lkX19BQkIyRDE3MTdDQjdENEEzN0JENEM2NkNGNkQ1MkZGN19fZmVlZF9zaG93X3R5cGVfXzFfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMA=="
+   },
+   {
+    "banners": [
+     {
+      "url": "https://cdn.max-c.com/ad/x.jpg",
+      "title": "广告位"
+     }
+    ],
+    "content_type": 23
+   },
+   {
+    "title": "",
+    "has_video": 0,
+    "up": 0,
+    "topics": [],
+    "act_hashtags": [],
+    "hashtags": [],
+    "hb_rich_texts": [],
+    "content_tags": [],
+    "list_content_tags": [],
+    "linkid": 196580279,
+    "userid": 19292194,
+    "description": "南方人第一次体验北方的搓澡文化，我的妈呀，一整个震惊360度无死角给我搓每 女孩子跟案板上的鱼肉一样，而且毫无遮挡",
+    "link_type": 1,
+    "link_tag": 27,
+    "is_web": 1,
+    "use_concept_type": 1,
+    "comment_num": 2097,
+    "link_award_num": 2131,
+    "down": 92,
+    "create_at": 1794298941,
+    "modify_at": 1794547790,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=ded072cd4694",
+    "vertical": 0,
+    "imgs": [
+     "https://imgheybox1.max-c.com/live/2026/11/10/6027d3bd846ecda22b72d23c50f8a6de.webp?imageMogr2/auto-orient/ignore-error/1"
+    ],
+    "thumbs": [
+     "https://imgheybox1.max-c.com/live/2026/11/10/6027d3bd846ecda22b72d23c50f8a6de.webp?imageMogr2/auto-orient/ignore-error/1/thumbnail/540x921%3E"
+    ],
+    "positions": {
+     "imgs": [
+      {
+       "top": 0,
+       "left": 0,
+       "width": 287,
+       "height": 287
+      }
+     ],
+     "img_cnt": 1
+    },
+    "img_text_margin": 8,
+    "content_type": 44,
+    "top_view_type": 4,
+    "content_view_type": 1,
+    "bottom_view_type": 3,
+    "hide_comment": 0,
+    "forward_num": 0,
+    "bottom_rich_text": {
+     "type": "stack",
+     "height": 18,
+     "models": [
+      {
+       "type": "stack",
+       "inset": {
+        "top": 0,
+        "bottom": 0,
+        "left": 6,
+        "right": 6
+       },
+       "height": 18,
+       "corner_radius": 2,
+       "background_color": "#FAFBFC#1A1B1D",
+       "models": [
+        {
+         "text_alignment": 1,
+         "attrs": [
+          {
+           "type": "text",
+           "text": "大家都在看",
+           "color": "#8C9196#858687",
+           "font_name": "PingFangSC-Regular",
+           "font_size": 11,
+           "line_height": 16
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "feedback": [
+     {
+      "cate": "favour",
+      "text": "不感兴趣（选择后将减少相似推荐）",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 8,
+        "text": "不喜欢该作者: 菠萝少侠c",
+        "user_id": 19292194,
+        "user_name": "菠萝少侠c",
+        "event_id": "19292194"
+       },
+       {
+        "reason": 25,
+        "text": "不喜欢: 生活相关",
+        "interest_tag_id": 42,
+        "interest_tag_name": "生活",
+        "event_id": "42"
+       },
+       {
+        "reason": 26,
+        "text": "不喜欢: 个人经历分享相关",
+        "interest_tag_id": 257435,
+        "interest_tag_name": "个人经历分享",
+        "event_id": "257435"
+       }
+      ]
+     },
+     {
+      "cate": "report",
+      "text": "内容反馈",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 23,
+        "text": "软文广告",
+        "event_id": "196580279"
+       },
+       {
+        "reason": 27,
+        "text": "标题党",
+        "event_id": "196580279"
+       },
+       {
+        "reason": 28,
+        "text": "不实炒作",
+        "event_id": "196580279"
+       },
+       {
+        "reason": 29,
+        "text": "AI生成",
+        "event_id": "196580279"
+       },
+       {
+        "reason": 24,
+        "text": "内容低俗",
+        "event_id": "196580279"
+       },
+       {
+        "reason": 30,
+        "text": "分区错误",
+        "event_id": "196580279"
+       },
+       {
+        "reason": 10,
+        "text": "内容质量差",
+        "event_id": "196580279"
+       },
+       {
+        "reason": 22,
+        "text": "内容不适",
+        "event_id": "196580279"
+       }
+      ]
+     }
+    ],
+    "feedback_config": {
+     "extra": {},
+     "disable_report": 0,
+     "ad_report": 0,
+     "keyword_block_config": {
+      "manage_text": "管理已屏蔽词条",
+      "input_hint": "添加后，含关键词的内容将减少推荐",
+      "max_keyword_length": 20
+     }
+    },
+    "user": {
+     "is_blacklist": false,
+     "userid": "19292194",
+     "username": "菠萝少侠c",
+     "avatar": "https://cdn.max-c.com/heybox/profile/avatar/heygirl_12.png?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://cdn.max-c.com/heybox/profile/avatar/heygirl_12.png?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 24,
+      "status": 1
+     },
+     "medal": [
+      {
+       "level": 0,
+       "medal_id": 55,
+       "name": "中级作者",
+       "description": "达到作者等级 3 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png",
+       "achieved": 1,
+       "wear": 1
+      }
+     ],
+     "medals": [
+      {
+       "level": 0,
+       "medal_id": 55,
+       "name": "中级作者",
+       "description": "达到作者等级 3 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png",
+       "achieved": 1,
+       "wear": 1
+      },
+      {
+       "wear": 0,
+       "level": 0,
+       "medal_id": 47,
+       "name": "壕气冲天",
+       "description": "累计消费 2000 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png",
+       "achieved": 1
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "img_show_type": 1,
+    "h_src": "YmJzX3dlYl9mZWVkc19fY29tbWVudF9udW1fXzIwOTdfX2ZlZWRfc2hvd190eXBlX18xX19zZW5kX2xpc3RfaW5kZXhfXzRfX3B1bGxfXzBfX3JlY2FsbF9fN19fYWxfX1JFQzAwMV9fYXBwX2ZlZWRzX2V4cG9zdXJlX2NvdW50X18xMjE0Nzc2X19yZXF1ZXN0X2lkX19BQkIyRDE3MTdDQjdENEEzN0JENEM2NkNGNkQ1MkZGN19fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMF9fcmVmcmVzaF90eXBlX18wX19tb2RlbF9jbGlja19mb2xsb3dfYXV0aG9yX3JhdGVfXzAuMDAxNzc0ODgxMjY3OTIwMTM2NV9fdHlwZV92Ml9fMl9fZmxvd190aWNrZXRfaWRfXzBfX2xpbmtfaWRfXzE5NjU4MDI3OV9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMQ=="
+   },
+   {
+    "has_video": 0,
+    "up": 0,
+    "act_hashtags": [],
+    "hb_rich_texts": [],
+    "content_tags": [],
+    "list_content_tags": [],
+    "linkid": 196273327,
+    "userid": 64008320,
+    "title": "老大这次出了雪之下雪乃[cube_喜欢][cube_喜欢]",
+    "description": "是雪乃的约会装，希望喜欢！佩丽卡正片正在加工加点赶进度[cube_比心]不知道为什么这一套连衣裙有点难穿 雪乃我是真喜欢[cube_比心] 值了！",
+    "link_type": 1,
+    "link_tag": 27,
+    "is_web": 1,
+    "use_concept_type": 1,
+    "comment_num": 457,
+    "link_award_num": 5499,
+    "down": 30,
+    "create_at": 1794029936,
+    "modify_at": 1794545103,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=72db72c8978c",
+    "vertical": 0,
+    "topics": [
+     {
+      "topic_id": 7214,
+      "name": "盒友杂谈",
+      "pic_url": "https://cdn.max-c.com/heybox/dailynews/img/b3c6f2f9af2eea0d97ca0ef811d9821c.png",
+      "app_id": -1,
+      "hot_value_v2": 79205099.75
+     }
+    ],
+    "hashtags": [
+     {
+      "name": "雪之下雪乃",
+      "hashtag_id": 8823
+     }
+    ],
+    "imgs": [
+     "https://imgheybox1.max-c.com/bbs/2026/11/06/afef8b0c6610401eb586416f9d1bbdf2/thumb.webp?imageMogr2/auto-orient/ignore-error/1/format/jpg"
+    ],
+    "thumbs": [
+     "https://imgheybox1.max-c.com/bbs/2026/11/06/afef8b0c6610401eb586416f9d1bbdf2/thumb.webp?imageMogr2/auto-orient/ignore-error/1/format/jpg/thumbnail/540x921%3E"
+    ],
+    "positions": {
+     "imgs": [
+      {
+       "top": 0,
+       "left": 0,
+       "width": 287,
+       "height": 287
+      }
+     ],
+     "img_cnt": 1
+    },
+    "img_text_margin": 8,
+    "content_type": 44,
+    "top_view_type": 4,
+    "content_view_type": 1,
+    "bottom_view_type": 3,
+    "hide_comment": 0,
+    "forward_num": 0,
+    "bottom_rich_text": {
+     "type": "stack",
+     "height": 18,
+     "models": [
+      {
+       "type": "stack",
+       "inset": {
+        "top": 0,
+        "bottom": 0,
+        "left": 2,
+        "right": 6
+       },
+       "height": 18,
+       "corner_radius": 2,
+       "background_color": "#F3F4F5#232526",
+       "models": [
+        {
+         "protocol": "heybox://{\"protocol_type\":\"openRouterPath\",\"path\":\"/bbs/topic\",\"params\":{\"h_src\":\"YmJzX3dlYl9mZWVkc19fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAxMTI2MDM4NjU1NjM4Njk0OF9fcmVjYWxsX183X190eXBlX3YyX18wX19mbG93X3RpY2tldF9pZF9fMF9fbGlua19pZF9fMTk2MjczMzI3X19hcHBfZmVlZHNfZXhwb3N1cmVfY291bnRfXzE1NzkwMl9fZmVlZF9zaG93X3R5cGVfXzFfX3NlbmRfbGlzdF9pbmRleF9fMV9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMF9fYWxfX1JFQzAwMV9fcmVxdWVzdF9pZF9fQUJCMkQxNzE3Q0I3RDRBMzdCRDRDNjZDRjZENTJGRjdfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMF9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMQ==\",\"page\":\"link\",\"topic_id\":\"7214\"}}",
+         "text_alignment": 0,
+         "attrs": [
+          {
+           "type": "image",
+           "image": "https://cdn.max-c.com/heybox/dailynews/img/b3c6f2f9af2eea0d97ca0ef811d9821c.png",
+           "width": 14,
+           "height": 14,
+           "corner_radius": 2
+          }
+         ]
+        },
+        {
+         "protocol": "heybox://{\"protocol_type\":\"openRouterPath\",\"path\":\"/bbs/topic\",\"params\":{\"h_src\":\"YmJzX3dlYl9mZWVkc19fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAxMTI2MDM4NjU1NjM4Njk0OF9fcmVjYWxsX183X190eXBlX3YyX18wX19mbG93X3RpY2tldF9pZF9fMF9fbGlua19pZF9fMTk2MjczMzI3X19hcHBfZmVlZHNfZXhwb3N1cmVfY291bnRfXzE1NzkwMl9fZmVlZF9zaG93X3R5cGVfXzFfX3NlbmRfbGlzdF9pbmRleF9fMV9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMF9fYWxfX1JFQzAwMV9fcmVxdWVzdF9pZF9fQUJCMkQxNzE3Q0I3RDRBMzdCRDRDNjZDRjZENTJGRjdfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMF9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMQ==\",\"page\":\"link\",\"topic_id\":\"7214\"}}",
+         "text_alignment": 1,
+         "attrs": [
+          {
+           "type": "spacer",
+           "width": 4
+          },
+          {
+           "type": "text",
+           "text": "盒友杂谈",
+           "color": "#64696E#C5C6C7",
+           "font_name": "PingFangSC-Regular",
+           "font_size": 11,
+           "line_height": 16
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "feedback": [
+     {
+      "cate": "favour",
+      "text": "不感兴趣（选择后将减少相似推荐）",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 3,
+        "text": "不喜欢该社区: 盒友杂谈",
+        "topic_id": 7214,
+        "topic_name": "盒友杂谈",
+        "event_id": "7214"
+       },
+       {
+        "reason": 8,
+        "text": "不喜欢该作者: PromisedLand",
+        "user_id": 64008320,
+        "user_name": "PromisedLand",
+        "event_id": "64008320"
+       },
+       {
+        "reason": 25,
+        "text": "不喜欢: Cosplay相关",
+        "interest_tag_id": 165353,
+        "interest_tag_name": "Cosplay",
+        "event_id": "165353"
+       },
+       {
+        "reason": 26,
+        "text": "不喜欢: 美图分享相关",
+        "interest_tag_id": 10848,
+        "interest_tag_name": "美图分享",
+        "event_id": "10848"
+       }
+      ]
+     },
+     {
+      "cate": "report",
+      "text": "内容反馈",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 23,
+        "text": "软文广告",
+        "event_id": "196273327"
+       },
+       {
+        "reason": 27,
+        "text": "标题党",
+        "event_id": "196273327"
+       },
+       {
+        "reason": 28,
+        "text": "不实炒作",
+        "event_id": "196273327"
+       },
+       {
+        "reason": 29,
+        "text": "AI生成",
+        "event_id": "196273327"
+       },
+       {
+        "reason": 24,
+        "text": "内容低俗",
+        "event_id": "196273327"
+       },
+       {
+        "reason": 30,
+        "text": "分区错误",
+        "event_id": "196273327"
+       },
+       {
+        "reason": 10,
+        "text": "内容质量差",
+        "event_id": "196273327"
+       },
+       {
+        "reason": 22,
+        "text": "内容不适",
+        "event_id": "196273327"
+       }
+      ]
+     }
+    ],
+    "feedback_config": {
+     "extra": {},
+     "disable_report": 0,
+     "ad_report": 0,
+     "keyword_block_config": {
+      "manage_text": "管理已屏蔽词条",
+      "input_hint": "添加后，含关键词的内容将减少推荐",
+      "max_keyword_length": 20
+     }
+    },
+    "user": {
+     "medal": [],
+     "is_blacklist": false,
+     "userid": "64008320",
+     "username": "PromisedLand",
+     "avatar": "https://imgheybox1.max-c.com/avatar/2026/10/13/79e385c5c784f7d4b46e32aa5a3bd333.webp?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://imgheybox1.max-c.com/avatar/2026/10/13/79e385c5c784f7d4b46e32aa5a3bd333.webp?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 17,
+      "status": 1
+     },
+     "medals": [
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 55,
+       "name": "新人作者",
+       "description": "达到作者等级 1 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 47,
+       "name": "小试牛刀",
+       "description": "累计消费 10 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "img_show_type": 1,
+    "h_src": "YmJzX3dlYl9mZWVkc19fdHlwZV92Ml9fMF9fZmxvd190aWNrZXRfaWRfXzBfX2xpbmtfaWRfXzE5NjI3MzMyN19fZmVlZF9zaG93X3R5cGVfXzFfX3NlbmRfbGlzdF9pbmRleF9fMV9fY29tbWVudF9udW1fXzQ1N19fYWxfX1JFQzAwMV9fcmVjYWxsX183X19hcHBfZmVlZHNfZXhwb3N1cmVfY291bnRfXzE1NzkwMl9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMF9fcHVsbF9fMF9fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAxMTI2MDM4NjU1NjM4Njk0OF9fcmVxdWVzdF9pZF9fQUJCMkQxNzE3Q0I3RDRBMzdCRDRDNjZDRjZENTJGRjdfX3JlZnJlc2hfdHlwZV9fMF9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMQ=="
+   },
+   {
+    "has_video": 0,
+    "use_concept_type": 0,
+    "up": 0,
+    "act_hashtags": [],
+    "hb_rich_texts": [],
+    "content_tags": [],
+    "list_content_tags": [],
+    "linkid": 196692736,
+    "userid": 55409690,
+    "title": "背刺拉满！Steam新一轮史低疯跌，闭眼入不亏",
+    "description": "懂的都懂，Steam玩家最大的痛就是原价入手转头就被背刺。这次我筛了一批实打实的史低游戏，没有凑数，也不玩虚标折扣那套。想买的先别急着掏钱，点开看看有没有你一直放愿望单的那一款，毕竟真史低不是天天有。epic喜加一近月少女的礼仪系列仙剑奇侠传系列真探系列A",
+    "link_type": 1,
+    "link_tag": 1,
+    "is_web": 1,
+    "comment_num": 102,
+    "link_award_num": 2108,
+    "down": 21,
+    "create_at": 1794410349,
+    "modify_at": 1794546228,
+    "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=236172cefddd",
+    "vertical": 0,
+    "topics": [
+     {
+      "topic_id": 425422,
+      "name": "Steam",
+      "pic_url": "https://cdn.max-c.com/mobile/app/icon/ccb3c23e275bef48aa7863ac5609ce8b.png",
+      "app_id": 99928013,
+      "game_type": "mobile",
+      "hot_value_v2": 97464599.6
+     }
+    ],
+    "hashtags": [
+     {
+      "name": "steam游戏",
+      "hashtag_id": 3856
+     },
+     {
+      "name": "单机游戏",
+      "hashtag_id": 1936
+     },
+     {
+      "name": "单机游戏专项创作计划",
+      "hashtag_id": 266572
+     },
+     {
+      "name": "游戏推荐",
+      "hashtag_id": 687
+     }
+    ],
+    "imgs": [
+     "https://imgheybox1.max-c.com/bbs/2026/11/11/a27f85442ae39a67e9f05b664a94920b/thumb.jpeg?imageMogr2/auto-orient/ignore-error/1/format/jpg"
+    ],
+    "thumbs": [
+     "https://imgheybox1.max-c.com/bbs/2026/11/11/a27f85442ae39a67e9f05b664a94920b/thumb.jpeg?imageMogr2/auto-orient/ignore-error/1/format/jpg/thumbnail/850x1450%3E"
+    ],
+    "positions": {
+     "imgs": [
+      {
+       "top": 0,
+       "left": 0,
+       "width": 459,
+       "height": 287
+      }
+     ],
+     "img_cnt": 1
+    },
+    "img_text_margin": 8,
+    "content_type": 44,
+    "top_view_type": 4,
+    "content_view_type": 1,
+    "bottom_view_type": 3,
+    "hide_comment": 0,
+    "forward_num": 6,
+    "bottom_rich_text": {
+     "type": "stack",
+     "height": 18,
+     "models": [
+      {
+       "type": "stack",
+       "inset": {
+        "top": 0,
+        "bottom": 0,
+        "left": 2,
+        "right": 6
+       },
+       "height": 18,
+       "corner_radius": 2,
+       "background_color": "#F3F4F5#232526",
+       "models": [
+        {
+         "protocol": "heybox://{\"protocol_type\":\"openRouterPath\",\"path\":\"/bbs/topic\",\"params\":{\"h_src\":\"YmJzX3dlYl9mZWVkc19fcmVjYWxsX18yNV9fdHlwZV92Ml9fMV9fc2hvd190eXBlX19zaG93X3dpdGhvdXRfdGh1bWJfX3NlbmRfbGlzdF9pbmRleF9fMF9fYWxfX1JFQzAwMV9fbGlua19pZF9fMTk2NjkyNzM2X19yZXF1ZXN0X2lkX19BQkIyRDE3MTdDQjdENEEzN0JENEM2NkNGNkQ1MkZGN19fZmVlZF9zaG93X3R5cGVfXzFfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMF9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMV9fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAwMzkxNzMwNTI2NDYyMTk3M19fZmxvd190aWNrZXRfaWRfXzBfX2FwcF9mZWVkc19leHBvc3VyZV9jb3VudF9fMTE3MjA0Nl9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMA==\",\"page\":\"link\",\"topic_id\":\"425422\"}}",
+         "text_alignment": 0,
+         "attrs": [
+          {
+           "type": "image",
+           "image": "https://cdn.max-c.com/mobile/app/icon/ccb3c23e275bef48aa7863ac5609ce8b.png",
+           "width": 14,
+           "height": 14,
+           "corner_radius": 2
+          }
+         ]
+        },
+        {
+         "protocol": "heybox://{\"protocol_type\":\"openRouterPath\",\"path\":\"/bbs/topic\",\"params\":{\"h_src\":\"YmJzX3dlYl9mZWVkc19fcmVjYWxsX18yNV9fdHlwZV92Ml9fMV9fc2hvd190eXBlX19zaG93X3dpdGhvdXRfdGh1bWJfX3NlbmRfbGlzdF9pbmRleF9fMF9fYWxfX1JFQzAwMV9fbGlua19pZF9fMTk2NjkyNzM2X19yZXF1ZXN0X2lkX19BQkIyRDE3MTdDQjdENEEzN0JENEM2NkNGNkQ1MkZGN19fZmVlZF9zaG93X3R5cGVfXzFfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMF9fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMV9fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAwMzkxNzMwNTI2NDYyMTk3M19fZmxvd190aWNrZXRfaWRfXzBfX2FwcF9mZWVkc19leHBvc3VyZV9jb3VudF9fMTE3MjA0Nl9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMA==\",\"page\":\"link\",\"topic_id\":\"425422\"}}",
+         "text_alignment": 1,
+         "attrs": [
+          {
+           "type": "spacer",
+           "width": 4
+          },
+          {
+           "type": "text",
+           "text": "Steam",
+           "color": "#64696E#C5C6C7",
+           "font_name": "PingFangSC-Regular",
+           "font_size": 11,
+           "line_height": 16
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "feedback": [
+     {
+      "cate": "favour",
+      "text": "不感兴趣（选择后将减少相似推荐）",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 3,
+        "text": "不喜欢该社区: Steam",
+        "topic_id": 425422,
+        "topic_name": "Steam",
+        "event_id": "425422"
+       },
+       {
+        "reason": 8,
+        "text": "不喜欢该作者: 知许。",
+        "user_id": 55409690,
+        "user_name": "知许。",
+        "event_id": "55409690"
+       },
+       {
+        "reason": 25,
+        "text": "不喜欢: steam相关",
+        "interest_tag_id": 784,
+        "interest_tag_name": "steam",
+        "event_id": "784"
+       },
+       {
+        "reason": 26,
+        "text": "不喜欢: 价格变动相关",
+        "interest_tag_id": 4,
+        "interest_tag_name": "价格变动",
+        "event_id": "4"
+       }
+      ]
+     },
+     {
+      "cate": "report",
+      "text": "内容反馈",
+      "col_count": 2,
+      "options": [
+       {
+        "reason": 23,
+        "text": "软文广告",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 27,
+        "text": "标题党",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 28,
+        "text": "不实炒作",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 29,
+        "text": "AI生成",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 24,
+        "text": "内容低俗",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 30,
+        "text": "分区错误",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 10,
+        "text": "内容质量差",
+        "event_id": "196692736"
+       },
+       {
+        "reason": 22,
+        "text": "内容不适",
+        "event_id": "196692736"
+       }
+      ]
+     }
+    ],
+    "feedback_config": {
+     "extra": {},
+     "disable_report": 0,
+     "ad_report": 0,
+     "keyword_block_config": {
+      "manage_text": "管理已屏蔽词条",
+      "input_hint": "添加后，含关键词的内容将减少推荐",
+      "max_keyword_length": 20
+     }
+    },
+    "user": {
+     "medal": [],
+     "is_blacklist": false,
+     "userid": "55409690",
+     "username": "知许。",
+     "avatar": "https://imgheybox1.max-c.com/avatar/2026/05/17/3560b5a1f9ea4ae1392522d34dc587dc.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "avartar": "https://imgheybox1.max-c.com/avatar/2026/05/17/3560b5a1f9ea4ae1392522d34dc587dc.jpeg?imageMogr2/thumbnail/100x100%3E",
+     "level_info": {
+      "level": 11,
+      "status": 1
+     },
+     "medals": [
+      {
+       "wear": 0,
+       "level": 0,
+       "medal_id": 55,
+       "name": "高级作者",
+       "description": "达到作者等级 4 级",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/254d29440c5e601c85a5f1f9af124c3e.png",
+       "achieved": 1
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 31,
+       "name": "个人认证",
+       "description": "说明：UP主、主播、职业选手等个人认证",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/05/08/b171206ef2c0f9efb99ae94eafcba019.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 47,
+       "name": "小试牛刀",
+       "description": "累计消费 10 元",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/c4a0aee5a87444d73e85d4aa9f15fd0d.png"
+      },
+      {
+       "achieved": 0,
+       "wear": 0,
+       "level": 0,
+       "medal_id": 44,
+       "name": "百科贡献者",
+       "description": "获得 50 点百科经验",
+       "img_url": "https://imgheybox1.max-c.com/oa/2023/04/18/d375efa8709e69c7e373dc886edd3640.png"
+      }
+     ]
+    },
+    "img_show_type": 1,
+    "h_src": "YmJzX3dlYl9mZWVkc19fdG90YWxfcmVjYWxsX3NyY19jb3VudF9fMV9fbW9kZWxfY2xpY2tfZm9sbG93X2F1dGhvcl9yYXRlX18wLjAwMzkxNzMwNTI2NDYyMTk3M19fZmxvd190aWNrZXRfaWRfXzBfX2FwcF9mZWVkc19leHBvc3VyZV9jb3VudF9fMTE3MjA0Nl9fcmVjX3RvZGF5X3Zpc2l0X2NudF9fMF9fcmVjYWxsX18yNV9fdHlwZV92Ml9fMV9fc2hvd190eXBlX19zaG93X3dpdGhvdXRfdGh1bWJfX3NlbmRfbGlzdF9pbmRleF9fMF9fY29tbWVudF9udW1fXzEwMl9fYWxfX1JFQzAwMV9fbGlua19pZF9fMTk2NjkyNzM2X19yZXF1ZXN0X2lkX19BQkIyRDE3MTdDQjdENEEzN0JENEM2NkNGNkQ1MkZGN19fZmVlZF9zaG93X3R5cGVfXzFfX3B1bGxfXzBfX3JlZnJlc2hfdHlwZV9fMA=="
+   }
+  ]
+ },
+ "status": "ok"
+}

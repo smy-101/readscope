@@ -181,15 +181,19 @@ const (
 )
 
 // rowMeta formats the meta column by source: hn rows carry the heat
-// radar, zhihu rows the hot board's heat reading, every other source
-// keeps the relative age. The favorites list mixes sources row by
-// row, so the choice is per row, not per feed.
+// radar, zhihu rows the hot board's heat reading, heybox rows the
+// award/comment radar, every other source keeps the relative age.
+// The favorites list mixes sources row by row, so the choice is per
+// row, not per feed.
 func (m Model) rowMeta(row store.ItemRow) string {
 	if row.Item.Source == "hn" {
 		return m.hnMeta(row.Item)
 	}
 	if row.Item.Source == "zhihu" {
 		return m.zhihuMeta(row.Item)
+	}
+	if row.Item.Source == "heybox" {
+		return m.heyboxMeta(row.Item)
 	}
 	return m.relTime(row.Item.PublishedAt)
 }
@@ -232,6 +236,26 @@ func (m Model) hnMeta(it core.Item) string {
 	}
 	if it.NumComments != nil {
 		segs = append(segs, m.cat.Get("hn.comments", *it.NumComments))
+	}
+	if it.Author != "" {
+		segs = append(segs, it.Author)
+	}
+	return strings.Join(segs, " · ")
+}
+
+// heyboxMeta renders the post card's radar "N 赞 · N 评论 · author"
+// from the fetched-at snapshot — the hn radar's shape on the heybox
+// heat pair (award count + comment count; the web endpoints serve
+// `up` as a constant zero, so the award count is the live signal).
+// Zero-valued segments drop like missing ones: "0 赞" says nothing a
+// blank column doesn't, and a bare record renders "author" alone.
+func (m Model) heyboxMeta(it core.Item) string {
+	segs := make([]string, 0, 3)
+	if it.Points != nil && *it.Points > 0 {
+		segs = append(segs, m.cat.Get("heybox.up", *it.Points))
+	}
+	if it.NumComments != nil && *it.NumComments > 0 {
+		segs = append(segs, m.cat.Get("heybox.comments", *it.NumComments))
 	}
 	if it.Author != "" {
 		segs = append(segs, it.Author)

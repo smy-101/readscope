@@ -14,6 +14,7 @@ import (
 
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/i18n"
+	"github.com/smy-101/readscope/internal/source/heybox"
 	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 
@@ -1115,5 +1116,130 @@ func TestRecommendFeedCursorWalk(t *testing.T) {
 	// 1 twice (two F5s), page A twice, nothing else.
 	if got, want := dialed(), []string{"", "A", "A", ""}; !slices.Equal(got, want) {
 		t.Fatalf("the walk dialed %v, want %v", got, want)
+	}
+}
+
+// The M5 ticket-01 tracer bullet: heybox registration → anonymous
+// recommend fetch → snapshot upsert → Ctrl+N offset walk → restart
+// resume (pages never re-dialed) → offline cache intact → a
+// risk-control refusal fails the refresh without touching the cache.
+func TestRefreshHeyboxTracerBullet(t *testing.T) {
+	page := func(offset string, hexes ...string) string {
+		links := make([]string, 0, len(hexes))
+		for i, hex := range hexes {
+			links = append(links, fmt.Sprintf(`{"linkid":%d,"share_url":"https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=%s",`+
+				`"title":"帖子 %s","description":"正文 %s","link_award_num":%d,"comment_num":%d,`+
+				`"create_at":1794500000,"modify_at":1794500100,"user":{"username":"玩家%d"}}`,
+				1000000+i, hex, hex, hex, 10+i, 100+i, i))
+		}
+		return fmt.Sprintf(`{"msg":"","result":{"links":[%s]},"status":"ok"}`, strings.Join(links, ","))
+	}
+	pages := map[string]string{
+		"0": page("0", "aaaa00000001", "aaaa00000002", "aaaa00000003"),
+		"1": page("1", "bbbb00000001", "bbbb00000002"),
+		"2": `{"msg":"","result":{"links":[]},"status":"ok"}`, // the index's end
+	}
+	var mu sync.Mutex
+	var offsets []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		offsets = append(offsets, r.URL.Query().Get("offset"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, pages[r.URL.Query().Get("offset")])
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_HEYBOX_BASE", srv.URL)
+	t.Setenv("READSCOPE_HEYBOX_DEVICE", "0123456789abcdef0123456789abcdef")
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "heybox.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srcs := core.DefaultSources()
+
+	// F5: the first page lands, three rows.
+	results, err := Feed(context.Background(), st, srcs, "heybox", "recommend")
+	if err != nil {
+		t.Fatalf("Feed: %v", err)
+	}
+	if len(results) != 1 || results[0].Err != nil || results[0].New != 3 || results[0].Total != 3 {
+		t.Fatalf("first refresh = %+v", results)
+	}
+
+	// Read one row, refresh again: no new rows, the read dot survives.
+	if err := st.SetRead(context.Background(), "hb:link/aaaa00000001", true); err != nil {
+		t.Fatalf("SetRead: %v", err)
+	}
+	results, err = Feed(context.Background(), st, srcs, "heybox", "recommend")
+	if err != nil {
+		t.Fatalf("second Feed: %v", err)
+	}
+	if results[0].Err != nil || results[0].New != 0 || results[0].Total != 3 {
+		t.Fatalf("second refresh should add nothing: %+v", results[0])
+	}
+	rows, err := st.FeedItems(context.Background(), "heybox", "recommend", false)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("FeedItems = %d rows, %v", len(rows), err)
+	}
+	if !slices.ContainsFunc(rows, func(r store.ItemRow) bool {
+		return r.Item.ID == "hb:link/aaaa00000001" && r.Read
+	}) {
+		t.Fatal("read state must survive a refresh")
+	}
+
+	// Ctrl+N walks forward page by page; the empty page reports the
+	// end and holds the depth. Pages 0 and 1 are never re-dialed —
+	// the restart-resume contract rides the stored paging depth.
+	_, end, err := More(context.Background(), st, srcs, "heybox", "recommend")
+	if err != nil || end {
+		t.Fatalf("first More: end=%v err=%v", end, err)
+	}
+	if _, end, err := More(context.Background(), st, srcs, "heybox", "recommend"); err != nil || !end {
+		t.Fatalf("second More should report the end: end=%v err=%v", end, err)
+	}
+	if _, end, err := More(context.Background(), st, srcs, "heybox", "recommend"); err != nil || !end {
+		t.Fatalf("post-end More re-reports without regressing: end=%v err=%v", end, err)
+	}
+	mu.Lock()
+	got := slices.Clone(offsets)
+	mu.Unlock()
+	// Two F5 refreshes + three walks: offset 0 twice, then 1 once,
+	// then the empty 2 twice (the end re-report retries the same
+	// page, never an earlier one).
+	if want := []string{"0", "0", "1", "2", "2"}; !slices.Equal(got, want) {
+		t.Fatalf("the walk dialed offsets %v, want %v", got, want)
+	}
+	rows, err = st.FeedItems(context.Background(), "heybox", "recommend", false)
+	if err != nil || len(rows) != 5 {
+		t.Fatalf("after the walk: %d rows, %v — want the 5 of pages 0+1", len(rows), err)
+	}
+
+	// A risk-control refusal (show_captcha) fails the refresh loudly
+	// as the try-later family and leaves every cached row in place.
+	captcha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"msg":"","result":{},"status":"show_captcha"}`)
+	}))
+	t.Cleanup(captcha.Close)
+	t.Setenv("READSCOPE_HEYBOX_BASE", captcha.URL)
+	results, err = Feed(context.Background(), st, srcs, "heybox", "recommend")
+	if err != nil {
+		t.Fatalf("Feed against captcha: %v", err)
+	}
+	if results[0].Err == nil || !errors.Is(results[0].Err, heybox.ErrTryLater) {
+		t.Fatalf("captcha refresh = %+v, want the try-later family", results[0])
+	}
+
+	// Offline: the host is gone entirely — the cached list still
+	// serves with zero dials, which is the whole point of 缓存先行
+	// (the refusal leg above already pinned the failing-refresh side:
+	// error on the Result, cache untouched).
+	rows, err = st.FeedItems(context.Background(), "heybox", "recommend", false)
+	if err != nil || len(rows) != 5 {
+		t.Fatalf("offline cache: %d rows, %v — the snapshot must outlive the host", len(rows), err)
 	}
 }

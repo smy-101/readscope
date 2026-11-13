@@ -48,7 +48,7 @@ readscope version         # print version
 Subscriptions live in `sources.toml`, next to `config.toml` (`readscope doctor` prints both paths):
 
 ```toml
-enabled = ["rss", "hn", "zhihu"]
+enabled = ["rss", "hn", "zhihu", "heybox"]
 
 [rss.feeds]
 ruanyifeng = { label = "阮一峰周刊", url = "https://www.ruanyifeng.com/blog/atom.xml" }
@@ -62,7 +62,7 @@ paint from cache and full text stays readable offline. In the TUI, `F5` refreshe
 background.
 
 > Upgrading from an older install? `sources.toml` is never rewritten automatically —
-> add `"hn"` and `"zhihu"` to your `enabled` list by hand to turn on the sources below.
+> add `"hn"`, `"zhihu"` and `"heybox"` to your `enabled` list by hand to turn on the sources below.
 
 ### Hacker News
 
@@ -136,6 +136,26 @@ standard OPML 2.0 document.
 `readscope doctor` probes every subscription with the same User-Agent and reports
 ✓ ok (with elapsed time), ! slow (> 3 s, warning) or ✗ failed (exit code 1) — a quick way
 to tell a dead feed from a broken setup.
+
+### Heybox
+
+Tab over to 小黑盒 (Heybox) for the **recommend feed** (推荐流) — the game-community
+algorithmic stream, fully anonymous: no account, no cookie, just an install-time device
+fingerprint minted into `<config dir>/heybox.device` and reused from then on (that is the
+only identity readscope ever sends). `F5` refreshes, `Ctrl+N` pages deeper, and the rows
+land in the same offline cache as every other source: unread dot, read/star, `Ctrl+O`
+(opens the post's share page) all work identically, and everything stays readable
+offline. Post cards carry the award count and comment count in the meta column; ad cards
+never enter the list.
+
+Refreshes speak the website's own signed-parameters dialect (the `hkey` request
+signature), read-only, at a polite per-request pace. If risk control ever pushes back
+(captcha / rate limit / a bumped version gate) the status bar says 「稍后再试」 — try
+later — and the cache keeps serving; nothing retries on its own. Heybox write operations,
+native-signature reversing and captcha bypassing are permanent non-goals.
+
+Heybox is on for fresh installs (`enabled = ["rss", "hn", "zhihu", "heybox"]`);
+see the upgrade note above if your file predates it.
 
 ### Keys
 

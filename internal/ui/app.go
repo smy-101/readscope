@@ -23,13 +23,14 @@ import (
 	"github.com/smy-101/readscope/internal/i18n"
 	"github.com/smy-101/readscope/internal/refresh"
 	"github.com/smy-101/readscope/internal/source"
+	"github.com/smy-101/readscope/internal/source/heybox"
 	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 	"github.com/smy-101/readscope/internal/theme"
 )
 
 // sourceIDs doubles as the source bar order (plan decision #11).
-var sourceIDs = []string{"books", "rss", "hn", "zhihu"}
+var sourceIDs = []string{"books", "rss", "hn", "zhihu", "heybox"}
 
 type region int
 
@@ -992,13 +993,27 @@ func (m Model) refreshStatus(msg refreshDoneMsg) string {
 
 // fetchErrText renders one fetch failure: zhihu session errors become
 // login guidance (the spec's 失效语义: detail-family 401/403 →
-// "re-login", no cookie → "log in"), everything else is the label
-// plus the raw error.
+// "re-login", no cookie → "log in"), heybox risk-control refusals
+// become the 「稍后再试」 hint (an anonymous source has nothing to
+// re-login into — the line says whose fault it isn't and that the
+// cache is intact), everything else is the label plus the raw error.
 func (m Model) fetchErrText(label string, err error) string {
 	if s := m.zhihuSessionStatus(err); s != "" {
 		return s
 	}
+	if s := m.heyboxRiskStatus(err); s != "" {
+		return s
+	}
 	return m.cat.Get("rss.feed_error", label, err)
+}
+
+// heyboxRiskStatus maps a heybox risk-control refusal to its
+// try-later line; "" = not the risk family.
+func (m Model) heyboxRiskStatus(err error) string {
+	if errors.Is(err, heybox.ErrTryLater) {
+		return m.cat.Get("heybox.risk_later")
+	}
+	return ""
 }
 
 // zhihuSessionStatus maps a zhihu session error to its guidance line;

@@ -42,10 +42,11 @@ func TestTabRotatesSources(t *testing.T) {
 	}
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // rss → hn
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // hn → zhihu
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // zhihu → heybox
 	if m.active != len(sourceIDs)-1 {
 		t.Fatalf("Tab should reach the last source, active=%d", m.active)
 	}
-	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // zhihu → books wraps
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyTab}) // heybox → books wraps
 	if m.active != 0 {
 		t.Fatalf("Tab should wrap to first source, active=%d", m.active)
 	}

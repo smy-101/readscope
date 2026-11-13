@@ -16,7 +16,8 @@ import (
 	"github.com/smy-101/readscope/internal/theme"
 	"github.com/smy-101/readscope/internal/ui"
 
-	_ "github.com/smy-101/readscope/internal/source/hn" // register the hn source
+	_ "github.com/smy-101/readscope/internal/source/heybox" // register the heybox source
+	_ "github.com/smy-101/readscope/internal/source/hn"     // register the hn source
 )
 
 // Version is injected at build time (-ldflags "-X main.Version=…").

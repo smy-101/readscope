@@ -18,6 +18,7 @@ books = "Bookshelf"
 rss = "RSS"
 hn = "Hacker News"
 zhihu = "Zhihu"
+heybox = "Heybox"
 
 [hn]
 front = "Front"
@@ -57,6 +58,12 @@ cli_login_banner = "Steps: log in to zhihu.com in the browser → F12 DevTools �
 cli_login_prompt = "Paste the Cookie request header (multi-line ok), then press Ctrl+D to finish:"
 cli_login_saved = "saved: %s (%d keys, z_c0 ✓, d_c0 %s)"
 cli_login_hint2 = "Ctrl+U in the TUI re-pastes anytime; readscope doctor reports the cookie state"
+
+[heybox]
+recommend = "For You"
+up = "%d up"
+comments = "%d comments"
+risk_later = "Heybox rate-limited us — try later (cached content unaffected)"
 
 [sidebar]
 no_feeds = "no feeds yet"

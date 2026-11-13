@@ -335,7 +335,7 @@ func TestReopenIsCacheFirstThenSilentRefresh(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "2 floors") || *hits != 0 {
 		t.Fatalf("cache leg must render before any network: hits=%d\n%s", *hits, m.View())
-		}
+	}
 
 	// The refresh leg lands silently: 3 floors, no status noise.
 	m = pump(t, m, next)

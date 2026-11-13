@@ -18,6 +18,7 @@ books = "书架"
 rss = "RSS"
 hn = "Hacker News"
 zhihu = "知乎"
+heybox = "小黑盒"
 
 [hn]
 front = "热门"
@@ -57,6 +58,12 @@ cli_login_banner = "步骤:浏览器登录 zhihu.com → F12 打开开发者工�
 cli_login_prompt = "粘贴 Cookie 请求头(可多行),然后按 Ctrl+D 结束:"
 cli_login_saved = "已保存:%s(%d 个键,z_c0 ✓,d_c0 %s)"
 cli_login_hint2 = "TUI 内 Ctrl+U 可随时重贴;readscope doctor 报告 cookie 状态"
+
+[heybox]
+recommend = "推荐流"
+up = "%d 赞"
+comments = "%d 评论"
+risk_later = "小黑盒风控/限流,稍后再试(已缓存内容不受影响)"
 
 [sidebar]
 no_feeds = "暂无订阅"

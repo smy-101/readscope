@@ -21,7 +21,7 @@ import (
 // whole open chain (auto read write + reload included).
 func openFirstRSS(t *testing.T, m Model) Model {
 	t.Helper()
-	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEnter}) // sidebar → list focus
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEnter})    // sidebar → list focus
 	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter}) // open item 0
 	if m.reader == nil {
 		t.Fatal("Enter on the list must open the detail layer")
@@ -85,7 +85,7 @@ func TestOpenAlreadyReadItemWritesNothing(t *testing.T) {
 	m := rssModel(t, "Example", 3)
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR}) // item 0 read, the manual way
 
-	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEnter}) // sidebar → list focus
+	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEnter})    // sidebar → list focus
 	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter}) // open the read item
 	if m.reader == nil {
 		t.Fatal("Enter on the list must open the detail layer")

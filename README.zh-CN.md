@@ -46,7 +46,7 @@ readscope version         # 打印版本
 订阅写在 `sources.toml`，与 `config.toml` 同目录（`readscope doctor` 会打印两个路径）：
 
 ```toml
-enabled = ["rss", "hn", "zhihu"]
+enabled = ["rss", "hn", "zhihu", "heybox"]
 
 [rss.feeds]
 ruanyifeng = { label = "阮一峰周刊", url = "https://www.ruanyifeng.com/blog/atom.xml" }
@@ -60,8 +60,8 @@ map 的键是稳定 slug（用于条目 id 与边栏）；`label` 可省，回�
 与其他阅读器互迁走 OPML：`readscope rss import subs.opml` 合并（已有订阅不动），
 `readscope rss export subs.opml` 导出标准 OPML 2.0。
 
-> 从旧版升级？`sources.toml` 不会被自动改写——手动在 `enabled` 里补上 `"hn"` 和
-> `"zhihu"` 即可开启下面的两个源。
+> 从旧版升级？`sources.toml` 不会被自动改写——手动在 `enabled` 里补上 `"hn"`、
+> `"zhihu"` 和 `"heybox"` 即可开启下面的源。
 
 ### Hacker News
 
@@ -120,6 +120,21 @@ cookie 数日至数周失效。失效时详情族端点回 401/403，界面提�
 
 `readscope doctor` 会用同一个 User-Agent 逐个试连订阅，报告 ✓ 可达（带耗时）、
 ! 慢（超过 3 秒，警告）或 ✗ 失败（退出码 1）——一眼分清是源挂了还是环境坏了。
+
+### 小黑盒
+
+Tab 切到小黑盒就是**推荐流**（For You）——游戏社区的算法推荐帖子流，完全匿名：无账号、
+无 cookie，只有一个安装时生成在 `<配置目录>/heybox.device` 的设备指纹，之后所有请求
+复用（这是 readscope 发出的唯一身份标识）。`F5` 刷新，`Ctrl+N` 向下翻页，条目落进与
+其他源相同的离线缓存：未读点、已读/收藏、`Ctrl+O`（打开帖子分享页）全部同语义，断网
+照读。帖子卡在元信息列携带赞数与评论数；广告卡永远不进列表。
+
+刷新说的是网站自己的签名参数方言（`hkey` 请求签名），只读、页间带礼貌延时。风控若不
+买账（验证码 / 限流 / 版本门槛抬升），状态栏提示「稍后再试」，缓存照常服务，不会自
+动重试。写操作、原生签名逆向、绕验证码是永久非目标。
+
+新装默认开启小黑盒（`sources.toml` 里 `enabled = ["rss", "hn", "zhihu", "heybox"]`）；
+老安装见上文升级说明。
 
 ### 键位
 
