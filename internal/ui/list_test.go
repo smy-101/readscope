@@ -77,6 +77,14 @@ func pump(t *testing.T, m Model, cmd tea.Cmd) Model {
 		if msg == nil {
 			break
 		}
+		// The runtime fans a BatchMsg's members out concurrently; tests
+		// run them sequentially to the same quiescence.
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, sub := range batch {
+				m = pump(t, m, sub)
+			}
+			return m
+		}
 		res, next := m.Update(msg)
 		var ok bool
 		if m, ok = res.(Model); !ok {

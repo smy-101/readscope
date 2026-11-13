@@ -236,18 +236,22 @@ func TestDetailCtrlRCtrlF(t *testing.T) {
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyRight}) // focus the list
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})    // open Story 0
 
-	// Ctrl+R while reading marks the open item read.
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
+	// Opening marked it read (auto-read-on-open); Ctrl+R while reading
+	// toggles it back to unread — with the manual flash intact.
 	if !m.reader.item.Read {
-		t.Fatal("Ctrl+R in the reader should mark the item read")
+		t.Fatal("opening the detail should have marked the item read")
 	}
-	if !strings.Contains(m.status, "marked read") {
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
+	if m.reader.item.Read {
+		t.Fatal("Ctrl+R in the reader should toggle back to unread")
+	}
+	if !strings.Contains(m.status, "marked unread") {
 		t.Fatalf("status should acknowledge: %q", m.status)
 	}
 	// The list below already reflects it once we drop back.
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if n := strings.Count(m.View(), "●"); n != 1 {
-		t.Fatalf("read toggle from the reader lost: dots = %d, want 1", n)
+	if n := strings.Count(m.View(), "●"); n != 2 {
+		t.Fatalf("read toggle from the reader lost: dots = %d, want 2", n)
 	}
 
 	// Reopen and star it from the reader.

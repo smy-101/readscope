@@ -12,7 +12,7 @@ IME-safe UI. Inspired by [FeedScope](https://github.com/howardli/FeedScope).
 
 - **Feeds**: RSS/Atom subscriptions with OPML import/export; Hacker News via the public Algolia API — no login, no API key; Zhihu hot board and daily digest anonymously, recommend feed, follow feed and answer comments with a pasted browser cookie
 - **EPUB bookshelf**: scan a library directory, `add` copies books in; read in a dedicated full-screen mode with TOC, bookmarks and full-text search
-- **State that survives**: read marks, favorites (full snapshots), and reading progress persist in SQLite; cached lists paint instantly and stay readable offline
+- **State that survives**: read marks (opening an item marks it read; Ctrl+R toggles back), favorites (full snapshots), and reading progress persist in SQLite; cached lists paint instantly and stay readable offline
 - **CJK-aware rendering**: one shared HTML→terminal pipeline renders both feed articles and EPUB chapters, with Chinese-aware line wrapping and code highlighting
 - **IME-safe keys**: every binding is a non-printing key (Tab / arrows / F-keys) — works while a Chinese IME is active
 - **Bilingual UI** (中文 / English) and dark/light themes
@@ -145,7 +145,7 @@ Every binding is a non-printing key, so a Chinese IME never swallows it:
 |-----|--------|-----|--------|
 | Tab / Shift+Tab | Switch source | F5 | Refresh |
 | ← → ↑ ↓ | Move / scroll | Ctrl+R | Toggle read/unread |
-| Enter | Open / enter | Ctrl+A | Mark all read (confirms) |
+| Enter | Open / enter (marks read) | Ctrl+A | Mark all read (confirms) |
 | Esc | Back one layer | Ctrl+F | Star/unstar |
 | F1 | This help | Ctrl+O | Open in browser |
 | F3 | Favorites | Ctrl+Y | Copy link |

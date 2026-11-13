@@ -207,6 +207,24 @@ func (m Model) setReadCmd(id string, read bool) tea.Cmd {
 	}
 }
 
+// markOpenedReadCmd writes the open-as-read mark with no status
+// flash: opening the item is its own feedback, and every Enter
+// flashing "marked read" would be noise. It lands in the same
+// stateSavedMsg reload chain as the manual toggles — dots, dimming
+// and sidebar counts follow for free.
+func (m Model) markOpenedReadCmd(id string) tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	st := m.st
+	return func() tea.Msg {
+		if err := st.SetRead(context.Background(), id, true); err != nil {
+			return stateSavedMsg{err: err}
+		}
+		return stateSavedMsg{} // status stays untouched (silent)
+	}
+}
+
 // setStarredCmd stars (snapshotting the item) or unstars; star and
 // read stay orthogonal in the store.
 func (m Model) setStarredCmd(it core.Item, star bool) tea.Cmd {

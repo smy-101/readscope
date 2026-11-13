@@ -42,6 +42,7 @@
 | 12 | 里程碑 | 骨架→渲染管线 v1→RSS 日用→HN→EPUB 压轴 | 每阶段都有可用的东西，符合自用定位 |
 | 13 | HN 数据面与楼层模型 | Algolia 公共索引；固定 Front/New/Ask/Show；链接帖不抓原文；评论楼层制+两层扁平化+@parent；缓存先行+后台刷新 | FeedScope 已验证的呈现规则；抓原文是无底洞；离线可读延续缓存先行原则（详见 .scratch/m3-hn/spec.md） |
 | 14 | 知乎源数据面与登录态 | 免签 API 直连（v3 信息流+v4 详情+comment_v5，只认 cookie）；手动贴 cookie 起步，chromedp 扫码留缝；关注流只收问题卡；详情三层 HN 同构 | 2026-11 实测签名（x-zse-96）已不需要、FeedScope 端点矩阵背书；非目标从"知乎登录态抓取"收窄为"浏览器常驻通道/签名器"；tracer 止损阶梯：调头序→chromedp 一次性登录→缩回免登录数据面（详见 .scratch/m4-zhihu/spec.md） |
+| 15 | 已读时机 | feed 条目打开详情即静默标已读（全源统一含收藏列表；拉取失败也标；已读重复打开零写入；无配置开关） | 打开即反馈、零新增状态机；静默避免每次 Enter 弹状态噪音；F4 下列表跳变与手动 Ctrl+R 同构，不做冻结（详见 .scratch/auto-read-on-open/issues/01） |
 
 ## 3. 技术栈
 

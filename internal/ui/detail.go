@@ -187,10 +187,21 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 	}
 	m.reader = d
 	m.rebuildBodyDoc()
-	if d.hasDetail {
-		return true, tea.Batch(m.readCommentsCmd(d.item.Item), bodyCmd)
+	// The open is the read: an unread item gets its mark now, silently
+	// (opening is its own feedback — no "marked read" flash on every
+	// Enter). The detail's copy flips too, so an in-detail Ctrl+R
+	// toggles back to unread instead of re-marking; the reload chain
+	// refreshes dots and counts behind the reader. A read item opens
+	// with zero writes. GLOSSARY 未读点: 打开即消, Ctrl+R 可恢复.
+	var markCmd tea.Cmd
+	if !d.item.Read {
+		d.item.Read = true
+		markCmd = m.markOpenedReadCmd(d.item.Item.ID)
 	}
-	return true, bodyCmd
+	if d.hasDetail {
+		return true, tea.Batch(m.readCommentsCmd(d.item.Item), bodyCmd, markCmd)
+	}
+	return true, tea.Batch(bodyCmd, markCmd)
 }
 
 // detailWidth is the reading column: the list pane minus its left

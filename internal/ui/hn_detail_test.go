@@ -310,13 +310,21 @@ func TestReopenIsCacheFirstThenSilentRefresh(t *testing.T) {
 	base, hits := hnDetailServer(t, hnDetailJSON())
 	m, cmd := openHNDetailCmd(t, fewerFloors, base)
 
-	// Only the cache leg has run: 2 cached floors, no server hit yet.
-	msg := cmd()
+	// The open fans out [comments load, silent mark-read] as one
+	// batch; the comments leg (first member) carries the cache-first
+	// sequencing this test pins. Only the cache leg has run so far:
+	// 2 cached floors, no server hit yet.
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("open should batch comments+mark, got %T", cmd())
+	}
+	msg := batch[0]()
 	res, next := m.Update(msg)
 	m = res.(Model)
 	if !strings.Contains(m.View(), "2 floors") || *hits != 0 {
 		t.Fatalf("cache leg must render before any network: hits=%d\n%s", *hits, m.View())
 	}
+	m = pump(t, m, batch[1]) // the silent mark lands too
 
 	// The refresh leg lands silently: 3 floors, no status noise.
 	m = pump(t, m, next)
@@ -503,8 +511,10 @@ func TestReadAndStarFromCommentLayers(t *testing.T) {
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // replies
 
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
-	if !m.reader.item.Read {
-		t.Fatal("Ctrl+R from the reply layer must mark the story read")
+	// Opening already marked the story read (auto-read-on-open);
+	// Ctrl+R from the reply layer toggles it back to unread.
+	if m.reader.item.Read {
+		t.Fatal("Ctrl+R from the reply layer must toggle the story unread")
 	}
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlF})
 	if !m.reader.item.Starred {

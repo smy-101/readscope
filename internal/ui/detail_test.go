@@ -55,9 +55,10 @@ func openRichDetail(t *testing.T) (Model, *bool) {
 		t.Fatalf("setup: listSel = %d, want 1", m.listSel)
 	}
 	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Fatal("opening the detail should not kick a command")
-	}
+	// The open kicks the silent mark-read write for this unread item
+	// (auto-read-on-open); pump it to quiescence. The offline intent
+	// is guarded by dialed — nothing here may dial the feed.
+	m = pump(t, m, cmd)
 	if m.reader == nil {
 		t.Fatal("Enter on the list must open the detail layer")
 	}
