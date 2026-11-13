@@ -7,9 +7,11 @@ package heybox
 // persistent device_id), the hkey/_time/nonce signature, the
 // risk-control sentinel (captcha / 429 / version gate → one
 // "try later" error, cache untouched), and the inter-page politeness
-// delay the smoke ran with. A cookie hook is deliberately absent —
-// login is out of scope by ADR #16, and the shape swap
-// (shapeWebV3 ↔ shapeWebV4) is the stop-loss ladder's first rung.
+// delay the smoke ran with. A cookie hook is reserved by the spec
+// (登录后门, MVP 不用) but not built: if a login door ever lands
+// despite ADR #16's红线, it bolts onto this struct's header block —
+// and the shape swap (shapeWebV3 ↔ shapeWebV4) is the stop-loss
+// ladder's first rung either way.
 
 import (
 	"context"
@@ -52,28 +54,33 @@ var ErrTryLater = errors.New("heybox: risk control refused — try later (cache 
 // Transport is one base URL + device fingerprint + client shape
 // behind every heybox GET. Cheap to build (the source constructs one
 // per refresh — the zhihu pattern); safe for concurrent use (the
-// only post-construction state is the politeness ledger, mutex-
-// guarded; races cost courtesy, never correctness).
+// only shared state is the dial ledger below, mutex-guarded; races
+// cost courtesy, never correctness).
 type Transport struct {
 	base     string
 	deviceID string
 	shape    clientShape // version parameter + its bound signer
 	client   *http.Client
-	minGap   time.Duration // politeness floor between this transport's requests
-
-	// mu guards lastReq (the only post-construction state — the
-	// politeness ledger). The gap is advisory: a race costs courtesy,
-	// never correctness, so the lock is held for two instants only.
-	mu      sync.Mutex
-	lastReq time.Time // zero: the first request rides without delay
+	minGap   time.Duration // this transport's politeness floor
 }
 
-// TransportOpt tweaks one transport at construction; tests are the
-// only user today (a zero delay, a fake's client, a pinned shape).
-type TransportOpt func(*Transport)
+// dialLedger is the politeness ledger, and it deliberately OUTLIVES
+// any one Transport: the runtime builds a fresh source — hence a
+// fresh transport — per user action (F5, Ctrl+N), so a per-transport
+// clock would always read zero and never sleep. The ledger keys the
+// last dial per base (one host in production; tests get one key per
+// fake server, so legs stay independent) and every transport's wait
+// consults and updates it. The gap is advisory and per-process: a
+// restart rides immediately, which is fine — the smoke's zero-429
+// came from pacing within a session, not across them.
+var dialLedger = struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}{last: map[string]time.Time{}}
 
-// WithClient pins the HTTP client (tests inject the fake's client).
-func WithClient(c *http.Client) TransportOpt { return func(t *Transport) { t.client = c } }
+// TransportOpt tweaks one transport at construction; tests are the
+// only user today (a zero delay, a pinned shape).
+type TransportOpt func(*Transport)
 
 // WithMinGap pins the politeness delay (tests pass 0 to run flat out,
 // or a few ms to observe the gap).
@@ -130,9 +137,9 @@ func (t *Transport) Get(ctx context.Context, name, path string, extra url.Values
 	if err := t.wait(ctx); err != nil {
 		return Response{Err: fmt.Errorf("%s: %w", name, err)}
 	}
-	t.mu.Lock()
-	t.lastReq = time.Now()
-	t.mu.Unlock()
+	dialLedger.mu.Lock()
+	dialLedger.last[t.base] = time.Now()
+	dialLedger.mu.Unlock()
 	params := url.Values{}
 	for k, vs := range extra {
 		params[k] = vs
@@ -214,20 +221,20 @@ func (t *Transport) Get(ctx context.Context, name, path string, extra url.Values
 	return res
 }
 
-// wait is the politeness gap: sleep out the remainder of minGap since
-// this transport's previous request, cancellable by ctx. The first
-// request on a fresh transport rides immediately (a transport is per
-// refresh — the gap governs the multi-request walks, chiefly the
-// detail layers of ticket 03).
+// wait is the politeness gap: sleep out the remainder of minGap
+// since the LAST dial to this base — across transports, per the
+// ledger above (the runtime builds a fresh transport per user
+// action, so per-transport memory would never fire) — cancellable by
+// ctx. A base never dialed in this process rides immediately.
 func (t *Transport) wait(ctx context.Context) error {
 	if t.minGap <= 0 {
 		return nil
 	}
-	t.mu.Lock()
-	last := t.lastReq
-	t.mu.Unlock()
+	dialLedger.mu.Lock()
+	last := dialLedger.last[t.base]
+	dialLedger.mu.Unlock()
 	if last.IsZero() {
-		return nil // the first request on a fresh transport rides now
+		return nil // this host's first dial in the process rides now
 	}
 	remaining := t.minGap - time.Since(last)
 	if remaining <= 0 {

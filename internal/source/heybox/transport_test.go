@@ -233,6 +233,32 @@ func TestTransportPolitenessGap(t *testing.T) {
 	}
 }
 
+// TestTransportGapSpansTransports: the politeness ledger outlives its
+// transport — the runtime builds a fresh source (hence a fresh
+// transport) per F5/Ctrl+N, so a per-transport clock would never
+// fire. Two transports against one base pace like one.
+func TestTransportGapSpansTransports(t *testing.T) {
+	const gap = 60 * time.Millisecond
+	fake := &fakeHeybox{shape: shapeWebV3, serve: func(w http.ResponseWriter, _ captured) {
+		_, _ = w.Write([]byte(`{"msg":"","result":{},"status":"ok"}`))
+	}}
+	srv := httptest.NewServer(fake)
+	t.Cleanup(srv.Close)
+
+	start := time.Now()
+	if res := NewTransport(srv.URL, "0123456789abcdef0123456789abcdef", WithMinGap(gap)).
+		Get(t.Context(), "f5", "/bbs/app/feeds", nil); res.Err != nil {
+		t.Fatalf("first transport's Get: %v", res.Err)
+	}
+	if res := NewTransport(srv.URL, "0123456789abcdef0123456789abcdef", WithMinGap(gap)).
+		Get(t.Context(), "ctrl-n", "/bbs/app/feeds", nil); res.Err != nil {
+		t.Fatalf("second transport's Get: %v", res.Err)
+	}
+	if d := time.Since(start); d < gap {
+		t.Errorf("two transports dialed %v apart, want >= %v — the ledger must span them", d, gap)
+	}
+}
+
 // TestTransportGapCancelledByContext: a cancelled context breaks the
 // politeness wait instead of blocking the caller for the full gap.
 func TestTransportGapCancelledByContext(t *testing.T) {

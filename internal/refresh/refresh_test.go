@@ -1150,6 +1150,7 @@ func TestRefreshHeyboxTracerBullet(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("READSCOPE_HEYBOX_BASE", srv.URL)
+	t.Setenv("READSCOPE_HEYBOX_MINGAP", "0") // tests run flat out; the ledger still spans transports
 	t.Setenv("READSCOPE_HEYBOX_DEVICE", "0123456789abcdef0123456789abcdef")
 
 	st, err := store.Open(filepath.Join(t.TempDir(), "heybox.db"))
@@ -1226,6 +1227,7 @@ func TestRefreshHeyboxTracerBullet(t *testing.T) {
 	}))
 	t.Cleanup(captcha.Close)
 	t.Setenv("READSCOPE_HEYBOX_BASE", captcha.URL)
+	t.Setenv("READSCOPE_HEYBOX_MINGAP", "0") // tests run flat out; the ledger still spans transports
 	results, err = Feed(context.Background(), st, srcs, "heybox", "recommend")
 	if err != nil {
 		t.Fatalf("Feed against captcha: %v", err)

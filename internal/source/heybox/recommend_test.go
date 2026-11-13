@@ -205,6 +205,7 @@ func TestNewHonorsEnvOverrides(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(fake.handler))
 	t.Cleanup(srv.Close)
 	t.Setenv("READSCOPE_HEYBOX_BASE", srv.URL)
+	t.Setenv("READSCOPE_HEYBOX_MINGAP", "0") // tests run flat out; the ledger still spans transports
 	t.Setenv("READSCOPE_HEYBOX_DEVICE", "fedcba9876543210fedcba9876543210")
 
 	src, err := New(core.DefaultSources())
@@ -231,6 +232,7 @@ func TestNewMintsDeviceFileInConfigDir(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(fake.handler))
 	t.Cleanup(srv.Close)
 	t.Setenv("READSCOPE_HEYBOX_BASE", srv.URL)
+	t.Setenv("READSCOPE_HEYBOX_MINGAP", "0") // tests run flat out; the ledger still spans transports
 	t.Setenv("READSCOPE_HEYBOX_DEVICE", "")
 	t.Setenv("READSCOPE_CONFIG", t.TempDir())
 

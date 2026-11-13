@@ -68,19 +68,30 @@ func LoadOrCreateDeviceID(path string) (string, error) {
 	return id, nil
 }
 
+// isLowerHex reports whether s is a non-empty string of [0-9a-f] —
+// the shape both the device fingerprint and the hex link_id share.
+// One spelling (the 01 review's transfer: device.go and source.go
+// had twin rune loops).
+func isLowerHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return false
+		}
+	}
+	return true
+}
+
 // parseDeviceID accepts a 32-hex-char line with optional surrounding
 // whitespace; anything else is "" (the caller decides what that
 // means — a re-mint for a blank new file, an error for a corrupt
 // one).
 func parseDeviceID(raw string) string {
 	id := strings.TrimSpace(raw)
-	if len(id) != 32 {
+	if len(id) != 32 || !isLowerHex(id) {
 		return ""
-	}
-	for _, r := range id {
-		if !strings.ContainsRune("0123456789abcdef", r) {
-			return ""
-		}
 	}
 	return id
 }

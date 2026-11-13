@@ -12,6 +12,6 @@
 - [x] 广告卡不出现在列表;帖子卡 id 形如 `hb:link/<hexid>`,Ctrl+O 打开 share_url
 - [x] Ctrl+N 翻页命中前进、到底提示,重启后续翻不重拉(refresh tracer 钉住拨号序列)
 - [x] show_captcha/429/版本过低 → 状态栏「稍后再试」级提示,不自动重试,已缓存内容不受影响(版本门槛的 msg 匹配为预留宽匹配,真网文案归 04 票校准)
-- [x] 断网重启后列表即现、条目可读;页间延时可观察(无 429)(传输层 1.5s 预间隙,可观察测试入 transport_test)
+- [x] 断网重启后列表即现、条目可读;页间延时可观察(无 429)(传输层 1.5s 预间隙,账本跨 transport 按基址共享——F5/Ctrl+N 各自新建 source 也能起效,可观察测试入 transport_test)
 - [x] 新增 UI 文案 zh-CN/en 双语齐备,语言包完整性测试过
 - [x] httptest 假小黑盒 + 冒烟样本 fixtures 覆盖传输矩阵与列表解析;CI 恒离线(P14 裁剪样本转正 testdata/recommend-page.json)

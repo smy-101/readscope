@@ -70,6 +70,15 @@ func New(*core.Sources) (source.Source, error) {
 	if v := os.Getenv("READSCOPE_HEYBOX_BASE"); v != "" {
 		base = v
 	}
+	// READSCOPE_HEYBOX_MINGAP (milliseconds) rescales the politeness
+	// delay — tests run flat out, a real-net smoke can slow down. The
+	// production default is the smoke's 1.5s floor.
+	minGap := defaultMinGap
+	if v := os.Getenv("READSCOPE_HEYBOX_MINGAP"); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms >= 0 {
+			minGap = time.Duration(ms) * time.Millisecond
+		}
+	}
 	var device string
 	if v := os.Getenv("READSCOPE_HEYBOX_DEVICE"); v != "" {
 		device = v // probe/debug override; bypasses the file
@@ -83,7 +92,7 @@ func New(*core.Sources) (source.Source, error) {
 			return nil, err
 		}
 	}
-	return &Source{tr: NewTransport(base, device)}, nil
+	return &Source{tr: NewTransport(base, device, WithMinGap(minGap))}, nil
 }
 
 // newSourceAt is the test constructor: a transport pinned to one base
@@ -238,16 +247,10 @@ func hexIDFromShareURL(shareURL string) string {
 	if err != nil {
 		return ""
 	}
-	id := u.Query().Get("link_id")
-	if id == "" {
-		return ""
+	if id := u.Query().Get("link_id"); isLowerHex(id) {
+		return id
 	}
-	for _, r := range id {
-		if !strings.ContainsRune("0123456789abcdef", r) {
-			return ""
-		}
-	}
-	return id
+	return ""
 }
 
 // numPtr converts a JSON number field to *int, nil when absent — the
