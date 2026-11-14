@@ -3,6 +3,7 @@ package i18n
 import (
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -35,17 +36,17 @@ func TestParityAllCatalogsShareKeyTree(t *testing.T) {
 	}
 }
 
-// verbRe matches one fmt verb, indexed or not ("%d", "%[2]s",
-// "%-3.2f"); "%%" (literal percent) matches nothing — it takes no
-// argument, so it must not perturb the verb sequence.
-var verbRe = regexp.MustCompile(`%(\[[0-9]+\])?[+#0-9.]*[a-zA-Z]`)
+// verbRe matches one fmt verb, indexed or not, with any flag,
+// width, or precision ("%d", "%[2]s", "%-3.2f", "% d").
+var verbRe = regexp.MustCompile(`%(\[[0-9]+\])?[-+#0-9. ]*[a-zA-Z]`)
 
 // verbs is a message's verb sequence in order: with unindexed verbs
 // Sprintf fills arguments in that order, so a translation whose
 // sequence differs from the default pack's is a runtime "%!d/string"
-// blow-up waiting for its first caller.
+// blow-up waiting for its first caller. "%%" (literal percent) is
+// stripped first so "%%d"-shaped text can't mint a phantom verb.
 func verbs(msg string) []string {
-	return verbRe.FindAllString(msg, -1)
+	return verbRe.FindAllString(strings.ReplaceAll(msg, "%%", ""), -1)
 }
 
 // TestParityFormatVerbsMatch pins the other half of translation
