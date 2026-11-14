@@ -403,3 +403,68 @@ func TestHeyboxDetailRiskRefusal(t *testing.T) {
 		t.Error("the cached body must keep rendering through the refusal")
 	}
 }
+
+// The 楼中楼's own Ctrl+N: at the reply layer's loaded end it walks
+// the sub door (first page from the start — the merge dedups the
+// previews already shown), folds the fresh rows in place, and the
+// exhausted cursor turns the next press into the no-more line. This
+// is the safety net under the eager gap walk (a >6-page or
+// soft-failed root still reads to its end), spec story 10.
+func TestHeyboxReplyLayerCtrlNWalksSubs(t *testing.T) {
+	p := &postPlane{}
+	// Floor 101's subs walk: one fresh row past the two previews,
+	// cursor ends. (The default plane serves an empty sub page —
+	// override it with a serving one.)
+	srv := p.server(t)
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/bbs/app/link/tree":
+			fmt.Fprint(w, p.tree(r.URL.Query().Get("offset")))
+		case "/bbs/app/comment/sub/comments":
+			p.mu.Lock()
+			p.subGot++
+			p.mu.Unlock()
+			fmt.Fprint(w, `{"msg":"","status":"ok","result":{"has_more":false,"lastval":0,"comments":[
+			 {"commentid":5101,"userid":8,"create_at":1794386229,"text":"直接回复","child_num":0,"up":0,
+			  "replyid":101,"user":{"username":"层客甲"}},
+			 {"commentid":6101,"userid":9,"create_at":1794386229,"text":"二层回复","child_num":0,"up":0,
+			  "replyid":5101,"user":{"username":"层客乙"}},
+			 {"commentid":7101,"userid":10,"create_at":1794386229,"text":"晚来的回复","child_num":0,"up":0,
+			  "replyid":101,"user":{"username":"层客丙"}}]}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	m := openPost(t, srv, 18)
+	var cmd tea.Cmd
+	for range 2 { // body → floors → replies
+		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+		m = pump(t, m, cmd)
+	}
+	if m.reader.layer != layerReplies || len(m.reader.floors[0].replies) != 2 {
+		t.Fatalf("reply layer = %v with %d rows, want the two cached previews", m.reader.layer, len(m.reader.floors[0].replies))
+	}
+
+	// Ctrl+N with the whole loaded window in view: the walk's page.
+	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = pump(t, m, cmd)
+	replies := m.reader.floors[0].replies
+	if len(replies) != 3 || replies[2].ID != "7101" {
+		t.Fatalf("replies after Ctrl+N = %+v, want the fresh row spliced under floor 101", replies)
+	}
+	if !strings.Contains(m.View(), "晚来的回复") {
+		t.Error("the fresh 楼中楼 row must render in place")
+	}
+	if m.status != m.cat.Get("zhihu.comments_loaded", 3) {
+		t.Errorf("status = %q, want the comments-loaded line", m.status)
+	}
+
+	// The cursor is spent: the next Ctrl+N says no-more.
+	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = pump(t, m, cmd)
+	if m.status != m.cat.Get("status.more_end") {
+		t.Errorf("status = %q, want the no-more line", m.status)
+	}
+}

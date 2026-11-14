@@ -58,10 +58,12 @@ func hexIDOfItem(itemID string) (string, bool) {
 }
 
 // treeResult is link/tree's result payload: the post itself (link),
-// the floor groups (comments), and the floors paging pair
-// (total_page; total_floor_num rides along unparsed-judgment — the
-// smoke saw it disagree with the groups served, so the walk trusts
-// total_page alone).
+// the floor groups (comments), and the floors paging bound
+// total_page. The page's other two counters stay deliberately
+// unparsed: total_floor_num disagreed with the groups the smoke's
+// own page served, and has_more_floors carries nothing total_page
+// plus the empty-page end guard do not (P11: has_more_floors 0 with
+// total_page 1 — one signal, two spellings); one bound, one rule.
 type treeResult struct {
 	Link      treeLink       `json:"link"`
 	Comments  []commentGroup `json:"comments"`
@@ -341,7 +343,11 @@ func floorsCursor(page treeResult, offset int) string {
 // on one ledger wake (the smoke's zero-429 came from serial gaps;
 // pacing correctness over completion speed). A failed walk is soft
 // and silent, the zhihu rule: the floor keeps its hot previews, and
-// a partial comment tree beats a failed page.
+// a partial comment tree beats a failed page. A floor re-served on
+// a later page re-walks its gap (the source cannot see the cache
+// that already holds the walked subs — the merge drops them): a
+// bounded waste the smoke's measured zero-overlap offsets make
+// rare, the same re-walk cost zhihu's completion carries.
 func (s *Source) completeGaps(ctx context.Context, hexID string, tree []core.Comment) []core.Comment {
 	out := make([]core.Comment, 0, len(tree))
 	held := make(map[string]bool, len(tree))

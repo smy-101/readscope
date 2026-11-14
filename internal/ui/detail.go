@@ -322,6 +322,10 @@ func (m Model) commentsFooter() string {
 		}
 		return m.cat.Get("detail.no_comments")
 	case d.post:
+		// The count rides the list snapshot's comment_num — the count
+		// the web header shows (roots + 楼中楼 both in). The fallback
+		// counts loaded roots only (a snapshot-less row is rare: the
+		// heybox list always serves comment_num).
 		if n := d.item.Item.NumComments; n != nil && *n > 0 {
 			return m.cat.Get("zhihu.comments_n", m.zhihuCount(int64(*n)))
 		}
@@ -612,8 +616,8 @@ func (m *Model) maybeKickArticleComments() tea.Cmd {
 // detailErrStatus maps one detail-fetch failure to its status line:
 // zhihu session errors become login guidance, a gone question/answer
 // the friendly 不存在或已删除 line, heybox's risk family the 稍后再试
-// line (the same sugar-coating the list fetch gets), everything else
-// the raw error.
+// line (the same sugar-coating the list fetch gets — one mapper,
+// heyboxRiskStatus, serves both), everything else the raw error.
 func (m Model) detailErrStatus(err error) string {
 	if s := m.zhihuSessionStatus(err); s != "" {
 		return s
@@ -621,8 +625,8 @@ func (m Model) detailErrStatus(err error) string {
 	if errors.Is(err, zhihu.ErrContentGone) {
 		return m.cat.Get("zhihu.question_gone")
 	}
-	if errors.Is(err, heybox.ErrTryLater) {
-		return m.cat.Get("heybox.risk_later")
+	if s := m.heyboxRiskStatus(err); s != "" {
+		return s
 	}
 	return m.cat.Get("errors.detail_fetch", err)
 }

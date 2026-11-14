@@ -193,7 +193,7 @@ func TestStarSnapshotExcludesComments(t *testing.T) {
 // paged-in floor (the merge rules' heybox halves are pinned in
 // merge_test; this is the composition).
 func TestHeyboxDetailCompositions(t *testing.T) {
-	tree := func(offset string, totalPage int, floorIDs ...int) string {
+	tree := func(totalPage int, floorIDs ...int) string {
 		groups := make([]string, 0, len(floorIDs))
 		for _, id := range floorIDs {
 			groups = append(groups, fmt.Sprintf(`{"comment":[
@@ -213,8 +213,8 @@ func TestHeyboxDetailCompositions(t *testing.T) {
 		  "replyid":%d,"user":{"username":"补全客"}}]}}`, root+9000, root)
 	}
 	pages := map[string]string{
-		"0": tree("0", 2, 101, 102),
-		"1": tree("1", 2, 103),
+		"0": tree(2, 101, 102),
+		"1": tree(2, 103),
 	}
 	subs := map[string]string{"101": subsFor(101), "103": subsFor(103)}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

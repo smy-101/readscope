@@ -282,6 +282,29 @@ func TestDetailCompletesFloorGaps(t *testing.T) {
 			t.Errorf("comment %s served %d times — the re-served preview must dedup", id, n)
 		}
 	}
+	// The visible count ends at the SERVER's truth, not child_num: the
+	// captured root reports child_num 5 but its walk ends at
+	// has_more=false having served 4 (the missing one is deleted
+	// upstream — the host's own arithmetic, P12's measurement). The
+	// floor header shows the tree's count once replies are loaded, so
+	// 楼中楼可见数与楼层头一致, by construction of this walk.
+	subsOf522 := 0
+	floorOf := map[string]string{}
+	for _, cm := range c.Comments {
+		if cm.ParentID == "" {
+			floorOf[cm.ID] = cm.ID
+		} else if f, ok := floorOf[cm.ParentID]; ok {
+			floorOf[cm.ID] = f
+		}
+	}
+	for _, cm := range c.Comments {
+		if floorOf[cm.ID] == "997948522" && cm.ID != "997948522" {
+			subsOf522++
+		}
+	}
+	if subsOf522 != 4 {
+		t.Errorf("floor 997948522 visible subs = %d, want 4 (the server's has_more end)", subsOf522)
+	}
 	// Tree order survived: parents strictly before children.
 	pos := map[string]int{}
 	for i, cm := range c.Comments {
