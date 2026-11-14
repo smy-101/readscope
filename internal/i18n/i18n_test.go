@@ -2,6 +2,7 @@ package i18n
 
 import (
 	"reflect"
+	"regexp"
 	"testing"
 )
 
@@ -30,6 +31,49 @@ func TestParityAllCatalogsShareKeyTree(t *testing.T) {
 		if !reflect.DeepEqual(baseKeys, keys) {
 			t.Errorf("%s: key tree differs from %s\n  missing: %v\n  extra:   %v",
 				info.Code, Default, diff(baseKeys, keys), diff(keys, baseKeys))
+		}
+	}
+}
+
+// verbRe matches one fmt verb, indexed or not ("%d", "%[2]s",
+// "%-3.2f"); "%%" (literal percent) matches nothing — it takes no
+// argument, so it must not perturb the verb sequence.
+var verbRe = regexp.MustCompile(`%(\[[0-9]+\])?[+#0-9.]*[a-zA-Z]`)
+
+// verbs is a message's verb sequence in order: with unindexed verbs
+// Sprintf fills arguments in that order, so a translation whose
+// sequence differs from the default pack's is a runtime "%!d/string"
+// blow-up waiting for its first caller.
+func verbs(msg string) []string {
+	return verbRe.FindAllString(msg, -1)
+}
+
+// TestParityFormatVerbsMatch pins the other half of translation
+// parity: the key-tree test above proves every key exists in every
+// pack, this one proves every key formats the same arguments. A zh
+// "%d 条" paired with an en "%s items" would otherwise pass the
+// key tree and only explode the first time the string is fetched.
+func TestParityFormatVerbsMatch(t *testing.T) {
+	base, err := Load(Default)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", Default, err)
+	}
+	infos, err := Available()
+	if err != nil {
+		t.Fatalf("Available: %v", err)
+	}
+	for _, info := range infos {
+		c, err := Load(info.Code)
+		if err != nil {
+			t.Fatalf("Load(%q): %v", info.Code, err)
+		}
+		for _, key := range c.Keys() {
+			want := verbs(base.msgs[key])
+			got := verbs(c.msgs[key])
+			if !reflect.DeepEqual(want, got) {
+				t.Errorf("%s: %s verb sequence %v, %s has %v\n  default: %q\n  %s: %q",
+					Default, key, want, info.Code, got, base.msgs[key], info.Code, c.msgs[key])
+			}
 		}
 	}
 }
