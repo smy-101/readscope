@@ -1,0 +1,339 @@
+{
+ "msg": "",
+ "status": "ok",
+ "result": {
+  "link": {
+   "linkid": 196586004,
+   "userid": 101992933,
+   "title": "",
+   "description": "成功忽悠两个入坑[cube_滑稽]",
+   "text": "成功忽悠两个入坑[cube_滑稽]",
+   "link_tag": 1,
+   "has_video": 1,
+   "is_web": 1,
+   "create_at": 1794304007,
+   "modify_at": 1794462009,
+   "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?h_camp=link&h_src=YXBwX3NoYXJl&link_id=c8dc72cd5cf1&new_post_share_style_v2=0",
+   "comment_num": 18,
+   "link_award_num": 49,
+   "is_article": 1,
+   "ip_location": "重庆",
+   "video_url": "https://videoheybox.max-c.com/video/2026/11/10/72a6248fdfbaac6965596b089dd3d692.mp4?auth=1794548272-VqK73s3g-0-68d713b918a8a1eee292d081eeff74ee&sign=169285cca9b4dfff03fd399f32456c54&t=6af6a35c",
+   "video_thumb": "https://imgheybox.max-c.com/bbs/2026/11/10/3dcec30f004559a223d917d8f3020591.jpeg",
+   "video_duration": 7,
+   "user": {
+    "userid": 101992933,
+    "username": "白素贞"
+   }
+  },
+  "comments": [
+   {
+    "comment": [
+     {
+      "commentid": 997952961,
+      "userid": 73595867,
+      "create_at": 1794386229,
+      "text": "好家伙，一个寝室仨人玩，氛围感拉满了",
+      "ip_location": "河南",
+      "child_num": 0,
+      "up": 12,
+      "is_support": 2,
+      "user": {
+       "userid": "73595867",
+       "username": "飘回"
+      },
+      "floor_num": 6,
+      "has_more": 0,
+      "is_top": 1
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 998019253,
+      "userid": 69275497,
+      "create_at": 1794390501,
+      "text": "一起开荒最有趣了[cube_喜欢]还能讨论剧情",
+      "ip_location": "江苏",
+      "child_num": 0,
+      "up": 8,
+      "is_support": 2,
+      "user": {
+       "userid": "69275497",
+       "username": "功利哀牢"
+      },
+      "floor_num": 7,
+      "has_more": 0,
+      "is_top": 0
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 997948522,
+      "userid": 14819084,
+      "create_at": 1794385943,
+      "text": "脱离低级游戏，这是善事",
+      "ip_location": "重庆",
+      "child_num": 5,
+      "up": 4,
+      "is_support": 2,
+      "user": {
+       "userid": "14819084",
+       "username": "韩望舒"
+      },
+      "floor_num": 5,
+      "has_more": 1,
+      "is_top": 0
+     },
+     {
+      "commentid": 998059957,
+      "userid": 101473845,
+      "create_at": 1794393221,
+      "text": "什么是低级游戏？",
+      "ip_location": "河南",
+      "child_num": 0,
+      "up": 0,
+      "is_support": 2,
+      "user": {
+       "userid": "101473845",
+       "username": "玩家101473845"
+      },
+      "floor_num": 0,
+      "has_more": 0,
+      "is_top": 0,
+      "replyid": 997948522,
+      "replyuserid": 14819084,
+      "replyuser": {
+       "userid": "14819084",
+       "username": "韩望舒"
+      }
+     },
+     {
+      "commentid": 998127763,
+      "userid": 60513874,
+      "create_at": 1794398511,
+      "text": "抽卡二游",
+      "ip_location": "广西",
+      "child_num": 0,
+      "up": 0,
+      "is_support": 2,
+      "user": {
+       "userid": "60513874",
+       "username": "hgchi4"
+      },
+      "floor_num": 0,
+      "has_more": 0,
+      "is_top": 0,
+      "replyid": 998059957,
+      "replyuserid": 101473845,
+      "replyuser": {
+       "userid": "101473845",
+       "username": "玩家101473845"
+      }
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 998273704,
+      "userid": 49276126,
+      "create_at": 1794411831,
+      "text": "每年都有大学生[cube_鬼斩客]",
+      "ip_location": "广东",
+      "child_num": 0,
+      "up": 2,
+      "is_support": 2,
+      "user": {
+       "userid": "49276126",
+       "username": "只是太喜欢我的头像了"
+      },
+      "floor_num": 10,
+      "has_more": 0,
+      "is_top": 0
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 998123033,
+      "userid": 67710215,
+      "create_at": 1794398106,
+      "text": "今夕是何年",
+      "ip_location": "吉林",
+      "child_num": 1,
+      "up": 1,
+      "is_support": 2,
+      "user": {
+       "userid": "67710215",
+       "username": "胖虎和饺子"
+      },
+      "floor_num": 9,
+      "has_more": 0,
+      "is_top": 0
+     },
+     {
+      "commentid": 998261208,
+      "userid": 76320894,
+      "create_at": 1794410722,
+      "text": "放心，年年都有大一新生。",
+      "ip_location": "广东",
+      "child_num": 0,
+      "up": 0,
+      "is_support": 2,
+      "user": {
+       "userid": "76320894",
+       "username": "看看你后面"
+      },
+      "floor_num": 0,
+      "has_more": 0,
+      "is_top": 0,
+      "replyid": 998123033,
+      "replyuserid": 67710215,
+      "replyuser": {
+       "userid": "67710215",
+       "username": "胖虎和饺子"
+      }
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 997815931,
+      "userid": 77406618,
+      "create_at": 1794376077,
+      "text": "这不弄个联机玩玩",
+      "ip_location": "河南",
+      "child_num": 0,
+      "up": 2,
+      "is_support": 2,
+      "user": {
+       "userid": "77406618",
+       "username": "o步停o"
+      },
+      "floor_num": 4,
+      "has_more": 0,
+      "is_top": 0
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 997799713,
+      "userid": 15766390,
+      "create_at": 1794374623,
+      "text": "给钟馗做贡献了属于是[cube_滑稽]",
+      "ip_location": "四川",
+      "child_num": 0,
+      "up": 2,
+      "is_support": 2,
+      "user": {
+       "userid": "15766390",
+       "username": "心态凸^-^凸爆炸"
+      },
+      "floor_num": 3,
+      "has_more": 0,
+      "is_top": 0
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 997615008,
+      "userid": 19584789,
+      "create_at": 1794361789,
+      "text": "赶紧配手柄",
+      "ip_location": "广东",
+      "child_num": 3,
+      "up": 0,
+      "is_support": 2,
+      "user": {
+       "userid": "19584789",
+       "username": "XFLRFD"
+      },
+      "floor_num": 2,
+      "has_more": 1,
+      "is_top": 0
+     },
+     {
+      "commentid": 997617452,
+      "userid": 101992933,
+      "create_at": 1794361964,
+      "text": "键鼠挺好的，我就用的键鼠[cube_惊讶]",
+      "ip_location": "重庆",
+      "child_num": 0,
+      "up": 0,
+      "is_support": 2,
+      "user": {
+       "userid": "101992933",
+       "username": "白素贞"
+      },
+      "floor_num": 0,
+      "has_more": 0,
+      "is_top": 0,
+      "replyid": 997615008,
+      "replyuserid": 19584789,
+      "replyuser": {
+       "userid": "19584789",
+       "username": "XFLRFD"
+      }
+     },
+     {
+      "commentid": 997763837,
+      "userid": 23718524,
+      "create_at": 1794371492,
+      "text": "可以的，后边如果有机会的话可以考虑换个手柄玩玩，我个人感觉玩这种动作类的手柄体验更好一些。我用的是xbox手柄",
+      "ip_location": "北京",
+      "child_num": 0,
+      "up": 0,
+      "is_support": 2,
+      "user": {
+       "userid": "23718524",
+       "username": "玲瓏骰子安红豆"
+      },
+      "floor_num": 0,
+      "has_more": 0,
+      "is_top": 0,
+      "replyid": 997617452,
+      "replyuserid": 101992933,
+      "replyuser": {
+       "userid": "101992933",
+       "username": "白素贞"
+      }
+     }
+    ]
+   },
+   {
+    "comment": [
+     {
+      "commentid": 998104581,
+      "userid": 67836146,
+      "create_at": 1794396593,
+      "text": "优秀",
+      "ip_location": "新加坡",
+      "child_num": 0,
+      "up": 0,
+      "is_support": 2,
+      "user": {
+       "userid": "67836146",
+       "username": "王小军_"
+      },
+      "floor_num": 8,
+      "has_more": 0,
+      "is_top": 0
+     }
+    ]
+   }
+  ],
+  "total_page": 1,
+  "total_floor_num": 8,
+  "has_more_floors": 0
+ }
+}

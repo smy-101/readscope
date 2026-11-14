@@ -1,0 +1,90 @@
+{
+ "msg": "",
+ "status": "ok",
+ "result": {
+  "has_more": false,
+  "lastval": 998703867,
+  "comments": [
+   {
+    "commentid": 998059957,
+    "userid": 101473845,
+    "create_at": 1794393221,
+    "text": "什么是低级游戏？",
+    "comment_type": 1,
+    "replyid": 997948522,
+    "replyuserid": 14819084,
+    "ip_location": "河南",
+    "up": 0,
+    "has_imgs": 0,
+    "user": {
+     "userid": "101473845",
+     "username": "玩家101473845"
+    },
+    "replyuser": {
+     "userid": "14819084",
+     "username": "韩望舒"
+    }
+   },
+   {
+    "commentid": 998127763,
+    "userid": 60513874,
+    "create_at": 1794398511,
+    "text": "抽卡二游",
+    "comment_type": 1,
+    "replyid": 998059957,
+    "replyuserid": 101473845,
+    "ip_location": "广西",
+    "up": 0,
+    "has_imgs": 0,
+    "user": {
+     "userid": "60513874",
+     "username": "hgchi4"
+    },
+    "replyuser": {
+     "userid": "101473845",
+     "username": "玩家101473845"
+    }
+   },
+   {
+    "commentid": 998151957,
+    "userid": 99862099,
+    "create_at": 1794400543,
+    "text": "王者荣耀",
+    "comment_type": 1,
+    "replyid": 998059957,
+    "replyuserid": 101473845,
+    "ip_location": "德国",
+    "up": 0,
+    "has_imgs": 0,
+    "user": {
+     "userid": "99862099",
+     "username": "ICEY女王大人的忠仆"
+    },
+    "replyuser": {
+     "userid": "101473845",
+     "username": "玩家101473845"
+    }
+   },
+   {
+    "commentid": 998703867,
+    "userid": 101461533,
+    "create_at": 1794462009,
+    "text": "大胆！！[cube_鳄鱼]",
+    "comment_type": 1,
+    "replyid": 998127763,
+    "replyuserid": 60513874,
+    "ip_location": "安徽",
+    "up": 0,
+    "has_imgs": 0,
+    "user": {
+     "userid": "101461533",
+     "username": "玩家101461533"
+    },
+    "replyuser": {
+     "userid": "60513874",
+     "username": "hgchi4"
+    }
+   }
+  ]
+ }
+}

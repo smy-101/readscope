@@ -28,6 +28,7 @@ import (
 	"github.com/smy-101/readscope/internal/refresh"
 	"github.com/smy-101/readscope/internal/render"
 	"github.com/smy-101/readscope/internal/source"
+	"github.com/smy-101/readscope/internal/source/heybox"
 	"github.com/smy-101/readscope/internal/source/zhihu"
 	"github.com/smy-101/readscope/internal/store"
 )
@@ -85,6 +86,7 @@ type detail struct {
 	commentsBusy bool
 	floorsBusy   bool
 	article      bool // a zhihu article's open: two-layer detail, no floors layer (ticket 09)
+	post         bool // a heybox post's open: body layer with the comment footer, no floor list under the body (ticket 03) — Enter still drops into the floors layer, unlike an article
 
 	// The lazy-body half (source.BodySource, ticket 03): a first open
 	// of a body-less row whose full text is fetched now — daily
@@ -160,6 +162,7 @@ func (m *Model) openDetail() (bool, tea.Cmd) {
 				d.commentURL = ds.CommentURL
 				d.loading = true // until the cache probe says otherwise
 				d.article = zhihu.IsArticleItem(d.item.Item.ID)
+				d.post = d.item.Item.Source == heybox.ID
 			}
 			// The paging detail (zhihu questions): its layers load more
 			// on the network — Ctrl+N on the question and comment layers
@@ -241,14 +244,15 @@ func (m *Model) relayoutReader() {
 
 // rebuildBodyDoc recomputes the body layer's document — header, body,
 // and (for detail sources) the state footer whose text tracks the
-// load state — keeping the reading position clamped. A paging detail
-// (zhihu question) instead assembles the whole question layer:
-// description, then the answer floor list (one floor-head line per
-// answer), then the answers footer with its load-more state.
+// load state — keeping the reading position clamped. A zhihu question
+// assembles the whole question layer: description, then the answer
+// floor list, then the answers footer; a heybox post's body layer
+// carries no floor list either (the floors live one layer down, not
+// inline under the body) — only the comment footer.
 func (m *Model) rebuildBodyDoc() {
 	d := m.reader
 	doc := m.detailDoc(d.item.Item)
-	if d.pager != nil && !d.article { // an article's body layer has no floor list under it
+	if d.pager != nil && !d.article && !d.post {
 		doc.Blocks = append(doc.Blocks, m.questionLayerBlocks()...)
 	} else if d.hasDetail {
 		doc.Blocks = append(doc.Blocks,
@@ -300,7 +304,9 @@ func (m Model) answersFooter() string {
 // question layer carries answersFooter instead; a zhihu ARTICLE —
 // ticket 09 — counts to the article's own comment total: the tree's
 // own count once roots are loaded, else the server's comment_count
-// off the pseudo floor.)
+// off the pseudo floor; a heybox POST counts to the server's own
+// comment total — the list snapshot's comment_num, the count the web
+// header shows — falling back to what loaded.)
 func (m Model) commentsFooter() string {
 	d := m.reader
 	switch {
@@ -313,6 +319,14 @@ func (m Model) commentsFooter() string {
 			if n := m.floorCommentCount(&d.floors[0]); n != nil && *n > 0 {
 				return m.cat.Get("zhihu.comments_n", m.zhihuCount(int64(*n)))
 			}
+		}
+		return m.cat.Get("detail.no_comments")
+	case d.post:
+		if n := d.item.Item.NumComments; n != nil && *n > 0 {
+			return m.cat.Get("zhihu.comments_n", m.zhihuCount(int64(*n)))
+		}
+		if len(d.floors) > 0 {
+			return m.cat.Get("zhihu.comments_n", m.zhihuCount(int64(len(d.floors))))
 		}
 		return m.cat.Get("detail.no_comments")
 	case len(d.floors) == 0:
@@ -597,13 +611,18 @@ func (m *Model) maybeKickArticleComments() tea.Cmd {
 
 // detailErrStatus maps one detail-fetch failure to its status line:
 // zhihu session errors become login guidance, a gone question/answer
-// the friendly 不存在或已删除 line, everything else the raw error.
+// the friendly 不存在或已删除 line, heybox's risk family the 稍后再试
+// line (the same sugar-coating the list fetch gets), everything else
+// the raw error.
 func (m Model) detailErrStatus(err error) string {
 	if s := m.zhihuSessionStatus(err); s != "" {
 		return s
 	}
 	if errors.Is(err, zhihu.ErrContentGone) {
 		return m.cat.Get("zhihu.question_gone")
+	}
+	if errors.Is(err, heybox.ErrTryLater) {
+		return m.cat.Get("heybox.risk_later")
 	}
 	return m.cat.Get("errors.detail_fetch", err)
 }
@@ -1014,7 +1033,11 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 				// points at Ctrl+N instead of dead-ending silently
 				// (ticket 10).
 				if d.floorIdx >= len(d.floors)-1 && m.floorsPageRemain() {
-					m.status = m.cat.Get("zhihu.answers_tail")
+					if d.post {
+						m.status = m.cat.Get("heybox.floors_tail")
+					} else {
+						m.status = m.cat.Get("zhihu.answers_tail")
+					}
 				}
 			}
 		}
@@ -1024,12 +1047,14 @@ func (m *Model) detailKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		// The layer decides: hn hops in memory (floor skip / next
 		// reply); a zhihu question layer fetches the next answers page
 		// and its comment layer the next roots page — the detail
-		// walk's own load-more (spec story 8).
+		// walk's own load-more (spec story 8). A heybox post's body
+		// layer pages nothing either (its floors walk lives one layer
+		// down, at the comment layer's Ctrl+N).
 		switch d.layer {
 		case layerBody:
 			if d.pager != nil {
-				if d.article {
-					return true, nil // the article pages nothing at the body layer (no floors walk)
+				if d.article || d.post {
+					return true, nil // no floors walk at the body layer
 				}
 				return true, m.moreFloorsCmd()
 			}
@@ -1227,7 +1252,11 @@ func (m *Model) floorsLanded(msg floorsMsg) tea.Cmd {
 		msg.next = "" // the count is served: the cursor's residue is not a page
 	}
 	d.feedsCursor = msg.next
-	m.status = m.cat.Get("zhihu.answers_loaded", len(d.floors))
+	if d.post {
+		m.status = m.cat.Get("heybox.floors_loaded", len(d.floors))
+	} else {
+		m.status = m.cat.Get("zhihu.answers_loaded", len(d.floors))
+	}
 	return nil
 }
 

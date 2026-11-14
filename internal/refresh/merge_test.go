@@ -556,3 +556,61 @@ func TestArticleDetailPersistsAndMergeKeepsWalkedComments(t *testing.T) {
 		t.Fatalf("body snapshot missing: %v %+v", err, rows)
 	}
 }
+
+// Ticket 03 (heybox) grows both folds for floors pages that carry
+// subtrees: a fresh floor's own 楼中楼 rides with it.
+
+// A fresh floor arriving WITH its subtree leads with it (heybox's
+// tree pages carry hot previews, and the fetch gap-completed them) —
+// the fresh subtree outranks both the cache's smaller one and a
+// stale cached subtree under a floor the fresh page re-serves
+// subtree-less (zhihu's shape: the floors page carries no subtree,
+// so the cache's survives).
+func TestMergeDetailTreePrefersFreshSubtrees(t *testing.T) {
+	old := []core.Comment{}
+	old = append(old, floors("f1")...)
+	old = append(old, subtree("f1", "f1.1")...)
+	old = append(old, floors("f2")...)
+	old = append(old, subtree("f2", "f2.1")...)
+
+	// f1 re-served with a GROWN subtree; f2 re-served bare.
+	fresh := []core.Comment{}
+	fresh = append(fresh, floors("f1")...)
+	fresh = append(fresh, subtree("f1", "f1.1", "f1.2", "f1.2.1")...)
+	fresh = append(fresh, floors("f2")...)
+
+	got := mergeDetailTree(old, fresh)
+	want := []string{"f1", "f1.1", "f1.2", "f1.2.1", "f2", "f2.1"}
+	var ids []string
+	for _, c := range got {
+		ids = append(ids, c.ID)
+	}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("subtree merge = %v, want %v", ids, want)
+	}
+}
+
+// A NEW floor's inline previews ride along under it (tree order
+// intact); a sub under a floor the cache already holds drops — that
+// floor's subtree is its own walk's business.
+func TestAppendFloorsCarriesNewFloorsSubtrees(t *testing.T) {
+	old := []core.Comment{}
+	old = append(old, floors("f1")...)
+	old = append(old, subtree("f1", "f1.1")...)
+
+	page := []core.Comment{} // f1 re-served with a late sub; f3 new with previews
+	page = append(page, floors("f1")...)
+	page = append(page, subtree("f1", "f1.9")...)
+	page = append(page, floors("f3")...)
+	page = append(page, subtree("f3", "f3.1", "f3.1.1")...)
+
+	got := appendFloors(old, page)
+	want := []string{"f1", "f1.1", "f3", "f3.1", "f3.1.1"}
+	var ids []string
+	for _, c := range got {
+		ids = append(ids, c.ID)
+	}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("subtree append = %v, want %v (new floor's previews ride, held floor's late sub drops)", ids, want)
+	}
+}

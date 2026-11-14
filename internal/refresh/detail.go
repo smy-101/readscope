@@ -141,42 +141,55 @@ func detailPagerOf(srcs *core.Sources, it core.Item) (source.DetailPager, error)
 }
 
 // mergeDetailTree folds a fresh first page into the cached tree: the
-// fresh floors lead with fresh scores and counts, and every old
-// floor the fresh page did not re-serve survives at the tail with
-// the comment subtree the cache already holds. Nothing ever unloads
-// — a re-rank that shuffles a Ctrl+N'd floor off page 1 must not
-// drop it (client-side, "deleted upstream" and "re-ranked" are
-// indistinguishable, and losing a read comment tree is the worse
-// miss). A floor deleted upstream therefore lingers as a stale tail
-// row: it was a real answer when fetched, and offline data stays
-// readable.
+// fresh floors lead with fresh scores and counts, every old floor the
+// fresh page did not re-serve survives at the tail with the comment
+// subtree the cache already holds, and a fresh floor that arrives
+// WITH its own subtree (heybox: the tree page carries hot 楼中楼
+// previews, and the fetch gap-completed them) leads with THAT — the
+// fresh copy outranks the cache, else a grown subtree would shed on
+// every refresh. Nothing ever unloads — a re-rank that shuffles a
+// Ctrl+N'd floor off page 1 must not drop it (client-side, "deleted
+// upstream" and "re-ranked" are indistinguishable, and losing a read
+// comment tree is the worse miss). A floor deleted upstream therefore
+// lingers as a stale tail row: it was a real floor when fetched, and
+// offline data stays readable.
 func mergeDetailTree(old, fresh []core.Comment) []core.Comment {
 	if len(old) == 0 {
 		return fresh
 	}
-	oldFloors, repliesOf := splitFloors(old)
+	oldFloors, oldReplies := splitFloors(old)
+	freshFloors, freshReplies := splitFloors(fresh)
 	freshIDs := make(map[string]bool, len(fresh))
 	out := make([]core.Comment, 0, len(old)+len(fresh))
-	for _, f := range fresh {
+	for _, f := range freshFloors {
 		freshIDs[f.ID] = true
 		out = append(out, f)
-		out = append(out, repliesOf[f.ID]...)
+		if subs := freshReplies[f.ID]; len(subs) > 0 {
+			out = append(out, subs...)
+		} else {
+			out = append(out, oldReplies[f.ID]...) // zhihu: the floors page carries no subtree
+		}
 	}
 	for _, of := range oldFloors {
 		if freshIDs[of.ID] {
 			continue // the fresh page's copy leads
 		}
 		out = append(out, of)
-		out = append(out, repliesOf[of.ID]...)
+		out = append(out, oldReplies[of.ID]...)
 	}
 	return out
 }
 
 // appendFloors folds one fetched floors page into the cached tree:
 // floors the cache already holds skip whole (the server happily
-// re-serves an answer on a later page — the dedup that keeps a
+// re-serves a floor on a later page — the dedup that keeps a
 // re-fetch from doubling a row), the rest append at the tail in page
-// order — never interleaved, the tail is where the walk left off.
+// order — never interleaved, the tail is where the walk left off —
+// and a NEW floor's own subtree (heybox: the hot 楼中楼 previews the
+// tree page carries inline) rides along under it, tree order intact.
+// A sub under a floor the cache already holds drops: that floor's
+// subtree is its own walk's business, and the next full refresh's
+// merge is what grows it.
 func appendFloors(old, page []core.Comment) []core.Comment {
 	if len(page) == 0 {
 		return old
@@ -185,12 +198,17 @@ func appendFloors(old, page []core.Comment) []core.Comment {
 	for _, c := range old {
 		held[c.ID] = true
 	}
+	appended := make(map[string]bool, len(page))
 	out := old
-	for _, f := range page {
-		if held[f.ID] || f.ParentID != "" {
-			continue // already cached, or not a floor (defensive)
+	for _, c := range page {
+		if held[c.ID] {
+			continue
 		}
-		out = append(out, f)
+		if c.ParentID != "" && !appended[c.ParentID] {
+			continue // a sub of a floor this pass did not append
+		}
+		out = append(out, c)
+		appended[c.ID] = true
 	}
 	return out
 }

@@ -73,6 +73,8 @@ cli_dup = "%s 已在圈列表中（topic %d）"
 cli_none = "没有匹配 %q 的圈，换个关键词试试"
 cli_cancel = "已取消，sources.toml 未修改"
 cli_bad_pick = "无效输入 %q —— 请输入 1-%d 的序号，或 q 取消"
+floors_loaded = "已加载 %d 楼"
+floors_tail = "已到已加载楼层末尾 · Ctrl+N 加载更多"
 
 [sidebar]
 no_feeds = "暂无订阅"

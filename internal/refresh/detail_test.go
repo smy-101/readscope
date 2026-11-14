@@ -6,6 +6,8 @@ package refresh
 // the offline half closes the server to prove the cache stands alone.
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,8 +18,9 @@ import (
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/store"
 
-	_ "github.com/smy-101/readscope/internal/source/hn"  // registry: hn
-	_ "github.com/smy-101/readscope/internal/source/rss" // registry: rss
+	_ "github.com/smy-101/readscope/internal/source/heybox" // registry: heybox
+	_ "github.com/smy-101/readscope/internal/source/hn"     // registry: hn
+	_ "github.com/smy-101/readscope/internal/source/rss"    // registry: rss
 )
 
 // storyTreeFixture: one floor with one reply, enough shape to prove
@@ -179,5 +182,155 @@ func TestStarSnapshotExcludesComments(t *testing.T) {
 	}
 	if strings.Contains(rows[0].Item.Title+rows[0].Item.Body, "root comment") {
 		t.Fatal("comment text leaked into the star snapshot")
+	}
+}
+
+// Ticket 03 (heybox): the detail compositions over the real heybox
+// source — Detail caches body + floors with completed 楼中楼 and
+// marks the post opened, DetailFloorsPage appends a later page's
+// floors WITH their inline previews, DetailCommentsPage folds a
+// floor's walked subs under it, and a re-open's merge keeps every
+// paged-in floor (the merge rules' heybox halves are pinned in
+// merge_test; this is the composition).
+func TestHeyboxDetailCompositions(t *testing.T) {
+	tree := func(offset string, totalPage int, floorIDs ...int) string {
+		groups := make([]string, 0, len(floorIDs))
+		for _, id := range floorIDs {
+			groups = append(groups, fmt.Sprintf(`{"comment":[
+			 {"commentid":%d,"userid":7,"create_at":1794386229,"text":"楼 %d","child_num":1,"up":%d,
+			  "floor_num":%d,"user":{"username":"楼长%d"}},
+			 {"commentid":%d,"userid":8,"create_at":1794386229,"text":"楼中楼 %d","child_num":0,"up":0,
+			  "replyid":%d,"user":{"username":"层客%d"}}]}`,
+				id, id, id%5, id, id, id+5000, id, id, id))
+		}
+		return fmt.Sprintf(`{"msg":"","status":"ok","result":{"link":{"text":"帖子正文[cube_滑稽]",
+		 "share_url":"https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=aaaa00000001"},
+		 "comments":[%s],"total_page":%d}}`, strings.Join(groups, ","), totalPage)
+	}
+	subsFor := func(root int) string {
+		return fmt.Sprintf(`{"msg":"","status":"ok","result":{"has_more":false,"lastval":0,"comments":[
+		 {"commentid":%d,"userid":9,"create_at":1794386229,"text":"补全的楼中楼","up":0,
+		  "replyid":%d,"user":{"username":"补全客"}}]}}`, root+9000, root)
+	}
+	pages := map[string]string{
+		"0": tree("0", 2, 101, 102),
+		"1": tree("1", 2, 103),
+	}
+	subs := map[string]string{"101": subsFor(101), "103": subsFor(103)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		switch r.URL.Path {
+		case "/bbs/app/link/tree":
+			fmt.Fprint(w, pages[q.Get("offset")])
+		case "/bbs/app/comment/sub/comments":
+			body, ok := subs[q.Get("root_comment_id")]
+			if !ok {
+				body = `{"msg":"","status":"ok","result":{"has_more":false,"lastval":0,"comments":[]}}`
+			}
+			fmt.Fprint(w, body)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("READSCOPE_HEYBOX_BASE", srv.URL)
+	t.Setenv("READSCOPE_HEYBOX_MINGAP", "0")
+	t.Setenv("READSCOPE_HEYBOX_DEVICE", "0123456789abcdef0123456789abcdef")
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "heybox-detail.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	srcs := core.DefaultSources()
+	it := core.Item{
+		ID: "hb:link/aaaa00000001", Source: "heybox", Feed: "recommend",
+		Title: "帖子", URL: "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=aaaa00000001",
+	}
+	// The list layer's row must exist before the detail can cache its
+	// tree (comments reference items) — in the real flow F5 landed it.
+	if _, _, err := st.SaveFeedItems(context.Background(), "heybox", "recommend", []core.Item{it}); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+
+	// The open: body + two floors with their inline previews. Both
+	// floors' child_num is served by their preview (gap 0), so this
+	// composition dials once; the gap walk itself is pinned in the
+	// heybox package tests.
+	c, err := Detail(context.Background(), st, srcs, it)
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if !strings.Contains(c.Body, "帖子正文[滑稽]") {
+		t.Errorf("body = %q, want the degraded text", c.Body)
+	}
+	if len(c.Comments) != 4 { // 2 floors + 2 previews
+		t.Fatalf("comments = %d nodes, want 4: %+v", len(c.Comments), c.Comments)
+	}
+	if c.Next != "1" {
+		t.Errorf("Next = %q, want 1 (total_page 2)", c.Next)
+	}
+	// The cache: whole tree + the opened marker (offline replay's key).
+	cached, err := st.CommentsForItem(context.Background(), it.ID)
+	if err != nil || len(cached) != 4 {
+		t.Fatalf("cached = %d nodes (err %v), want 4", len(cached), err)
+	}
+	opened, err := st.DetailFetched(context.Background(), it.ID)
+	if err != nil || !opened {
+		t.Fatalf("opened marker = %v (err %v), want true", opened, err)
+	}
+
+	// Ctrl+N on the floors layer: page 2's floor 103 lands WITH its
+	// preview — the append that carries subtrees.
+	merged, next, err := DetailFloorsPage(context.Background(), st, srcs, it, "1")
+	if err != nil {
+		t.Fatalf("DetailFloorsPage: %v", err)
+	}
+	if next != "" {
+		t.Errorf("next = %q, want \"\" (page 2 of 2)", next)
+	}
+	var ids []string
+	for _, cm := range merged {
+		ids = append(ids, cm.ID)
+	}
+	if strings.Join(ids, ",") != "101,5101,102,5102,103,5103" {
+		t.Fatalf("merged ids = %v, want page 2's floor+preview appended", ids)
+	}
+
+	// The reply layer's walk: floor 103's sub page folds under it.
+	merged, next, err = DetailCommentsPage(context.Background(), st, srcs, it, "103", "")
+	if err != nil {
+		t.Fatalf("DetailCommentsPage: %v", err)
+	}
+	if next != "" {
+		t.Errorf("comments next = %q, want \"\"", next)
+	}
+	ids = ids[:0]
+	for _, cm := range merged {
+		ids = append(ids, cm.ID)
+	}
+	if strings.Join(ids, ",") != "101,5101,102,5102,103,5103,9103" {
+		t.Fatalf("walked ids = %v, want the new sub spliced under floor 103", ids)
+	}
+	if last := merged[len(merged)-1]; last.ParentID != "103" {
+		t.Errorf("walked sub ParentID = %q, want 103", last.ParentID)
+	}
+
+	// The re-open merge: a fresh page-1 fetch must keep the paged-in
+	// floor 103 and its walked sub at the tail.
+	c, err = Detail(context.Background(), st, srcs, it)
+	if err != nil {
+		t.Fatalf("re-open Detail: %v", err)
+	}
+	ids = ids[:0]
+	for _, cm := range c.Comments {
+		ids = append(ids, cm.ID)
+	}
+	if strings.Join(ids, ",") != "101,5101,102,5102,103,5103,9103" {
+		t.Fatalf("re-open ids = %v, want the paged floor and walked sub kept", ids)
 	}
 }

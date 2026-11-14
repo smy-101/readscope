@@ -73,6 +73,8 @@ cli_dup = "%s is already subscribed (topic %d)"
 cli_none = "no circles match %q — try another keyword"
 cli_cancel = "cancelled — sources.toml untouched"
 cli_bad_pick = "invalid choice %q — enter 1-%d, or q to cancel"
+floors_loaded = "loaded %d floors"
+floors_tail = "end of loaded floors · Ctrl+N loads more"
 
 [sidebar]
 no_feeds = "no feeds yet"
