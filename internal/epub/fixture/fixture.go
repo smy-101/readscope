@@ -128,6 +128,87 @@ func without(files []File, names ...string) []File {
 	return out
 }
 
+// replacing swaps one entry's bytes, keeping position — used to corrupt
+// the OPF in place.
+func replacing(files []File, name, data string) []File {
+	out := make([]File, len(files))
+	copy(out, files)
+	for i := range out {
+		if out[i].Name == name {
+			out[i].Data = data
+			break
+		}
+	}
+	return out
+}
+
+// MissingContainer is ValidEPUB2 without container.xml: the OPF
+// must be found by scanning the zip for *.opf.
+func MissingContainer() []File {
+	return without(ValidEPUB2(), "META-INF/container.xml")
+}
+
+// MissingSpine drops the <spine> element: reading order falls back to
+// manifest declaration order (documents only).
+func MissingSpine() []File {
+	opf := `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>无脊书</dc:title>
+    <dc:creator>fixture</dc:creator>
+    <dc:language>zh-CN</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch3" href="text/ch3.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+</package>`
+	files := without(ValidEPUB2(), "OEBPS/content.opf")
+	return append(files, File{Name: "OEBPS/content.opf", Data: opf})
+}
+
+// MissingNCX keeps the NCX references but ships no toc.ncx: the TOC is
+// generated from chapter headings.
+func MissingNCX() []File {
+	return without(ValidEPUB2(), "OEBPS/toc.ncx")
+}
+
+// MalformedOPF replaces the OPF with garbage text: structure must be
+// inferred from the zip itself.
+func MalformedOPF() []File {
+	return replacing(ValidEPUB2(), "OEBPS/content.opf", "this is not xml at all\n")
+}
+
+// MinimalEPUB3 is the smallest honest EPUB3: mimetype, container, OPF
+// with a nav property, one chapter, one toc nav. Zero warnings.
+func MinimalEPUB3() []File {
+	return []File{
+		{Name: "mimetype", Data: "application/epub+zip"},
+		{Name: "META-INF/container.xml", Data: `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`},
+		{Name: "content.opf", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>最小 EPUB3</dc:title>
+    <dc:language>zh-CN</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>`},
+		{Name: "nav.xhtml", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body><nav epub:type="toc"><ol><li><a href="ch1.xhtml">唯一章</a></li></ol></nav></body>
+</html>`},
+		{Name: "ch1.xhtml", Data: chapterXHTML("唯一章", "<p>正文</p>")},
+	}
+}
+
 // ValidEPUB2 is a canonical OEBPS-layout EPUB2: container.xml, NCX toc,
 // three chapters under text/ (ch3 marked non-linear), one cover image.
 // Metadata and TOC are non-trivial on purpose: CJK text, two authors,

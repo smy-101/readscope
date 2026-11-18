@@ -95,7 +95,8 @@ type Book struct {
 	TOC      []TOCItem
 	Warnings []Warning
 	zr       *zip.ReadCloser
-	files    map[string]*zip.File // normalized entry name → file
+	files    map[string]*zip.File // normalized entry name
+	names    []string             // normalized entry names in zip directory order → file
 	opfDir   string               // directory of the OPF inside the zip ("" for root)
 	manifest map[string]ManifestItem
 }
@@ -113,6 +114,7 @@ func Open(path string) (*Book, error) {
 		name := normalizeZipName(f.Name)
 		if name != "" {
 			b.files[name] = f
+			b.names = append(b.names, name)
 		}
 	}
 
@@ -285,7 +287,7 @@ func (b *Book) inferFromZip() {
 	if b.manifest == nil {
 		b.manifest = make(map[string]ManifestItem)
 	}
-	for name := range b.files {
+	for _, name := range b.names {
 		if mt, ok := inferredMediaType(name); ok {
 			item := ManifestItem{ID: path.Base(name), Href: name, MediaType: mt}
 			b.Manifest = append(b.Manifest, item)
@@ -464,9 +466,9 @@ func inferredMediaType(name string) (string, bool) {
 	}
 }
 
-// loadTOC fills the TOC: EPUB3 nav wins (added alongside its test),
-// NCX is the fallback, and a book with neither gets a TOC generated
-// from chapter titles plus a warning.
+// loadTOC fills the TOC: EPUB3 nav wins, NCX is the fallback, and a
+// book with neither gets a TOC generated from chapter titles plus one
+// warning.
 func (b *Book) loadTOC(spineTocID string) {
 	if b.loadNavTOC() {
 		return
@@ -474,12 +476,14 @@ func (b *Book) loadTOC(spineTocID string) {
 	if b.loadNCXTOC(spineTocID) {
 		return
 	}
+	b.warn(CodeMissingTOC, "no usable NCX or nav document; TOC generated from chapter titles")
 	b.generateTOC()
 }
 
 // loadNCXTOC locates the NCX (spine@toc id → manifest media-type scan →
 // any .ncx entry) and maps its navMap onto the TOC. Src hrefs resolve
-// against the NCX's own directory.
+// against the NCX's own directory. A located-but-unusable NCX returns
+// false without warning: loadTOC's fallback warning covers it once.
 func (b *Book) loadNCXTOC(spineTocID string) bool {
 	ncxPath := ""
 	if item, ok := b.ManifestByID(spineTocID); ok && spineTocID != "" {
@@ -506,12 +510,10 @@ func (b *Book) loadNCXTOC(spineTocID string) bool {
 	}
 	data, err := b.readEntry(ncxPath)
 	if err != nil {
-		b.warn(CodeMissingTOC, fmt.Sprintf("NCX %s unreadable (%v); TOC generated from chapter titles", ncxPath, err))
 		return false
 	}
 	var doc ncxDoc
 	if err := xmlDecodeBytes(data, &doc); err != nil {
-		b.warn(CodeMissingTOC, fmt.Sprintf("NCX %s malformed (%v); TOC generated from chapter titles", ncxPath, err))
 		return false
 	}
 	ncxDir := path.Dir(ncxPath)
@@ -519,11 +521,7 @@ func (b *Book) loadNCXTOC(spineTocID string) bool {
 		ncxDir = ""
 	}
 	b.TOC = navPointsToTOC(doc.NavMap.NavPoints, ncxDir)
-	if len(b.TOC) == 0 {
-		b.warn(CodeMissingTOC, fmt.Sprintf("NCX %s has no navPoints; TOC generated from chapter titles", ncxPath))
-		return false
-	}
-	return true
+	return len(b.TOC) > 0
 }
 
 func navPointsToTOC(points []ncxNavPoint, dir string) []TOCItem {
@@ -539,7 +537,6 @@ func navPointsToTOC(points []ncxNavPoint, dir string) []TOCItem {
 // generateTOC derives a flat TOC from chapter headings (first h1–h6 of
 // each spine document), falling back to the file's base name.
 func (b *Book) generateTOC() {
-	b.warn(CodeMissingTOC, "no NCX and no nav document; TOC generated from chapter titles")
 	for _, s := range b.Spine {
 		title := ""
 		if data, err := b.ReadItem(s.Href); err == nil {
