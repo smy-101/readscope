@@ -7,10 +7,15 @@
 package ui
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
 	"errors"
+	"fmt"
 	"math"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -403,11 +408,19 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.maybePersistBookChapter()
 		return true, nil
 
-	case "enter": // TOC: jump to the chapter head
-		if br.focusToc && br.tocSel < len(br.toc) {
-			br.flow.jump(br.toc[br.tocSel].spine, 0)
-			m.maybePersistBookChapter()
+	case "enter": // TOC: jump; content: open the visible image
+		if br.focusToc {
+			if br.tocSel < len(br.toc) {
+				br.flow.jump(br.toc[br.tocSel].spine, 0)
+				m.maybePersistBookChapter()
+			}
+			return true, nil
 		}
+		m.openBookImage()
+		return true, nil
+
+	case "ctrl+o": // open the topmost visible image externally
+		m.openBookImage()
 		return true, nil
 
 	case "ctrl+n": // next chapter head
@@ -746,4 +759,69 @@ func (m Model) bookBmListView() string {
 		m.th.HelpTitle.Render(m.cat.Get("reader.bm_title")) + "\n\n" +
 			strings.Join(rows, "\n"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// --- image external open (Enter on content / Ctrl+O) ---------------------
+
+// visibleImage finds the topmost visible image marker: the first line
+// in the viewport carrying a [图片 span with a link number, and the
+// chapter that owns it (the link table is per-chapter). ok=false when
+// the view holds no marker.
+func (m Model) visibleImage() (chapter, link int, ok bool) {
+	lines, owners := m.book.flow.view()
+	for i, ln := range lines {
+		for _, s := range ln.Spans {
+			if s.Link > 0 && strings.HasPrefix(s.Text, "[图片") {
+				return owners[i], s.Link, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// openBookImage opens the topmost visible image externally: an
+// http(s) src goes straight to the browser, anything else resolves
+// chapter-relatively (ReadItemIn — the seam slice 2 added), lands as
+// a content-hash-named temp file (re-open reuses it) and opens with
+// the system program. goread's degradation model: the terminal shows
+// the marker, the real viewer shows the picture.
+func (m *Model) openBookImage() {
+	ch, link, ok := m.visibleImage()
+	if !ok {
+		m.status = m.cat.Get("reader.no_image")
+		return
+	}
+	fc := m.book.flow.chapter(ch)
+	if link > len(fc.doc.Links) {
+		m.status = m.cat.Get("reader.no_image")
+		return
+	}
+	href := fc.doc.Links[link-1]
+	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
+		m.status = m.cat.Get("reader.img_opening")
+		openBrowserCmd(href)()
+		return
+	}
+	data, err := m.book.bk.ReadItemIn(m.book.bk.Spine[ch].Href, href)
+	if err != nil {
+		m.status = m.cat.Get("reader.img_err", err)
+		return
+	}
+	ext := path.Ext(strings.SplitN(href, "#", 2)[0])
+	if ext == "" {
+		ext = ".img"
+	}
+	sum := sha1.Sum([]byte(m.book.row.Path + "\x00" + href))
+	tmp := filepath.Join(os.TempDir(), fmt.Sprintf("readscope-%x%s", sum[:6], ext))
+	if fresh, err := os.ReadFile(tmp); err != nil || !bytes.Equal(fresh, data) {
+		if err := os.WriteFile(tmp, data, 0o644); err != nil {
+			m.status = m.cat.Get("reader.img_err", err)
+			return
+		}
+	}
+	if err := openBrowser(tmp); err != nil {
+		m.status = m.cat.Get("errors.open_browser", err)
+		return
+	}
+	m.status = m.cat.Get("reader.img_opened")
 }

@@ -10,6 +10,7 @@ package ui
 // the UI rides.
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -498,5 +499,52 @@ func TestBookBookmarkNoteCancel(t *testing.T) {
 	bms, _ := m.st.Bookmarks(t.Context(), m.book.row.ID)
 	if len(bms) != 0 {
 		t.Fatalf("cancelled dialog wrote %d bookmarks", len(bms))
+	}
+}
+
+// The image keys (Enter on content / Ctrl+O): the topmost visible
+// [图片: alt] marker resolves chapter-relatively (ReadItemIn), lands
+// as a temp file and opens with the system program; a view without a
+// marker says so; an http(s) src goes straight to the browser.
+func TestBookReaderOpenImage(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+
+	// Park on the fixture's image block (spine 1, last block).
+	m.book.flow.jump(1, 4)
+	var opened string
+	orig := openBrowser
+	openBrowser = func(p string) error { opened = p; return nil }
+	t.Cleanup(func() { openBrowser = orig })
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	if opened == "" {
+		t.Fatalf("no image opened (status %q)", m.status)
+	}
+	if !strings.HasSuffix(opened, ".png") {
+		t.Fatalf("temp file = %q, want a .png suffix", opened)
+	}
+	data, err := os.ReadFile(opened)
+	t.Cleanup(func() { os.Remove(opened) })
+	if err != nil || string(data) != "\x89PNG fake png bytes" {
+		t.Fatalf("temp file bytes = %q err=%v, want the zip entry's", data, err)
+	}
+	if !strings.Contains(m.status, "opened") {
+		t.Fatalf("status = %q, want the opened line", m.status)
+	}
+
+	// Enter on the content does the same job.
+	opened = ""
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if opened == "" {
+		t.Fatal("content Enter must open the visible image too")
+	}
+
+	// A view without any marker explains itself (a short viewport over
+	// the book head — the stitching would otherwise reach the image).
+	m = size(m, 100, 7)
+	m.book.flow.jump(0, 0)
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	if !strings.Contains(m.status, "no image") {
+		t.Fatalf("status = %q, want the no-image line", m.status)
 	}
 }
