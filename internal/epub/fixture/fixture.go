@@ -295,6 +295,33 @@ func ValidEPUB3() []File {
 	}
 }
 
+// Latin1OPF declares encoding="ISO-8859-1" and carries a high byte
+// (0xE9 é) in its title: the OPF decoder must convert it to UTF-8
+// instead of failing the whole package parse (the probe's Café case).
+func Latin1OPF() []File {
+	opf := "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n" +
+		"<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\">\n" +
+		"  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n" +
+		"    <dc:title>Caf\xe9 Test</dc:title>\n" +
+		"    <dc:creator>Fixture \xe9</dc:creator>\n" +
+		"    <dc:language>fr</dc:language>\n" +
+		"  </metadata>\n" +
+		"  <manifest>\n" +
+		"    <item id=\"ch1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>\n" +
+		"  </manifest>\n" +
+		"  <spine><itemref idref=\"ch1\"/></spine>\n" +
+		"</package>"
+	return []File{
+		{Name: "mimetype", Data: "application/epub+zip"},
+		{Name: "META-INF/container.xml", Data: `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`},
+		{Name: "content.opf", Data: opf},
+		{Name: "ch1.xhtml", Data: chapterXHTML("Caf\xe9", "<p>Bonjour</p>")},
+	}
+}
+
 // chapterXHTML wraps body into a minimal XHTML 1.1 chapter document.
 func chapterXHTML(title, body string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>

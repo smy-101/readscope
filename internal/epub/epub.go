@@ -282,6 +282,9 @@ func (b *Book) fillFromOPF(pkg opfPackage) {
 // in zip order become the spine. Used when the OPF is missing or
 // unparseable.
 func (b *Book) inferFromZip() {
+	if b.manifest == nil {
+		b.manifest = make(map[string]ManifestItem)
+	}
 	for name := range b.files {
 		if mt, ok := inferredMediaType(name); ok {
 			item := ManifestItem{ID: path.Base(name), Href: name, MediaType: mt}
@@ -762,9 +765,42 @@ func firstDescendant(n *html.Node, tag string) *html.Node {
 	return nil
 }
 
-// xmlDecodeBytes decodes v from data with the package's tolerance
-// settings (charset handling is added alongside its first test).
+// xmlDecodeBytes decodes v from data. The decoder is namespace-
+// tolerant (see opfPackage) and converts ISO-8859-1/latin1 declarations
+// to UTF-8 — old-world OPFs exist (probe's Café case); any other
+// charset surfaces as a decode error, which callers degrade to
+// malformed-opf.
 func xmlDecodeBytes(data []byte, v any) error {
 	dec := xml.NewDecoder(bytes.NewReader(data))
+	dec.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		switch strings.ToLower(strings.TrimSpace(charset)) {
+		case "iso-8859-1", "latin1":
+			return latin1ToUTF8(input), nil
+		default:
+			return nil, fmt.Errorf("unsupported charset %q", charset)
+		}
+	}
 	return dec.Decode(v)
+}
+
+// latin1ToUTF8 converts ISO-8859-1 bytes on the fly: every byte is a
+// codepoint, so bytes >= 0x80 widen to two-byte UTF-8 sequences.
+func latin1ToUTF8(r io.Reader) io.Reader {
+	return &latin1Reader{r: r}
+}
+
+type latin1Reader struct {
+	r io.Reader
+}
+
+func (l *latin1Reader) Read(p []byte) (int, error) {
+	// Read at most half the buffer: worst case every byte widens to 2.
+	buf := make([]byte, len(p)/2)
+	n, err := l.r.Read(buf)
+	out := 0
+	for _, b := range buf[:n] {
+		// latin1: byte value IS the codepoint; rune() widens it.
+		out += copy(p[out:], string(rune(b)))
+	}
+	return out, err
 }

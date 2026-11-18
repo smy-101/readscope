@@ -138,6 +138,20 @@ func TestOpenEPUB3NavTOCWinsOverNCX(t *testing.T) {
 	}
 }
 
+func TestOpenLatin1OPFMetadata(t *testing.T) {
+	book := open(t, fixture.Latin1OPF())
+
+	if got, want := book.Title, "Caf\u00e9 Test"; got != want {
+		t.Errorf("Title = %q, want %q", got, want)
+	}
+	if got, want := book.Authors, []string{"Fixture \u00e9"}; !equalStrings(got, want) {
+		t.Errorf("Authors = %q, want %q", got, want)
+	}
+	if got, want := len(book.Warnings), 1; got != want || book.Warnings[0].Code != epub.CodeMissingTOC {
+		t.Errorf("Warnings = %+v, want exactly [missing-toc] (no NCX, no nav)", book.Warnings)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
