@@ -13,12 +13,21 @@ import (
 	"time"
 )
 
+// BookWrite is UpsertBook's outcome: what (if anything) hit the disk.
+type BookWrite int
+
+const (
+	BookUnchanged BookWrite = iota // row already held this metadata: zero writes
+	BookInserted                   // new path: row inserted
+	BookUpdated                    // existing row: metadata refreshed in place
+)
+
 // UpsertBook inserts a new book row keyed by absolute path, or
-// refreshes an existing one's metadata. changed=false means the row
+// refreshes an existing one's metadata. BookUnchanged means the row
 // already held exactly this metadata and nothing was written — the
 // scan's idempotency contract (a re-scan of an unchanged library is
 // zero writes, and added_at never moves on an update).
-func (s *Store) UpsertBook(ctx context.Context, path, title, author, language string, now time.Time) (id int64, changed bool, err error) {
+func (s *Store) UpsertBook(ctx context.Context, path, title, author, language string, now time.Time) (id int64, outcome BookWrite, err error) {
 	var (
 		existingID                int64
 		exTitle, exAuthor, exLang string
@@ -32,22 +41,22 @@ func (s *Store) UpsertBook(ctx context.Context, path, title, author, language st
 			`INSERT INTO books (path, title, author, language, added_at) VALUES (?, ?, ?, ?, ?)`,
 			path, title, author, language, now)
 		if err != nil {
-			return 0, false, err
+			return 0, BookUnchanged, err
 		}
 		id, err := res.LastInsertId()
-		return id, true, err
+		return id, BookInserted, err
 	case err != nil:
-		return 0, false, err
+		return 0, BookUnchanged, err
 	}
 	if exTitle == title && exAuthor == author && exLang == language {
-		return existingID, false, nil
+		return existingID, BookUnchanged, nil
 	}
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE books SET title = ?, author = ?, language = ? WHERE id = ?`,
 		title, author, language, existingID); err != nil {
-		return 0, false, err
+		return 0, BookUnchanged, err
 	}
-	return existingID, true, nil
+	return existingID, BookUpdated, nil
 }
 
 // DelistMissing deletes every book row whose path is not in keep —

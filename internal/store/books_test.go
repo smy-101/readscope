@@ -15,20 +15,20 @@ func TestUpsertBookIdempotent(t *testing.T) {
 	ctx := t.Context()
 	now := nowUTC()
 
-	id1, changed, err := s.UpsertBook(ctx, "/books/a.epub", "书甲", "张三, 李四", "zh", now)
+	id1, outcome, err := s.UpsertBook(ctx, "/books/a.epub", "书甲", "张三, 李四", "zh", now)
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if !changed || id1 == 0 {
-		t.Fatalf("first upsert: changed=%v id=%d", changed, id1)
+	if outcome != BookInserted || id1 == 0 {
+		t.Fatalf("first upsert: outcome=%v id=%d", outcome, id1)
 	}
 
 	// Same metadata again: zero write, same row.
-	id2, changed, err := s.UpsertBook(ctx, "/books/a.epub", "书甲", "张三, 李四", "zh", now.Add(time.Hour))
+	id2, outcome, err := s.UpsertBook(ctx, "/books/a.epub", "书甲", "张三, 李四", "zh", now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("re-upsert: %v", err)
 	}
-	if changed {
+	if outcome != BookUnchanged {
 		t.Fatal("unchanged metadata must not write")
 	}
 	if id2 != id1 {
@@ -36,11 +36,11 @@ func TestUpsertBookIdempotent(t *testing.T) {
 	}
 
 	// Metadata change: update in place, added_at preserved.
-	_, changed, err = s.UpsertBook(ctx, "/books/a.epub", "书甲(修订)", "张三", "zh", now.Add(2*time.Hour))
+	_, outcome, err = s.UpsertBook(ctx, "/books/a.epub", "书甲(修订)", "张三", "zh", now.Add(2*time.Hour))
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if !changed {
+	if outcome != BookUpdated {
 		t.Fatal("changed metadata must write")
 	}
 	rows, err := s.BookRows(ctx)
