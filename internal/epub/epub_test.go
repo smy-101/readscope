@@ -348,3 +348,41 @@ func TestZipPasswordEntryPinnedBehavior(t *testing.T) {
 		t.Errorf("ReadItem(ch1): %v", err)
 	}
 }
+
+// ReadItemIn resolves hrefs against a base document's directory, not
+// the OPF's — the reader's image seam (M6 ticket 03). A chapter at
+// OEBPS/text/ pointing at ../images/cover.jpg means OEBPS/images/,
+// which the OPF-relative ReadItem cannot express: that gap is pinned
+// first, then the base-relative resolutions.
+func TestReadItemInResolvesAgainstBaseDir(t *testing.T) {
+	book := open(t, fixture.ValidEPUB2())
+	ch3 := book.Spine[2].Href // OEBPS/text/ch3.xhtml
+
+	// The motivating gap: OPF-relative resolution misses the entry.
+	if _, err := book.ReadItem("../images/cover.jpg"); err == nil {
+		t.Fatal("ReadItem must not resolve a chapter-relative ../ href (motivating pin)")
+	}
+
+	// ../ from the chapter's directory reaches the image.
+	data, err := book.ReadItemIn(ch3, "../images/cover.jpg")
+	if err != nil {
+		t.Fatalf("ReadItemIn ../: %v", err)
+	}
+	if want := "\xff\xd8\xff\xe0 fake jpeg bytes"; string(data) != want {
+		t.Fatalf("bytes = %q, want %q", data, want)
+	}
+
+	// Same-directory and fragment-stripped spellings resolve too.
+	ch1 := book.Spine[0].Href
+	if _, err := book.ReadItemIn(ch1, "ch2.xhtml"); err != nil {
+		t.Fatalf("ReadItemIn same dir: %v", err)
+	}
+	if _, err := book.ReadItemIn(ch3, "../images/cover.jpg#cover-anchor"); err != nil {
+		t.Fatalf("ReadItemIn fragment: %v", err)
+	}
+
+	// A missing target stays a typed miss.
+	if _, err := book.ReadItemIn(ch1, "../nowhere.png"); err == nil {
+		t.Fatal("ReadItemIn on a missing entry must error")
+	}
+}

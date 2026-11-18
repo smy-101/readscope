@@ -352,7 +352,22 @@ func (b *Book) warn(code WarningCode, message string) {
 // variant of one: fragments are stripped, %XX decoded, ./ and ../
 // resolved against the OPF's directory (a zip-root spelling also hits).
 func (b *Book) ReadItem(href string) ([]byte, error) {
-	name := b.resolveHref(href)
+	return b.readName(b.resolveHref(href), href)
+}
+
+// ReadItemIn returns the raw bytes of the resource href addresses
+// relative to base's directory — the reader's chapter-relative seam:
+// a chapter at OEBPS/text/ referencing ../images/cover.jpg means
+// OEBPS/images/cover.jpg, a relation the OPF-relative ReadItem cannot
+// express. Base is a zip path in any spelling ReadItem accepts.
+func (b *Book) ReadItemIn(base, href string) ([]byte, error) {
+	return b.readName(resolveRelative(zipDir(base), href), href)
+}
+
+// readName serves bytes for a resolved zip path, with the literal
+// cleaned href as the fallback spelling (a zip-rooted caller value
+// that only differs from the OPF-relative join still hits).
+func (b *Book) readName(name, href string) ([]byte, error) {
 	if f, ok := b.files[name]; ok {
 		return readZipFile(f)
 	}
