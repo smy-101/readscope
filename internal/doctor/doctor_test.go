@@ -318,14 +318,14 @@ func TestHeyboxBrokenCircleTableFails(t *testing.T) {
 // --- M6 ticket 02: the library check ---------------------------------
 
 // doctorBookEnv points a library-check run at a temp state dir and a
-// temp library directory (English output).
-func doctorBookEnv(t *testing.T) (*core.Config, string) {
+// temp library directory, in the given language.
+func doctorBookEnv(t *testing.T, lang string) (*core.Config, string) {
 	t.Helper()
 	t.Setenv("READSCOPE_STATE", filepath.Join(t.TempDir(), "state"))
 	books := t.TempDir()
 	cfg := core.Defaults()
 	cfg.BookDir = books
-	cfg.Language = "en"
+	cfg.Language = lang
 	return cfg, books
 }
 
@@ -341,7 +341,7 @@ func shelveFixture(t *testing.T, dir, name string, files []fixture.File) {
 // bookshelf does; an empty (or missing) library directory is the
 // fresh-install note, never a failure.
 func TestLibraryCheckEmpty(t *testing.T) {
-	cfg, _ := doctorBookEnv(t)
+	cfg, _ := doctorBookEnv(t, "en")
 	cat, _ := i18n.Load("en")
 	c := libraryCheck(cat, cfg)
 	if c.err != nil {
@@ -355,19 +355,30 @@ func TestLibraryCheckEmpty(t *testing.T) {
 // TestLibraryCheckCensus: the note counts shelved books, hard
 // failures and warned books from the scan it just ran.
 func TestLibraryCheckCensus(t *testing.T) {
-	cfg, books := doctorBookEnv(t)
-	shelveFixture(t, books, "good.epub", fixture.ValidEPUB3())
-	shelveFixture(t, books, "dirty.epub", fixture.MissingNCX()) // 1 warning
-	shelveFixture(t, books, "drm.epub", fixture.DRMEncrypted()) // hard fail
-	cat, _ := i18n.Load("en")
+	for lang, wants := range map[string][][]string{
+		"en": {{"2 books", "1 broken", "1 with warnings"}},
+		// zh rides one composed string, not fragments (the i18n
+		// standard: assert the assembled product).
+		"zh-CN": {{"2 本 · 1 册损坏 · 1 本带警告"}},
+	} {
+		t.Run(lang, func(t *testing.T) {
+			cfg, books := doctorBookEnv(t, lang)
+			shelveFixture(t, books, "good.epub", fixture.ValidEPUB3())
+			shelveFixture(t, books, "dirty.epub", fixture.MissingNCX()) // 1 warning
+			shelveFixture(t, books, "drm.epub", fixture.DRMEncrypted()) // hard fail
+			cat, _ := i18n.Load(lang)
 
-	c := libraryCheck(cat, cfg)
-	if c.err != nil {
-		t.Fatalf("census must pass: %v", c.err)
-	}
-	for _, want := range []string{"2 books", "1 broken", "1 with warnings"} {
-		if !strings.Contains(c.note, want) {
-			t.Errorf("note %q missing %q", c.note, want)
-		}
+			c := libraryCheck(cat, cfg)
+			if c.err != nil {
+				t.Fatalf("census must pass: %v", c.err)
+			}
+			for _, group := range wants {
+				for _, want := range group {
+					if !strings.Contains(c.note, want) {
+						t.Errorf("note %q missing %q", c.note, want)
+					}
+				}
+			}
+		})
 	}
 }

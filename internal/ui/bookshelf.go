@@ -40,11 +40,15 @@ type brokenRow struct {
 	title string // filename, extension included
 }
 
+// booksSourceID is the books source's stable id — the rail entry it
+// occupies and the branch key the shell's bookshelf seams test.
+const booksSourceID = "books"
+
 // onBookshelf reports whether the books source's screen is what the
 // list area shows right now (favorites is a modal over it, like over
 // the feed lists).
 func (m Model) onBookshelf() bool {
-	return m.activeSourceID() == "books" && !m.favorites
+	return m.activeSourceID() == booksSourceID && !m.favorites
 }
 
 // shelfLen is the bookshelf's row count: shelved rows plus the
@@ -79,7 +83,7 @@ func (m Model) scanBooksCmd() tea.Cmd {
 func (m *Model) booksLanded(msg booksMsg) tea.Cmd {
 	m.scanning = false
 	if msg.err != nil {
-		m.status = m.cat.Get("errors.db_query", msg.err)
+		m.status = m.cat.Get("books.err_scan", msg.err)
 		return nil
 	}
 	if !m.onBookshelf() {
@@ -140,34 +144,6 @@ func (m *Model) moveBooksSel(delta int) {
 // clampBooksCursor keeps the shelf cursor valid when rows change.
 func (m *Model) clampBooksCursor() {
 	m.booksSel, m.booksTop = clampSel(m.booksSel, m.booksTop, m.shelfLen(), m.bodyHeight())
-}
-
-// clampSel is the shared cursor math underneath both list cursors:
-// keep sel inside [0, n-1] and scroll top just enough to keep it
-// visible over h rows. n == 0 resets to the top.
-func clampSel(sel, top, n, h int) (int, int) {
-	if n <= 0 {
-		return 0, 0
-	}
-	if sel > n-1 {
-		sel = n - 1
-	}
-	if sel < 0 {
-		sel = 0
-	}
-	if h < 1 {
-		h = 1
-	}
-	if sel < top {
-		top = sel
-	}
-	if sel >= top+h {
-		top = sel - h + 1
-	}
-	if top < 0 {
-		top = 0
-	}
-	return sel, top
 }
 
 // openBook is Enter on a shelf row: a broken row explains itself with

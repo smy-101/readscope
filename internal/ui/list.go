@@ -42,48 +42,46 @@ func (m Model) listWindow(h int) (top, end int) {
 	return top, end
 }
 
-// moveListSel moves the cursor by delta (rows or pages), clamped to the
-// items, and keeps the cursor inside the scroll window.
-func (m *Model) moveListSel(delta int) {
-	if len(m.items) == 0 {
-		m.listSel, m.listTop = 0, 0
-		return
+// clampSel is the shared cursor math underneath both list cursors
+// (the feed list's and the bookshelf's): keep sel inside [0, n-1]
+// and scroll top just enough to keep it visible over h rows.
+// n == 0 resets to the top.
+func clampSel(sel, top, n, h int) (int, int) {
+	if n <= 0 {
+		return 0, 0
 	}
-	sel := m.listSel + delta
+	if sel > n-1 {
+		sel = n - 1
+	}
 	if sel < 0 {
 		sel = 0
 	}
-	if sel > len(m.items)-1 {
-		sel = len(m.items) - 1
+	if h < 1 {
+		h = 1
 	}
-	m.listSel = sel
-	m.clampListCursor()
+	if sel < top {
+		top = sel
+	}
+	if sel >= top+h {
+		top = sel - h + 1
+	}
+	if top < 0 {
+		top = 0
+	}
+	return sel, top
+}
+
+// moveListSel moves the cursor by delta (rows or pages), clamped to the
+// items, and keeps the cursor inside the scroll window.
+func (m *Model) moveListSel(delta int) {
+	m.listSel, m.listTop = clampSel(m.listSel+delta, m.listTop, len(m.items), m.bodyHeight())
 }
 
 // clampListCursor keeps the cursor valid for the current items and
 // scrolls the window to keep it visible (also the same-feed reload
 // path, where the cursor must survive).
 func (m *Model) clampListCursor() {
-	if len(m.items) == 0 {
-		m.listSel, m.listTop = 0, 0
-		return
-	}
-	if m.listSel > len(m.items)-1 {
-		m.listSel = len(m.items) - 1
-	}
-	h := m.bodyHeight()
-	if h < 1 {
-		h = 1
-	}
-	if m.listSel < m.listTop {
-		m.listTop = m.listSel
-	}
-	if m.listSel >= m.listTop+h {
-		m.listTop = m.listSel - h + 1
-	}
-	if m.listTop < 0 {
-		m.listTop = 0
-	}
+	m.listSel, m.listTop = clampSel(m.listSel, m.listTop, len(m.items), m.bodyHeight())
 }
 
 func (m Model) listView() string {

@@ -317,7 +317,7 @@ func libraryCheck(cat *i18n.Catalog, cfg *core.Config) check {
 		return check{label: label, err: err}
 	}
 	if res.Scanned == 0 {
-		return check{label: label, note: cat.Get("doctor.library_empty", cfg.BookDir)}
+		return check{label: label, note: cat.Get("doctor.library_empty", dir)}
 	}
 	return check{label: label, note: cat.Get("doctor.library_state",
 		res.Scanned-len(res.Failed), len(res.Failed), res.Warned)}

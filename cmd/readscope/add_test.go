@@ -114,3 +114,28 @@ func TestRunAddReportsBrokenCopies(t *testing.T) {
 		t.Fatalf("report should explain the refusal, got %q", out)
 	}
 }
+
+// TestRunAddComposedZH: the copy report is a composed product —
+// asserted in Chinese too (CODING_STANDARDS: key parity cannot catch
+// a bad composition, only a missing key).
+func TestRunAddComposedZH(t *testing.T) {
+	t.Setenv("LC_ALL", "zh_CN.UTF-8")
+	cfgDir := t.TempDir()
+	t.Setenv("READSCOPE_CONFIG", cfgDir)
+	t.Setenv("READSCOPE_STATE", filepath.Join(t.TempDir(), "state"))
+	books := filepath.Join(t.TempDir(), "books")
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
+		[]byte("language = \"zh-CN\"\nbook_dir = \""+books+"\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	src := fixture.Write(t, fixture.ValidEPUB3())
+	out, code := runAddOut(t, []string{src})
+	if code != 0 {
+		t.Fatalf("runAdd = %d, want 0", code)
+	}
+	for _, want := range []string{"已拷入：", "《合成书 · EPUB3》", "下次扫描即上架"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("zh report missing %q: %q", want, out)
+		}
+	}
+}

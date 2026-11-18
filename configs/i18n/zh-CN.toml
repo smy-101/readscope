@@ -39,6 +39,7 @@ reader_pending = "阅读器随下一票开通，Enter 键位已占住"
 err_drm = "这本书有 DRM，不支持"
 err_zip = "文件损坏，不是有效的 EPUB"
 err_open = "无法打开：%v"
+err_scan = "书库扫描失败：%v"
 never = "—"
 
 [add]

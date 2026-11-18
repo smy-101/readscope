@@ -39,6 +39,7 @@ reader_pending = "The reader arrives with the next ticket — Enter is reserved"
 err_drm = "This book is DRM-protected and unsupported"
 err_zip = "File corrupt: not a valid EPUB"
 err_open = "cannot open: %v"
+err_scan = "library scan failed: %v"
 never = "—"
 
 [add]

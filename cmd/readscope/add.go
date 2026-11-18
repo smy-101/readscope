@@ -20,8 +20,6 @@ import (
 	"github.com/smy-101/readscope/internal/library"
 )
 
-const addUsage = "usage: readscope add <file.epub>"
-
 // runAdd implements `readscope add <file>`. Exit codes: 0 copied
 // (the report may still carry parse warnings or the typed refusal of
 // a broken book — the copy stands, the shelf's ⚠ explains), 1 the
@@ -29,7 +27,6 @@ const addUsage = "usage: readscope add <file.epub>"
 func runAdd(args []string) int {
 	cat := loadCatalogLenient()
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, addUsage)
 		fmt.Fprintln(os.Stderr, cat.Get("add.usage"))
 		return 2
 	}

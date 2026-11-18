@@ -30,7 +30,7 @@ import (
 )
 
 // sourceIDs doubles as the source bar order (plan decision #11).
-var sourceIDs = []string{"books", "rss", "hn", "zhihu", "heybox"}
+var sourceIDs = []string{booksSourceID, "rss", "hn", "zhihu", "heybox"}
 
 type region int
 
@@ -166,7 +166,7 @@ func (m Model) loadFeedsCmd() tea.Cmd {
 		return nil
 	}
 	id := m.activeSourceID()
-	if id == "books" {
+	if id == booksSourceID {
 		// The bookshelf has no feeds to list — entering the screen IS
 		// the scan (进屏扫描), same seam F5 rides.
 		return m.scanBooksCmd()
@@ -419,7 +419,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// bookshelf there is nothing to reload from a feed refresh —
 		// and chaining would fire a scan whose scan_done line clobbers
 		// the refresh feedback (e.g. login guidance) just shown.
-		if m.activeSourceID() == "books" {
+		if m.activeSourceID() == booksSourceID {
 			return m, nil
 		}
 		return m, m.loadFeedsCmd() // counts + list pick up what just landed
@@ -817,14 +817,14 @@ func (m *Model) cycleSource(delta int) {
 	// A source with no registered package is a mystery blank without
 	// a word — the status bar says what's up. books ships its own
 	// screen (the bookshelf) and is exempt.
-	if id := m.activeSourceID(); id != "books" && !slices.Contains(source.IDs(), id) {
+	if id := m.activeSourceID(); id != booksSourceID && !slices.Contains(source.IDs(), id) {
 		m.status = m.cat.Get("status.todo")
 	}
 	m.resetSource()
 	// Entering the bookshelf kicks off its scan; the flag lives here
 	// (a pointer receiver) because loadFeedsCmd's value receiver
 	// cannot set model state.
-	if m.activeSourceID() == "books" {
+	if m.activeSourceID() == booksSourceID {
 		m.scanning = true
 	}
 }
