@@ -28,6 +28,19 @@ show = "Show HN"
 pts = "%d 分"
 comments = "%d 条评论"
 
+[books]
+all = "全部书籍"
+empty = "书库是空的：readscope add <文件> 把书拷进来，或把 .epub 放进书库目录"
+scanning = "扫描中…"
+scan_done = "扫描 %d 本 · 新上架 %d · 下架 %d"
+count = "%d 本"
+broken = "%d 册损坏"
+reader_pending = "阅读器随下一票开通，Enter 键位已占住"
+err_drm = "这本书有 DRM，不支持"
+err_zip = "文件损坏，不是有效的 EPUB"
+err_open = "无法打开：%v"
+never = "—"
+
 [zhihu]
 hot = "热榜"
 recommend = "推荐"

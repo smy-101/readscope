@@ -87,6 +87,9 @@ func (m *Model) clampListCursor() {
 }
 
 func (m Model) listView() string {
+	if m.onBookshelf() {
+		return m.bookshelfView()
+	}
 	w, h := m.listWidth(), m.bodyHeight()
 	if len(m.items) == 0 {
 		empty := m.cat.Get("list.empty")

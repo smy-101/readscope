@@ -94,10 +94,12 @@ func TestFeedLabelResolvesLabelKeyOverRawLabel(t *testing.T) {
 	}
 }
 
-func TestTabToUnimplementedSourceHintsLater(t *testing.T) {
+func TestTabToBooksOpensBookshelf(t *testing.T) {
 	m := size(newTestModel(t), 100, 30)
 	// books → rss → hn → zhihu → heybox → books: landing back on the
-	// unimplemented source, the status bar explains itself.
+	// bookshelf, the scan runs (entry semantics) and the shelf —
+	// empty library, honest hint — replaces the old "later milestone"
+	// placeholder books used to be.
 	for i := 0; i < 5; i++ {
 		var cmd tea.Cmd
 		m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyTab})
@@ -106,11 +108,12 @@ func TestTabToUnimplementedSourceHintsLater(t *testing.T) {
 	if m.active != 0 {
 		t.Fatalf("active = %d, want books", m.active)
 	}
-	if !strings.Contains(m.status, "later milestone") {
-		t.Fatalf("status should hint at a later milestone, got %q", m.status)
+	if !strings.Contains(m.status, "Scanned 0 books") {
+		t.Fatalf("status should report the entry scan, got %q", m.status)
 	}
-	if !strings.Contains(m.View(), "later milestone") {
-		t.Fatal("the hint should be visible in the status bar")
+	view := m.View()
+	if !strings.Contains(view, "All books") || !strings.Contains(view, "Library is empty") {
+		t.Fatalf("bookshelf should render its sidebar entry and empty state:\n%s", view)
 	}
 }
 

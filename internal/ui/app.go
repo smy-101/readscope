@@ -64,6 +64,16 @@ type Model struct {
 	items      []store.ItemRow            // selected feed's items
 	loadedFeed string                     // feed key of m.items ("" = none)
 
+	// Bookshelf state (books source): rows from the last scan, the
+	// scan's failure map (⚠ markers + Enter explanations), synthesized
+	// rows for never-shelved broken files, and the cursor over both.
+	books    []store.BookRow
+	broken   []brokenRow
+	failErr  map[string]error
+	booksSel int
+	booksTop int
+	scanning bool // library scan in flight (screen entry or F5)
+
 	refreshing  bool   // F5 fetch in flight
 	loadingMore bool   // Ctrl+N page append in flight
 	help        bool   // F1 overlay open
@@ -101,6 +111,9 @@ type feedsMsg struct {
 	feeds  []core.Feed
 	counts map[string]store.FeedCount
 }
+
+// booksMsg is defined in bookshelf.go: a finished library scan
+// (shelf rows + the scan's verdict).
 
 type itemsMsg struct {
 	feed string
@@ -153,6 +166,11 @@ func (m Model) loadFeedsCmd() tea.Cmd {
 		return nil
 	}
 	id := m.activeSourceID()
+	if id == "books" {
+		// The bookshelf has no feeds to list — entering the screen IS
+		// the scan (进屏扫描), same seam F5 rides.
+		return m.scanBooksCmd()
+	}
 	srcs, st := m.srcs, m.st
 	return func() tea.Msg {
 		feeds := []core.Feed{}
@@ -391,9 +409,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case booksMsg:
+		return m, m.booksLanded(msg)
+
 	case refreshDoneMsg:
 		m.refreshing = false
 		m.status = m.refreshStatus(msg)
+		// The reload chain is feed machinery (counts + list). On the
+		// bookshelf there is nothing to reload from a feed refresh —
+		// and chaining would fire a scan whose scan_done line clobbers
+		// the refresh feedback (e.g. login guidance) just shown.
+		if m.activeSourceID() == "books" {
+			return m, nil
+		}
 		return m, m.loadFeedsCmd() // counts + list pick up what just landed
 
 	case moreDoneMsg:
@@ -527,6 +555,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// help overlay); shell-wide keys fall through to the shared switch.
 		if m.reader != nil && !m.help {
 			if handled, cmd := m.detailKeys(msg); handled {
+				return m, cmd
+			}
+		}
+		// The bookshelf owns its list keys while the books source is
+		// active and the list is focused (the reader-overlay pattern);
+		// region navigation and shell keys fall through below.
+		if m.onBookshelf() && m.focus == regionList && m.reader == nil {
+			if handled, cmd := m.bookshelfKeys(msg); handled {
 				return m, cmd
 			}
 		}
@@ -686,8 +722,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.refreshing {
 				return m, nil
 			}
+			// F5 on the bookshelf is the rescan (any focus region — the
+			// scan is the screen's, not the list's).
+			if m.onBookshelf() {
+				if m.scanning {
+					return m, nil
+				}
+				m.scanning = true
+				return m, m.scanBooksCmd()
+			}
 			if _, err := source.New(m.activeSourceID(), m.srcs); err != nil {
-				m.status = m.cat.Get("status.todo") // books/hn: no fetchable source yet
+				m.status = m.cat.Get("status.todo") // no fetchable source yet
 				return m, nil
 			}
 			m.refreshing = true
@@ -769,17 +814,28 @@ func (m *Model) cycleSource(delta int) {
 	m.reader = nil // the overlay belongs to the previous source's list
 	m.favorites = false
 	m.confirming = false
-	// A source with no registered package (books until M4) is a
-	// mystery blank without a word — the status bar says what's up.
-	if !slices.Contains(source.IDs(), m.activeSourceID()) {
+	// A source with no registered package is a mystery blank without
+	// a word — the status bar says what's up. books ships its own
+	// screen (the bookshelf) and is exempt.
+	if id := m.activeSourceID(); id != "books" && !slices.Contains(source.IDs(), id) {
 		m.status = m.cat.Get("status.todo")
 	}
 	m.resetSource()
+	// Entering the bookshelf kicks off its scan; the flag lives here
+	// (a pointer receiver) because loadFeedsCmd's value receiver
+	// cannot set model state.
+	if m.activeSourceID() == "books" {
+		m.scanning = true
+	}
 }
 
 // sidebarLen is the sidebar's row count (feeds, or the single
-// placeholder row for sources without feeds yet).
+// placeholder row for sources without feeds yet — the bookshelf's
+// single 全部书籍 entry included).
 func (m Model) sidebarLen() int {
+	if m.onBookshelf() {
+		return 1
+	}
 	if len(m.feeds) == 0 {
 		return 1
 	}
@@ -800,6 +856,11 @@ func (m *Model) resetSource() {
 	m.items = nil
 	m.loadedFeed = ""
 	m.listSel, m.listTop = 0, 0
+	m.books = nil
+	m.broken = nil
+	m.failErr = nil
+	m.booksSel, m.booksTop = 0, 0
+	m.scanning = false
 }
 
 func (m Model) selectedFeed() *core.Feed {
@@ -847,9 +908,13 @@ func (m Model) sourceBarView() string {
 
 func (m Model) sidebarView() string {
 	var b strings.Builder
-	if len(m.feeds) == 0 {
+	switch {
+	case m.onBookshelf():
+		b.WriteString(m.sidebarRow(m.cat.Get("books.all"), m.shelfLen(),
+			m.focus == regionSidebar))
+	case len(m.feeds) == 0:
 		b.WriteString(m.sidebarRow(m.cat.Get("sidebar.no_feeds"), 0, false))
-	} else {
+	default:
 		for i, f := range m.feeds {
 			b.WriteString(m.sidebarRow(m.feedLabel(&f), m.counts[f.Key].Unread,
 				i == m.sidebarSel && m.focus == regionSidebar))
@@ -917,6 +982,15 @@ func (m Model) statusBarView() string {
 		if n := len(m.items); n > 0 {
 			left += "  " + m.th.StatusNormal.Render(m.cat.Get("status.items", n))
 		}
+	} else if m.onBookshelf() {
+		// Shelf census: composed count · broken, the same shape the
+		// feed counts render (composed strings, both packs — the
+		// i18n standard).
+		parts := []string{m.cat.Get("books.count", m.shelfLen())}
+		if n := len(m.failErr); n > 0 {
+			parts = append(parts, m.cat.Get("books.broken", n))
+		}
+		left = m.th.StatusNormal.Render(strings.Join(parts, " · "))
 	} else if f := m.selectedFeed(); f != nil {
 		label := m.feedLabel(f)
 		if c := m.counts[f.Key]; c.Total > 0 {
@@ -931,6 +1005,9 @@ func (m Model) statusBarView() string {
 	}
 	if m.refreshing {
 		left = m.th.StatusAccent.Render(m.cat.Get("status.refreshing")) + "  " + left
+	}
+	if m.scanning {
+		left = m.th.StatusAccent.Render(m.cat.Get("books.scanning")) + "  " + left
 	}
 	if m.loadingMore {
 		left = m.th.StatusAccent.Render(m.cat.Get("status.loading_more")) + "  " + left

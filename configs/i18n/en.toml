@@ -28,6 +28,19 @@ show = "Show HN"
 pts = "%d pts"
 comments = "%d comments"
 
+[books]
+all = "All books"
+empty = "Library is empty — readscope add <file> to shelve one, or drop .epub files into the library directory"
+scanning = "Scanning…"
+scan_done = "Scanned %d books · %d new · %d delisted"
+count = "%d books"
+broken = "%d broken"
+reader_pending = "The reader arrives with the next ticket — Enter is reserved"
+err_drm = "This book is DRM-protected and unsupported"
+err_zip = "File corrupt: not a valid EPUB"
+err_open = "cannot open: %v"
+never = "—"
+
 [zhihu]
 hot = "Hot List"
 recommend = "Recommend"

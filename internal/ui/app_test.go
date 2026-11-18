@@ -21,8 +21,8 @@ func TestViewRendersShell(t *testing.T) {
 	view := m.View()
 	for _, want := range []string{
 		"Bookshelf", "RSS", "Hacker News", // source bar
-		"no feeds yet", // sidebar
-		"No items yet", // list
+		"All books",        // bookshelf sidebar entry (startup source)
+		"Library is empty", // bookshelf empty state
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
