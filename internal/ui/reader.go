@@ -7,12 +7,21 @@
 package ui
 
 import (
+	"context"
+	"errors"
+	"math"
 	"path"
 	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/smy-101/readscope/internal/epub"
 	"github.com/smy-101/readscope/internal/i18n"
 	"github.com/smy-101/readscope/internal/render"
+	"github.com/smy-101/readscope/internal/store"
 )
 
 // epubFeeder is the flow engine's production feeder: spine chapters
@@ -121,4 +130,322 @@ func firstHeadingTitle(doc *render.Document) string {
 // extension.
 func fileTitle(href string) string {
 	return strings.TrimSuffix(path.Base(href), path.Ext(href))
+}
+
+// --- the reader screen (ADR #11: 独立全屏) ------------------------------
+
+// readerTocW is the TOC sidebar's width (the shell sidebar's width —
+// one visual column system across screens).
+const readerTocW = sidebarWidth
+
+// tocRow is one flattened TOC entry; spine is the jump target's spine
+// index (-1 never happens: entries without a spine target are dropped
+// at flatten time — a TOC line that cannot jump is a lie).
+type tocRow struct {
+	title string
+	depth int
+	spine int
+}
+
+// bookReader is the open book's full-screen state: the epub handle,
+// the feeder, the flow engine, the flattened TOC with its cursor, and
+// the persisted-anchor bookkeeping for the 章界+退出 write throttle.
+type bookReader struct {
+	row       store.BookRow
+	bk        *epub.Book
+	feeder    *epubFeeder
+	flow      *bookFlow
+	toc       []tocRow
+	tocSel    int
+	tocTop    int
+	focusToc  bool
+	bookmarks []store.Bookmark
+	savedCh   int // anchor chapter at the last progress write
+}
+
+// bookOpenMsg lands when the reader's open finished: the parsed book,
+// the saved 续读位 and the bookmarks — or a typed failure.
+type bookOpenMsg struct {
+	row       store.BookRow
+	bk        *epub.Book
+	prog      store.Progress
+	hasProg   bool
+	bookmarks []store.Bookmark
+	err       error
+}
+
+// openBookCmd is the reader's open half, off the UI goroutine: parse
+// the book (zip central directory only — fast), then read the saved
+// progress and bookmarks. The parse layer's two hard failures (DRM,
+// corrupt zip) arrive typed for the status bar.
+func (m Model) openBookCmd(row store.BookRow) tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	st := m.st
+	return func() tea.Msg {
+		bk, err := epub.Open(row.Path)
+		if err != nil {
+			return bookOpenMsg{row: row, err: err}
+		}
+		prog, hasProg, err := st.GetProgress(context.Background(), row.ID)
+		if err != nil {
+			bk.Close()
+			return bookOpenMsg{row: row, err: err}
+		}
+		bms, err := st.Bookmarks(context.Background(), row.ID)
+		if err != nil {
+			bk.Close()
+			return bookOpenMsg{row: row, err: err}
+		}
+		return bookOpenMsg{row: row, bk: bk, prog: prog, hasProg: hasProg, bookmarks: bms}
+	}
+}
+
+// bookLanded folds a finished open: failures keep the shelf with a
+// typed status line; success builds the reader — the flow over the
+// production feeder, the jump to the saved 续读位 (Enter 落到续读位,
+// the shelf story 6), the flattened TOC with its cursor parked on the
+// current chapter's nearest preceding entry.
+func (m *Model) bookLanded(msg bookOpenMsg) tea.Cmd {
+	m.bookOpening = false
+	if msg.err != nil {
+		switch {
+		case errors.Is(msg.err, epub.ErrDRMUnsupported):
+			m.status = m.cat.Get("books.err_drm")
+		case errors.Is(msg.err, epub.ErrInvalidZip):
+			m.status = m.cat.Get("books.err_zip")
+		default:
+			m.status = m.cat.Get("books.err_open", msg.err)
+		}
+		return nil
+	}
+	feeder := newEpubFeeder(msg.bk, m.cat)
+	br := &bookReader{
+		row: msg.row, bk: msg.bk, feeder: feeder,
+		bookmarks: msg.bookmarks,
+	}
+	br.flow = newBookFlow(feeder, m.bookTextWidth(), m.readerHeight())
+	if msg.hasProg {
+		br.flow.jump(msg.prog.SpineIndex, msg.prog.BlockOffset)
+	} else {
+		br.flow.jump(0, 0)
+	}
+	br.savedCh, _ = br.flow.anchor()
+	br.toc = flattenBookTOC(msg.bk)
+	br.tocSel = max(br.tocHighlightIdx(), 0)
+	m.book = br
+	return nil
+}
+
+// closeBook is Esc: persist the final position, release the handle,
+// and reload the shelf rows (the percent and order changed; the disk
+// did not — no rescan).
+func (m *Model) closeBook() tea.Cmd {
+	br := m.book
+	if br == nil {
+		return nil
+	}
+	m.saveBookProgress()
+	br.bk.Close()
+	m.book = nil
+	return m.reloadBooksCmd()
+}
+
+// saveBookProgress writes the 续读位 now (the throttle's write half;
+// callers are the chapter boundary and the exit paths).
+func (m *Model) saveBookProgress() {
+	br := m.book
+	if br == nil || m.st == nil {
+		return
+	}
+	ch, block, pct := br.flow.progress()
+	if err := m.st.SaveProgress(context.Background(), br.row.ID, ch, block, pct, time.Now()); err != nil {
+		m.status = m.cat.Get("errors.db_write", err)
+		return
+	}
+	br.savedCh = ch
+}
+
+// maybePersistBookChapter is the 章界 half of the 落盘节流: crossing
+// into a new chapter writes; scrolling within a chapter does not.
+func (m *Model) maybePersistBookChapter() {
+	if m.book == nil {
+		return
+	}
+	if ch, _, _ := m.book.flow.progress(); ch != m.book.savedCh {
+		m.saveBookProgress()
+	}
+}
+
+// flattenBookTOC walks the TOC depth-first into jump-capable rows
+// (href → spine index; entries targeting non-spine files drop).
+func flattenBookTOC(bk *epub.Book) []tocRow {
+	hrefIdx := make(map[string]int, len(bk.Spine))
+	for i, s := range bk.Spine {
+		if _, ok := hrefIdx[s.Href]; !ok {
+			hrefIdx[s.Href] = i
+		}
+	}
+	var rows []tocRow
+	var walk func(items []epub.TOCItem, depth int)
+	walk = func(items []epub.TOCItem, depth int) {
+		for _, it := range items {
+			if idx, ok := hrefIdx[it.Href]; ok {
+				rows = append(rows, tocRow{title: it.Title, depth: depth, spine: idx})
+			}
+			walk(it.Children, depth+1)
+		}
+	}
+	walk(bk.TOC, 0)
+	return rows
+}
+
+// tocHighlightIdx is the TOC row the current chapter highlights: the
+// nearest preceding entry by spine (a chapter the TOC skips — the
+// fixture's svg and corrupt chapters — reads under the previous
+// entry's light). -1 when the TOC has nothing at or before it.
+func (br *bookReader) tocHighlightIdx() int {
+	cur, _ := br.flow.anchor()
+	best, bestSpine := -1, -1
+	for i, r := range br.toc {
+		if r.spine <= cur && r.spine >= bestSpine {
+			best, bestSpine = i, r.spine
+		}
+	}
+	return best
+}
+
+// --- keys ----------------------------------------------------------------
+
+// bookKeys is the reader's key pump. Consumed keys stop here; the
+// shell-wide set (F1 help, Ctrl+T theme, Ctrl+Q … where not overridden)
+// falls through to the shared switch in Update.
+func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	br := m.book
+	switch msg.String() {
+	case "esc": // any focus: back to the shelf (progress persisted)
+		return true, m.closeBook()
+	case "ctrl+q": // quit from inside the reader: persist, then quit
+		m.saveBookProgress()
+		br.bk.Close()
+		m.book = nil
+		return true, tea.Quit
+	case "up":
+		br.flow.up(1)
+		m.maybePersistBookChapter()
+		return true, nil
+	case "down":
+		br.flow.down(1)
+		m.maybePersistBookChapter()
+		return true, nil
+	case "pgup":
+		br.flow.up(m.readerHeight())
+		m.maybePersistBookChapter()
+		return true, nil
+	case "pgdown":
+		br.flow.down(m.readerHeight())
+		m.maybePersistBookChapter()
+		return true, nil
+	}
+	return false, nil
+}
+
+// --- view ----------------------------------------------------------------
+
+// readerHeight is the content height: the terminal minus the reader's
+// own status line.
+func (m Model) readerHeight() int {
+	h := m.height - 1
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// bookTextWidth is the reading column: config text_width when set
+// (capped by the pane), else the pane itself (text_width=0 随终端).
+func (m Model) bookTextWidth() int {
+	pane := m.width - readerTocW
+	if pane < 1 {
+		pane = 1
+	}
+	if m.cfg != nil && m.cfg.TextWidth > 0 {
+		return min(m.cfg.TextWidth, pane)
+	}
+	return pane
+}
+
+// bookView is the independent full screen: TOC sidebar left, content
+// viewport right, the reader's own status line below.
+func (m Model) bookView() string {
+	h := m.readerHeight()
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.bookTocView(h),
+		m.bookContentView(h),
+	)
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.bookStatusView())
+}
+
+// bookTocView renders the TOC sidebar: depth-indented entries with
+// the current chapter's row marked ▸ (nearest preceding — a chapter
+// the TOC skips reads under the previous entry's light).
+func (m Model) bookTocView(h int) string {
+	br := m.book
+	var b strings.Builder
+	if len(br.toc) == 0 {
+		b.WriteString(m.th.Dim.Render(m.cat.Get("reader.no_toc")))
+	} else {
+		hl := br.tocHighlightIdx()
+		for i, r := range br.toc {
+			marker := "  "
+			if i == hl {
+				marker = "▸ "
+			}
+			label := strings.Repeat(" ", 2*r.depth) + marker + r.title
+			b.WriteString(m.th.SidebarItem.Render(
+				runewidth.FillRight(runewidth.Truncate(label, readerTocW-2, "…"), readerTocW-2)))
+			if i < len(br.toc)-1 {
+				b.WriteString("\n")
+			}
+		}
+	}
+	return m.th.Sidebar.Width(readerTocW).Height(h).Render(b.String())
+}
+
+// bookContentView renders the flow's viewport into the content pane:
+// ANSI-styled lines at the reading width, centered when the column is
+// narrower than the pane.
+func (m Model) bookContentView(h int) string {
+	lines, _ := m.book.flow.view()
+	text := render.ToANSI(lines, m.th.StyleFor)
+	w := m.bookTextWidth()
+	block := lipgloss.NewStyle().Width(w).Height(h).Render(text)
+	pane := m.width - readerTocW
+	if pane < 1 {
+		pane = 1
+	}
+	return lipgloss.Place(pane, h, lipgloss.Center, lipgloss.Top, block)
+}
+
+// bookStatusLine is the reader status line's left half: 书名 ·
+// 第 x/y 章 · pct — the same percent figure the shelf column shows.
+func (m Model) bookStatusLine() string {
+	br := m.book
+	ch, _, pct := br.flow.progress()
+	return br.row.Title + " · " + m.cat.Get("reader.pos",
+		ch+1, br.flow.feed.Len(), int(math.Round(pct*100)))
+}
+
+// bookStatusView is the reader's status line: the position triple
+// left, the exit hint right.
+func (m Model) bookStatusView() string {
+	left := m.th.StatusNormal.Render(m.bookStatusLine())
+	right := m.th.StatusHint.Render(m.cat.Get("reader.hint"))
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return m.th.StatusBar.Width(m.width).MaxHeight(1).
+		Render(left + strings.Repeat(" ", gap) + right)
 }

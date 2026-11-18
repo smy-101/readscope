@@ -125,19 +125,26 @@ func TestBookshelfOrderAndProgressColumns(t *testing.T) {
 	}
 }
 
-func TestBookshelfEnterReservedAndBrokenExplains(t *testing.T) {
+func TestBookshelfEnterOpensAndBrokenExplains(t *testing.T) {
 	m, dir := bookshelfModel(t, "en")
 	shelveIn(t, dir, "good.epub", fixture.ValidEPUB3())
 	shelveIn(t, dir, "drm.epub", fixture.DRMEncrypted())
 	m = size(m, 100, 30)
 	m = pump(t, m, m.Init())
 
-	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.status, "The reader arrives with the next ticket") {
-		t.Fatalf("Enter on a shelved book should show the reserved hint, got %q", m.status)
+	// Enter on a shelved book starts the reader's open chain (ticket
+	// 03 took the key over from the reserved hint).
+	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(m.status, "Opening") {
+		t.Fatalf("Enter on a shelved book should start the open, got %q", m.status)
+	}
+	m = pump(t, m, cmd)
+	if m.book == nil {
+		t.Fatalf("the reader should be open:\n%s", m.View())
 	}
 
 	// The broken row sits after the shelved rows; walk down to it.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyDown})
 	m = updateKey(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !strings.Contains(m.status, "DRM-protected") {

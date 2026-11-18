@@ -87,6 +87,11 @@ type Model struct {
 	loginBuf  string // the pasted Cookie header; masked in the view, never echoed
 
 	reader *detail // open item's overlay reader; nil = list mode
+
+	// Book reader state (M6 ticket 03): the EPUB full screen. book is
+	// nil unless reading; bookOpening guards the async open.
+	book        *bookReader
+	bookOpening bool
 }
 
 // New builds the root model from loaded configuration, the item store
@@ -114,6 +119,8 @@ type feedsMsg struct {
 
 // booksMsg is defined in bookshelf.go: a finished library scan
 // (shelf rows + the scan's verdict).
+
+// bookOpenMsg is defined in reader.go: the EPUB reader's open chain.
 
 type itemsMsg struct {
 	feed string
@@ -376,6 +383,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.book != nil { // reader: re-height always, re-wrap on width change
+			br := m.book
+			br.flow.resize(m.readerHeight())
+			if w := m.bookTextWidth(); w != br.flow.width {
+				br.flow.relayout(w)
+			}
+			return m, nil
+		}
 		if m.reader != nil { // re-wrap at the new width, keep the position
 			m.relayoutReader()
 		}
@@ -411,6 +426,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case booksMsg:
 		return m, m.booksLanded(msg)
+
+	case bookOpenMsg:
+		return m, m.bookLanded(msg)
 
 	case refreshDoneMsg:
 		m.refreshing = false
@@ -550,6 +568,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil
+		}
+		// The book reader owns its keys while open (the full screen's
+		// key pump, reader.go); shell-wide keys it does not consume
+		// fall through below.
+		if m.book != nil {
+			if handled, cmd := m.bookKeys(msg); handled {
+				return m, cmd
+			}
 		}
 		// The reader owns navigation keys while open (except under the
 		// help overlay); shell-wide keys fall through to the shared switch.
@@ -783,6 +809,9 @@ func (m Model) View() string {
 	if m.loginOpen {
 		return m.loginView()
 	}
+	if m.book != nil {
+		return m.bookView() // the EPUB full screen (ADR #11)
+	}
 	pane := m.listView()
 	if m.reader != nil {
 		pane = m.detailView() // the reader covers the list pane
@@ -812,6 +841,7 @@ func (m *Model) cycleSource(delta int) {
 	m.active = (m.active + delta + len(sourceIDs)) % len(sourceIDs)
 	m.focus, m.sidebarSel = regionSidebar, 0
 	m.reader = nil // the overlay belongs to the previous source's list
+	m.book = nil   // the reader's full screen goes with it
 	m.favorites = false
 	m.confirming = false
 	// A source with no registered package is a mystery blank without
@@ -861,6 +891,7 @@ func (m *Model) resetSource() {
 	m.failErr = nil
 	m.booksSel, m.booksTop = 0, 0
 	m.scanning = false
+	m.bookOpening = false
 }
 
 func (m Model) selectedFeed() *core.Feed {

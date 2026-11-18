@@ -25,10 +25,13 @@ import (
 // booksMsg lands when a library scan finished (screen entry or F5):
 // the shelf rows in store order plus the scan's verdict. Stale
 // messages are fine to drop — the scan still freshened the database.
+// A rows-only reload (rescan=false, the reader's close path) swaps
+// the rows and keeps the verdicts: the disk did not change.
 type booksMsg struct {
 	rows   []store.BookRow
 	result library.Result
 	err    error
+	rescan bool // true = a real scan; false = rows-only reload
 }
 
 // brokenRow is a file the scan refused that never shelved (no
@@ -70,10 +73,24 @@ func (m Model) scanBooksCmd() tea.Cmd {
 		}
 		res, err := library.Scan(context.Background(), st, dir)
 		if err != nil {
-			return booksMsg{err: err}
+			return booksMsg{err: err, rescan: true}
 		}
 		rows, err := st.BookRows(context.Background())
-		return booksMsg{rows: rows, result: res, err: err}
+		return booksMsg{rows: rows, result: res, err: err, rescan: true}
+	}
+}
+
+// reloadBooksCmd reloads the shelf rows without rescanning — the
+// reader's close path: progress changed the rows, the disk did not.
+// The verdicts (failErr/broken) stay as the last scan left them.
+func (m Model) reloadBooksCmd() tea.Cmd {
+	if m.st == nil {
+		return nil
+	}
+	st := m.st
+	return func() tea.Msg {
+		rows, err := st.BookRows(context.Background())
+		return booksMsg{rows: rows, err: err}
 	}
 }
 
@@ -88,6 +105,11 @@ func (m *Model) booksLanded(msg booksMsg) tea.Cmd {
 	}
 	if !m.onBookshelf() {
 		return nil // the user Tabbed away; the db is fresh, the rows are moot
+	}
+	if !msg.rescan { // rows-only reload: keep verdicts and status
+		m.books = msg.rows
+		m.clampBooksCursor()
+		return nil
 	}
 	m.books = msg.rows
 	m.failErr = make(map[string]error, len(msg.result.Failed))
@@ -129,8 +151,7 @@ func (m *Model) bookshelfKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.moveBooksSel(m.bodyHeight())
 		return true, nil
 	case "enter":
-		m.openBook()
-		return true, nil
+		return true, m.openBook()
 	}
 	return false, nil
 }
@@ -147,15 +168,20 @@ func (m *Model) clampBooksCursor() {
 }
 
 // openBook is Enter on a shelf row: a broken row explains itself with
-// the typed parse error (DRM / corrupt zip), a shelved row shows the
-// reserved hint — the reader opens with ticket 03.
-func (m *Model) openBook() {
+// the typed parse error (DRM / corrupt zip), a shelved row opens the
+// reader (ticket 03) — the open chain is async, the status bar says
+// 开书中… until bookOpenMsg lands.
+func (m *Model) openBook() tea.Cmd {
 	if m.booksSel >= m.shelfLen() {
-		return
+		return nil
 	}
 	path := ""
+	var row store.BookRow
+	haveRow := false
 	if m.booksSel < len(m.books) {
-		path = m.books[m.booksSel].Path
+		row = m.books[m.booksSel]
+		path = row.Path
+		haveRow = true
 	} else {
 		path = m.broken[m.booksSel-len(m.books)].path
 	}
@@ -168,9 +194,14 @@ func (m *Model) openBook() {
 		default:
 			m.status = m.cat.Get("books.err_open", err)
 		}
-		return
+		return nil
 	}
-	m.status = m.cat.Get("books.reader_pending")
+	if !haveRow || m.bookOpening {
+		return nil
+	}
+	m.bookOpening = true
+	m.status = m.cat.Get("reader.opening")
+	return m.openBookCmd(row)
 }
 
 // Column width clamps for the four-column layout: the author column
