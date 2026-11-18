@@ -87,18 +87,17 @@ type TOCItem struct {
 // Open. Warnings lists every degradation recovered from, in the order
 // they were encountered.
 type Book struct {
-	Title     string
-	Authors   []string
-	Language  string
-	Spine     []SpineItem
-	Manifest  []ManifestItem
-	TOC       []TOCItem
-	Warnings  []Warning
-	zr        *zip.ReadCloser
-	files     map[string]*zip.File // normalized entry name → file
-	opfDir    string               // directory of the OPF inside the zip ("" for root)
-	manifest  map[string]ManifestItem
-	hasNavTOC bool // EPUB3 nav document with a usable toc nav
+	Title    string
+	Authors  []string
+	Language string
+	Spine    []SpineItem
+	Manifest []ManifestItem
+	TOC      []TOCItem
+	Warnings []Warning
+	zr       *zip.ReadCloser
+	files    map[string]*zip.File // normalized entry name → file
+	opfDir   string               // directory of the OPF inside the zip ("" for root)
+	manifest map[string]ManifestItem
 }
 
 // Open parses the EPUB at path. It fails only on a corrupt zip
@@ -606,8 +605,162 @@ func nodeText(n *html.Node) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// loadNavTOC parses the EPUB3 nav document when the book has one.
-func (b *Book) loadNavTOC() bool { return false } // arrives with its test
+// loadNavTOC parses the EPUB3 nav document when the manifest declares
+// one (properties ~ nav). Selection: the nav whose epub:type list
+// contains "toc" wins; an untyped nav (authors omit the attribute more
+// often than they should) is the runner-up; navs typed as something
+// else — landmarks first of all — are never selected. Hrefs resolve
+// against the nav document's directory.
+func (b *Book) loadNavTOC() bool {
+	navPath := ""
+	for _, item := range b.Manifest {
+		for _, prop := range strings.Fields(item.Properties) {
+			if prop == "nav" {
+				navPath = item.Href
+				break
+			}
+		}
+		if navPath != "" {
+			break
+		}
+	}
+	if navPath == "" {
+		return false
+	}
+	data, err := b.readEntry(navPath)
+	if err != nil {
+		return false // unreadable nav: NCX takes over silently
+	}
+	root, err := html.Parse(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+
+	var tocNav, plainNav *html.Node
+	walkNodes(root, func(n *html.Node) {
+		if n.Type != html.ElementNode || n.Data != "nav" {
+			return
+		}
+		if hasEpubTypeToken(n, "toc") {
+			if tocNav == nil {
+				tocNav = n
+			}
+		} else if epubTypeAttr(n) == "" && plainNav == nil {
+			plainNav = n
+		}
+	})
+	chosen := tocNav
+	if chosen == nil {
+		chosen = plainNav
+	}
+	if chosen == nil {
+		return false // only landmarks-typed navs: let NCX answer
+	}
+	ol := firstDescendant(chosen, "ol")
+	if ol == nil {
+		return false
+	}
+	navDir := path.Dir(navPath)
+	if navDir == "." || navDir == "/" {
+		navDir = ""
+	}
+	toc := olToTOC(ol, navDir)
+	if len(toc) == 0 {
+		return false
+	}
+	b.TOC = toc
+	return true
+}
+
+// olToTOC walks an ol of li > a (+ nested ol) into TOC items.
+func olToTOC(ol *html.Node, dir string) []TOCItem {
+	var items []TOCItem
+	for li := firstElementChild(ol); li != nil; li = nextElementSibling(li) {
+		if li.Data != "li" {
+			continue
+		}
+		a := firstDescendant(li, "a")
+		if a == nil {
+			continue
+		}
+		item := TOCItem{Title: nodeText(a)}
+		for _, attr := range a.Attr {
+			if attr.Key == "href" {
+				item.Href = resolveRelative(dir, attr.Val)
+				break
+			}
+		}
+		if nested := firstDescendant(li, "ol"); nested != nil {
+			item.Children = olToTOC(nested, dir)
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// hasEpubTypeToken reports whether n's epub:type list contains token.
+func hasEpubTypeToken(n *html.Node, token string) bool {
+	for _, t := range strings.Fields(epubTypeAttr(n)) {
+		if t == token {
+			return true
+		}
+	}
+	return false
+}
+
+// epubTypeAttr returns the epub:type value of n, or "" if absent. The
+// HTML parser splits the prefixed attribute into Space "epub" + Key
+// "type"; the unsplit spelling is covered defensively.
+func epubTypeAttr(n *html.Node) string {
+	for _, attr := range n.Attr {
+		if attr.Key == "type" && attr.Namespace == "epub" {
+			return attr.Val
+		}
+		if attr.Key == "epub:type" {
+			return attr.Val
+		}
+	}
+	return ""
+}
+
+func walkNodes(n *html.Node, visit func(*html.Node)) {
+	visit(n)
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		walkNodes(c, visit)
+	}
+}
+
+func firstElementChild(n *html.Node) *html.Node {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode {
+			return c
+		}
+	}
+	return nil
+}
+
+func nextElementSibling(n *html.Node) *html.Node {
+	for c := n.NextSibling; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode {
+			return c
+		}
+	}
+	return nil
+}
+
+// firstDescendant returns the first descendant element named tag in
+// document order.
+func firstDescendant(n *html.Node, tag string) *html.Node {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode && c.Data == tag {
+			return c
+		}
+		if found := firstDescendant(c, tag); found != nil {
+			return found
+		}
+	}
+	return nil
+}
 
 // xmlDecodeBytes decodes v from data with the package's tolerance
 // settings (charset handling is added alongside its first test).

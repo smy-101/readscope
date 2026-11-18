@@ -233,6 +233,68 @@ func HrefMatrix() []File {
 	}
 }
 
+// ValidEPUB3 is an EPUB3 that also carries an NCX (compat book): the
+// nav document must win. Its first nav is landmarks (the mis-selection
+// trap), the toc nav nests two levels and one entry carries a
+// #fragment. NCX labels deliberately differ from nav labels so the
+// wrong source is loud.
+func ValidEPUB3() []File {
+	mk := func(name string) File {
+		return File{Name: name, Data: chapterXHTML(name, "<p>"+name+"</p>")}
+	}
+	return []File{
+		{Name: "mimetype", Data: "application/epub+zip"},
+		{Name: "META-INF/container.xml", Data: `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`},
+		{Name: "OEBPS/content.opf", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>合成书 · EPUB3</dc:title>
+    <dc:creator>作者甲</dc:creator>
+    <dc:language>zh-CN</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+  </spine>
+</package>`},
+		{Name: "OEBPS/nav.xhtml", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>导航</title></head>
+<body>
+  <nav epub:type="landmarks" hidden="">
+    <ol><li><a epub:type="bodymatter" href="text/ch1.xhtml">正文起点</a></li></ol>
+  </nav>
+  <nav epub:type="toc">
+    <ol>
+      <li><a href="text/ch1.xhtml">第一章 起航</a>
+        <ol><li><a href="text/ch2.xhtml#sec-1">1.1 小节</a></li></ol>
+      </li>
+    </ol>
+  </nav>
+</body>
+</html>`},
+		{Name: "OEBPS/toc.ncx", Data: `<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="p1"><navLabel><text>NCX 不该被选中</text></navLabel><content src="text/ch1.xhtml"/></navPoint>
+  </navMap>
+</ncx>`},
+		mk("OEBPS/text/ch1.xhtml"),
+		mk("OEBPS/text/ch2.xhtml"),
+	}
+}
+
 // chapterXHTML wraps body into a minimal XHTML 1.1 chapter document.
 func chapterXHTML(title, body string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>

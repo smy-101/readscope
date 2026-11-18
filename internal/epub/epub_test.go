@@ -120,6 +120,24 @@ func TestHrefNormalizationMatrix(t *testing.T) {
 	}
 }
 
+func TestOpenEPUB3NavTOCWinsOverNCX(t *testing.T) {
+	book := open(t, fixture.ValidEPUB3())
+
+	// The epub:type=toc nav wins over NCX; the landmarks nav that comes
+	// first in the document is not mis-selected; nesting survives and
+	// the #fragment is stripped.
+	want := []epub.TOCItem{
+		{
+			Title: "第一章 起航", Href: "OEBPS/text/ch1.xhtml",
+			Children: []epub.TOCItem{{Title: "1.1 小节", Href: "OEBPS/text/ch2.xhtml"}},
+		},
+	}
+	assertTOC(t, book.TOC, want)
+	if got, want := len(book.Warnings), 0; got != want {
+		t.Errorf("Warnings = %+v, want none", book.Warnings)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
