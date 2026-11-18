@@ -41,6 +41,15 @@ err_zip = "文件损坏，不是有效的 EPUB"
 err_open = "无法打开：%v"
 never = "—"
 
+[add]
+usage = "用法：readscope add <文件.epub> — 把一本书拷进书库目录"
+missing = "文件不存在：%s"
+exists = "书库已存在同名文件：\n  %s\n要替换请先删除旧文件（删文件即下架）"
+copied = "已拷入：%s — 《%s》下次扫描即上架"
+copied_dirty = "已拷入：%s — 《%s》，带 %d 条解析警告"
+copied_broken = "已拷入：%s — 但打不开：%s"
+err_copy = "拷入失败：%v"
+
 [zhihu]
 hot = "热榜"
 recommend = "推荐"

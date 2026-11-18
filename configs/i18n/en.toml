@@ -41,6 +41,15 @@ err_zip = "File corrupt: not a valid EPUB"
 err_open = "cannot open: %v"
 never = "—"
 
+[add]
+usage = "usage: readscope add <file.epub> — copy one book into the library directory"
+missing = "no such file: %s"
+exists = "the library already has a file with this name:\n  %s\ndelete the old file first to replace it (deleting a file unshelves it)"
+copied = "copied: %s — 《%s》 shelves on the next scan"
+copied_dirty = "copied: %s — 《%s》 with %d parse warnings"
+copied_broken = "copied: %s — but it will not open: %s"
+err_copy = "copy failed: %v"
+
 [zhihu]
 hot = "Hot List"
 recommend = "Recommend"
