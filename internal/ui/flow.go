@@ -137,14 +137,15 @@ func (f *bookFlow) touch(idx int) {
 }
 
 // evict trims the cache to the cap, dropping the least recently used
-// chapter that the current viewport does not span; if every entry is
-// in span the trim stands down (see flowCacheChapters).
+// chapter that the current viewport does not span (the top chapter
+// counts as spanned even before a view runs); if every entry is in
+// span the trim stands down (see flowCacheChapters).
 func (f *bookFlow) evict() {
 	for len(f.cache) > flowCacheChapters {
 		dropped := false
 		for i := len(f.lru) - 1; i >= 0; i-- {
 			idx := f.lru[i]
-			if idx >= f.span[0] && idx <= f.span[1] {
+			if idx == f.topCh || (idx >= f.span[0] && idx <= f.span[1]) {
 				continue
 			}
 			delete(f.cache, idx)
@@ -167,7 +168,9 @@ func (f *bookFlow) view() ([]render.Line, []int) {
 	lines := make([]render.Line, 0, f.height)
 	owners := make([]int, 0, f.height)
 	ch, ln := f.topCh, f.topLine
+	f.span = [2]int{f.topCh, f.topCh}
 	for len(lines) < f.height && ch < f.feed.Len() {
+		f.span[1] = ch // before the render: the chapter being consumed is in-span
 		c := f.chapter(ch)
 		for ; ln < len(c.lines) && len(lines) < f.height; ln++ {
 			lines = append(lines, c.lines[ln])
@@ -175,10 +178,6 @@ func (f *bookFlow) view() ([]render.Line, []int) {
 		}
 		ln = 0
 		ch++
-	}
-	f.span = [2]int{f.topCh, ch - 1}
-	if f.span[1] < f.span[0] {
-		f.span[1] = f.span[0]
 	}
 	for len(lines) < f.height {
 		lines = append(lines, render.Line{})

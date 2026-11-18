@@ -9,6 +9,7 @@ package ui
 // in their own slices.
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -272,5 +273,109 @@ func TestFlowZeroLineChapterCannotLoop(t *testing.T) {
 	// the title line at index 2.
 	if got := lines[2].Plain(); got != "空" {
 		t.Fatalf("empty chapter still shows its title: %q", got)
+	}
+}
+
+// The width-change contract (锚点不丢): relayout re-wraps the cached
+// chapters at the new width and puts the anchor block's first line
+// back on top — the anchor is the position, lines are derived. The
+// re-wrap itself is pinned through the chapter's shrinking line count
+// (the wrap arithmetic has its own goldens in the render package).
+func TestFlowRelayoutKeepsAnchor(t *testing.T) {
+	f := newFakeFeeder(
+		[]string{"甲", "乙"},
+		[][]string{{strings.Repeat("a", 24)}, {strings.Repeat("b", 12)}})
+	flow := newTestFlow(f, 6, 10)
+
+	// Anchor on chapter 0's paragraph block (block 2: rule, title,
+	// para): at width 6 the paragraph is 4 lines.
+	flow.jump(0, 2)
+	ch, b := flow.anchor()
+	if ch != 0 || b != 2 {
+		t.Fatalf("setup anchor = (%d,%d), want (0,2)", ch, b)
+	}
+	narrow := len(flow.chapter(0).lines)
+
+	flow.relayout(12)
+	ch, b = flow.anchor()
+	if ch != 0 || b != 2 {
+		t.Fatalf("anchor after relayout = (%d,%d), want (0,2) — 锚点不丢", ch, b)
+	}
+	if wide := len(flow.chapter(0).lines); wide >= narrow {
+		t.Fatalf("relayout did not re-wrap: %d lines at width 12 vs %d at width 6", wide, narrow)
+	}
+	lines, _ := flow.view()
+	if got := lines[0].Plain(); got != strings.Repeat("a", 12) {
+		t.Fatalf("top after relayout = %q, want the anchor block's first line", got)
+	}
+
+	// Same contract mid-book: anchored in chapter 1's content (a third
+	// chapter behind it, so no end clamp interferes), a resize keeps
+	// chapter and block.
+	f3 := newFakeFeeder(
+		[]string{"甲", "乙", "丙"},
+		[][]string{{"a1"}, {strings.Repeat("b", 12)}, {"c1"}})
+	flow3 := newTestFlow(f3, 12, 10)
+	flow3.jump(1, 2)
+	flow3.relayout(6)
+	if ch, b := flow3.anchor(); ch != 1 || b != 2 {
+		t.Fatalf("mid-book anchor after relayout = (%d,%d), want (1,2)", ch, b)
+	}
+}
+
+// The memory decision (LRU 16): walking past the cap evicts the
+// oldest chapters (a revisit re-renders them), while a viewport that
+// itself spans more chapters than the cap keeps them all — memory
+// follows the viewport, never the book.
+func TestFlowLRUEvictsBeyondCap(t *testing.T) {
+	titles := make([]string, 20)
+	blocks := make([][]string, 20)
+	for i := range titles {
+		titles[i] = "章" + strconv.Itoa(i)
+		blocks[i] = []string{"正文" + strconv.Itoa(i)}
+	}
+	f := newFakeFeeder(titles, blocks)
+	flow := newTestFlow(f, 40, 3) // a chapter is 5 lines; the view takes 3
+
+	for i := 0; i < 20; i++ {
+		flow.jump(i, 0)
+		flow.view()
+	}
+	if len(flow.cache) != flowCacheChapters {
+		t.Fatalf("cache = %d chapters, want the cap %d", len(flow.cache), flowCacheChapters)
+	}
+	for i := 0; i < 4; i++ {
+		if _, ok := flow.cache[i]; ok {
+			t.Fatalf("chapter %d survived the LRU: %v", i, flow.cache)
+		}
+	}
+	// Revisiting an evicted chapter re-renders it (the call count the
+	// lazy contract rides).
+	if f.calls[0] != 1 {
+		t.Fatalf("setup: chapter 0 rendered %d times", f.calls[0])
+	}
+	flow.jump(0, 0)
+	if f.calls[0] != 2 {
+		t.Fatalf("evicted chapter re-jump rendered %d times, want 2", f.calls[0])
+	}
+}
+
+// A viewport spanning more chapters than the cap keeps them all: the
+// stitcher cannot serve a view from evicted chapters, so the span is
+// eviction-proof by construction (each chapter is 5 lines; 20
+// chapters fit one 100-line viewport).
+func TestFlowCacheFollowsTheViewport(t *testing.T) {
+	titles := make([]string, 20)
+	blocks := make([][]string, 20)
+	for i := range titles {
+		titles[i] = "章" + strconv.Itoa(i)
+		blocks[i] = []string{"正文" + strconv.Itoa(i)}
+	}
+	f := newFakeFeeder(titles, blocks)
+	flow := newBookFlow(f, 40, 100)
+	flow.jump(0, 0)
+	flow.view()
+	if len(flow.cache) != 20 {
+		t.Fatalf("cache = %d chapters, want all 20 the viewport spans", len(flow.cache))
 	}
 }
