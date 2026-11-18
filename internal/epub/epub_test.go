@@ -88,6 +88,38 @@ func assertTOC(t *testing.T, got, want []epub.TOCItem) {
 	}
 }
 
+func TestHrefNormalizationMatrix(t *testing.T) {
+	book := open(t, fixture.HrefMatrix())
+
+	// Spine hrefs: idref → manifest join with ./, sub/../ and %XX all
+	// resolved onto the real entry names.
+	want := []string{"text/ch1.xhtml", "text/ch2.xhtml", "text/my ch3.xhtml"}
+	for i, w := range want {
+		if got := book.Spine[i].Href; got != w {
+			t.Errorf("Spine[%d].Href = %q, want %q", i, got, w)
+		}
+		if _, err := book.ReadItem(book.Spine[i].Href); err != nil {
+			t.Errorf("ReadItem(Spine[%d] = %q): %v", i, book.Spine[i].Href, err)
+		}
+	}
+
+	// TOC src carried a #fragment: stripped, chapter path kept.
+	if len(book.TOC) != 1 || book.TOC[0].Href != "text/ch2.xhtml" {
+		t.Errorf("TOC = %+v, want one item pointing at text/ch2.xhtml", book.TOC)
+	}
+
+	// Messy caller spellings land on entries too.
+	for _, href := range []string{
+		"./text/../text/ch1.xhtml", // dot-walk from a rooted spelling
+		"text/my%20ch3.xhtml",      // percent-escaped space
+		"text/ch2.xhtml#anywhere",  // fragment from a TOC-style src
+	} {
+		if _, err := book.ReadItem(href); err != nil {
+			t.Errorf("ReadItem(%q): %v", href, err)
+		}
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

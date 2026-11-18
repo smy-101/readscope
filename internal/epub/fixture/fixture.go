@@ -187,6 +187,52 @@ func ValidEPUB2() []File {
 	}
 }
 
+// ValidEPUB2 exercises dirty href spellings against a root-level OPF:
+// ./ prefixes, sub/../ dot-dot walks, %XX escapes, TOC #fragments. Every
+// href must resolve onto a real zip entry.
+func HrefMatrix() []File {
+	mk := func(name, href string) File {
+		return File{Name: name, Data: chapterXHTML(name, "<p>"+name+"</p>")}
+	}
+	return []File{
+		{Name: "mimetype", Data: "application/epub+zip"},
+		{Name: "META-INF/container.xml", Data: `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`},
+		{Name: "content.opf", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>脏 href 矩阵书</dc:title>
+    <dc:creator>fixture</dc:creator>
+    <dc:language>zh-CN</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="./text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/sub/../ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch3" href="text/my%20ch3.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+    <itemref idref="ch3"/>
+  </spine>
+</package>`},
+		{Name: "toc.ncx", Data: `<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="p1"><navLabel><text>带锚点</text></navLabel><content src="text/ch2.xhtml#section-2"/></navPoint>
+  </navMap>
+</ncx>`},
+		mk("text/ch1.xhtml", "ch1"),
+		mk("text/ch2.xhtml", "ch2"),
+		mk("text/my ch3.xhtml", "ch3"),
+	}
+}
+
 // chapterXHTML wraps body into a minimal XHTML 1.1 chapter document.
 func chapterXHTML(title, body string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>
