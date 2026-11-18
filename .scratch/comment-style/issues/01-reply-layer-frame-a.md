@@ -1,6 +1,6 @@
 # 评论层样式:帧 A(缩进阶梯)折回
 
-Status: done (2026-11-14, agent 侧; 全量 `go test ./...` 绿, i18n parity 验讫; 深浅两主题下的手感走查归用户真机环节)
+Status: done (2026-11-14 agent 侧, 全量 `go test ./...` 绿, i18n parity 验讫; 2026-11-18 用户真机手感走查**暂时通过**, 改良方向延后——见 Comments)
 
 ## 问题
 
@@ -46,4 +46,6 @@ B（结构不动纯上色）与 C（meta 整行弱化）未销毁，仍在 proto
 - **P2 四项全修**：抽 `authorSpan`（author 样式三行两处重复）；`replyRow.deep()` 单点判定 depth≥2（头行与缩进两处不再各自摆开关）；i18n 键 `detail.reply_to`→`detail.replied_to`（与 `replies_to` 一字母之差易错抓）。
 - **放行项（Spec b）**：floors.go / heybox / zhihu 三处纯注释的术语退役超出折回范围清单，零行为变化，随批知会。
 
-修复后全量 `go test ./...` 16 包绿，gofmt/vet 净；用户真机手感走查仍归用户环节。
+修复后全量 `go test ./...` 16 包绿，gofmt/vet 净。
+
+**用户判定（2026-11-18）**：帧 A 真机手感**暂时通过**；后续再评估改良方向（用一段时间后再定，候选：缩进量/颜色对比/前缀形式；落选帧 B/C 仍在 `prototype/comment-styles` 分支可重开）。本票关闭，改良不另开票——到时按新问题走 `/grill-with-docs`。
