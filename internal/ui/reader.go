@@ -36,10 +36,11 @@ type epubFeeder struct {
 	bk     *epub.Book
 	cat    *i18n.Catalog
 	titles map[int]string // spine idx → TOC title, first match wins
+	cache  map[int]string // resolved display titles (title() reads chapters)
 }
 
 func newEpubFeeder(bk *epub.Book, cat *i18n.Catalog) *epubFeeder {
-	f := &epubFeeder{bk: bk, cat: cat, titles: make(map[int]string, len(bk.TOC))}
+	f := &epubFeeder{bk: bk, cat: cat, titles: make(map[int]string, len(bk.TOC)), cache: map[int]string{}}
 	hrefIdx := make(map[string]int, len(bk.Spine))
 	for i, s := range bk.Spine {
 		if _, ok := hrefIdx[s.Href]; !ok {
@@ -82,18 +83,24 @@ func (f *epubFeeder) Chapter(idx int) (*render.Document, string) {
 }
 
 // title is the chapter's display title on its own (the TOC sidebar's
-// current-chapter label rides it) — the same chain Chapter applies.
+// current-chapter label and the bookmark rows ride it) — the same
+// chain Chapter applies, memoized: the fallback links read chapters.
 func (f *epubFeeder) title(idx int) string {
-	if title := f.titles[idx]; title != "" {
-		return title
+	if t, ok := f.cache[idx]; ok {
+		return t
 	}
-	href := f.bk.Spine[idx].Href
-	if doc, err := f.chapterDoc(idx); err == nil {
-		if title := firstHeadingTitle(doc); title != "" {
-			return title
+	t := f.titles[idx]
+	if t == "" {
+		href := f.bk.Spine[idx].Href
+		if doc, err := f.chapterDoc(idx); err == nil {
+			t = firstHeadingTitle(doc)
+		}
+		if t == "" {
+			t = fileTitle(href)
 		}
 	}
-	return fileTitle(href)
+	f.cache[idx] = t
+	return t
 }
 
 // chapterDoc reads and parses the spine chapter's document.
@@ -161,6 +168,12 @@ type bookReader struct {
 	focusToc  bool
 	bookmarks []store.Bookmark
 	savedCh   int // anchor chapter at the last progress write
+
+	// Bookmark modals: the Ctrl+B note dialog and the Ctrl+G list.
+	bmNoteOpen bool
+	bmNoteBuf  string
+	bmListOpen bool
+	bmSel      int
 }
 
 // bookOpenMsg lands when the reader's open finished: the parsed book,
@@ -324,7 +337,20 @@ func (br *bookReader) tocHighlightIdx() int {
 // — it toggles the TOC focus with ←/→.
 func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	br := m.book
+	if br.bmNoteOpen { // the note dialog is modal
+		return m.bookNoteKeys(msg)
+	}
+	if br.bmListOpen { // the bookmark list is modal
+		return m.bookListKeys(msg)
+	}
 	switch msg.String() {
+	case "ctrl+b": // bookmark the current position (note optional)
+		br.bmNoteOpen, br.bmNoteBuf = true, ""
+		return true, nil
+	case "ctrl+g": // the bookmark list
+		br.bmListOpen = true
+		br.bmSel = 0
+		return true, nil
 	case "esc": // any focus: back to the shelf (progress persisted)
 		return true, m.closeBook()
 	case "ctrl+q": // quit from inside the reader: persist, then quit
@@ -447,12 +473,19 @@ func (m Model) bookTextWidth() int {
 // bookView is the independent full screen: TOC sidebar left, content
 // viewport right, the reader's own status line below.
 func (m Model) bookView() string {
+	if m.book.bmNoteOpen { // the note dialog is its own screen
+		return m.bookBmView()
+	}
 	h := m.readerHeight()
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.bookTocView(h),
 		m.bookContentView(h),
 	)
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.bookStatusView())
+	view := lipgloss.JoinVertical(lipgloss.Left, body, m.bookStatusView())
+	if m.book.bmListOpen { // the list overlays the reader
+		return m.bookBmListView()
+	}
+	return view
 }
 
 // bookTocView renders the TOC sidebar: depth-indented entries with
@@ -561,4 +594,156 @@ func (m *Model) adjustBookWidth(delta int) {
 		br.flow.relayout(w)
 	}
 	m.status = m.cat.Get("reader.width", w)
+}
+
+// --- bookmarks (Ctrl+B add, Ctrl+G list) ---------------------------------
+
+// bmRow is one rendered bookmark-list row: the target's chapter title
+// (resolved once when the list opens — feeder.title reads lazily),
+// the note, and the jump anchor.
+type bmRow struct {
+	title string
+	note  string
+	ch    int
+	block int
+}
+
+// bmRows builds the list's rows from the store's bookmarks (newest
+// first — the store's order).
+func (m Model) bmRows() []bmRow {
+	br := m.book
+	rows := make([]bmRow, 0, len(br.bookmarks))
+	for _, b := range br.bookmarks {
+		rows = append(rows, bmRow{
+			title: br.feeder.title(b.SpineIndex),
+			note:  b.Note,
+			ch:    b.SpineIndex, block: b.BlockOffset,
+		})
+	}
+	return rows
+}
+
+// bookNoteKeys is the note dialog's modal pump: runes accumulate
+// (typed or pasted), Enter saves at the current anchor (an empty note
+// is a valid bookmark), Esc cancels, backspace edits.
+func (m *Model) bookNoteKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	br := m.book
+	switch msg.String() {
+	case "enter":
+		br.bmNoteOpen = false
+		ch, block := br.flow.anchor()
+		if err := m.st.AddBookmark(context.Background(), br.row.ID, ch, block, br.bmNoteBuf, time.Now()); err != nil {
+			m.status = m.cat.Get("errors.db_write", err)
+			return true, nil
+		}
+		br.bmNoteBuf = ""
+		if bms, err := m.st.Bookmarks(context.Background(), br.row.ID); err == nil {
+			br.bookmarks = bms
+		}
+		m.status = m.cat.Get("reader.bm_saved", ch+1, br.flow.feed.Len())
+		return true, nil
+	case "esc":
+		br.bmNoteOpen, br.bmNoteBuf = false, ""
+		return true, nil
+	case "backspace":
+		if rs := []rune(br.bmNoteBuf); len(rs) > 0 {
+			br.bmNoteBuf = string(rs[:len(rs)-1])
+		}
+		return true, nil
+	}
+	if msg.Type == tea.KeyRunes && !msg.Paste {
+		br.bmNoteBuf += string(msg.Runes)
+		return true, nil
+	}
+	return true, nil // modal: everything else waits
+}
+
+// bookListKeys is the bookmark list's modal pump: arrows walk, Enter
+// jumps to the row's block, Ctrl+D deletes, Esc closes.
+func (m *Model) bookListKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	br := m.book
+	switch msg.String() {
+	case "esc":
+		br.bmListOpen = false
+		return true, nil
+	case "up":
+		if br.bmSel > 0 {
+			br.bmSel--
+		}
+		return true, nil
+	case "down":
+		if br.bmSel < len(br.bookmarks)-1 {
+			br.bmSel++
+		}
+		return true, nil
+	case "ctrl+d":
+		if len(br.bookmarks) == 0 {
+			return true, nil
+		}
+		b := br.bookmarks[br.bmSel]
+		if err := m.st.DeleteBookmark(context.Background(), br.row.ID, b.SpineIndex, b.BlockOffset); err != nil {
+			m.status = m.cat.Get("errors.db_write", err)
+			return true, nil
+		}
+		m.status = m.cat.Get("reader.bm_deleted")
+		if bms, err := m.st.Bookmarks(context.Background(), br.row.ID); err == nil {
+			br.bookmarks = bms
+		}
+		br.bmSel = min(br.bmSel, max(len(br.bookmarks)-1, 0))
+		return true, nil
+	case "enter":
+		if len(br.bookmarks) == 0 {
+			return true, nil
+		}
+		b := br.bookmarks[br.bmSel]
+		br.flow.jump(b.SpineIndex, b.BlockOffset)
+		m.maybePersistBookChapter()
+		br.bmListOpen = false
+		return true, nil
+	}
+	return true, nil // modal: everything else waits
+}
+
+// bookBmView renders the note dialog (centered, the buffer shown in
+// plain text — a note is meant to be read back).
+func (m Model) bookBmView() string {
+	br := m.book
+	buf := br.bmNoteBuf
+	if buf == "" {
+		buf = " "
+	}
+	box := m.th.HelpOverlay.Render(
+		m.th.HelpTitle.Render(m.cat.Get("reader.bm_note_title")) + "\n\n" +
+			m.th.Title.Render(buf) + "\n\n" +
+			m.th.Dim.Render(m.cat.Get("reader.bm_note_hint")))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// bookBmListView renders the bookmark list over the reader: chapter
+// position + title + note per row, the selected row highlighted, the
+// empty state when the book has none.
+func (m Model) bookBmListView() string {
+	br := m.book
+	var rows []string
+	if len(br.bookmarks) == 0 {
+		rows = append(rows, m.th.Dim.Render(m.cat.Get("reader.bm_empty")))
+	} else {
+		for i, b := range m.bmRows() {
+			pos := m.cat.Get("reader.bm_row", b.ch+1, br.flow.feed.Len())
+			row := "  " + m.th.HelpKey.Render(pos) + "  " +
+				m.th.HelpDesc.Render(runewidth.Truncate(b.title, 24, "…"))
+			if b.note != "" {
+				row += m.th.Dim.Render(" — " + runewidth.Truncate(b.note, 30, "…"))
+			}
+			if i == br.bmSel {
+				row = m.th.ListSelected.Render(row)
+			}
+			rows = append(rows, row)
+		}
+		rows = append(rows, "", m.th.Dim.Render(m.cat.Get("reader.bm_list_hint")))
+	}
+	box := m.th.HelpOverlay.Render(
+		m.th.HelpTitle.Render(m.cat.Get("reader.bm_title")) + "\n\n" +
+			strings.Join(rows, "\n"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }

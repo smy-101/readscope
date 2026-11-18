@@ -404,3 +404,99 @@ func TestBookReaderWidthAdjust(t *testing.T) {
 		t.Fatalf("cap = %d, want the pane width 76", w)
 	}
 }
+
+// The bookmark flow: Ctrl+B opens the note dialog (empty note is a
+// valid bookmark), Enter saves at the current anchor, Ctrl+G lists
+// them (Enter jumps to the block, Ctrl+D deletes), Esc cancels the
+// dialog without writing.
+func TestBookBookmarkAddJumpDelete(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	ctx := t.Context()
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN}) // park on spine 1
+	for i := 0; i < 4; i++ {                      // walk onto a content block (block 2)
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	// Ctrl+B → note dialog; typing accumulates; Enter saves.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if !m.book.bmNoteOpen {
+		t.Fatal("Ctrl+B must open the note dialog")
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("关键段")})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	bms, err := m.st.Bookmarks(ctx, m.book.row.ID)
+	if err != nil || len(bms) != 1 {
+		t.Fatalf("bookmarks after save = %v err=%v", bms, err)
+	}
+	if bms[0].SpineIndex != 1 || bms[0].BlockOffset != 2 || bms[0].Note != "关键段" {
+		t.Fatalf("saved bookmark = %+v, want spine 1 block 2 note 关键段", bms[0])
+	}
+	if !strings.Contains(m.status, "bookmark added") {
+		t.Fatalf("status = %q, want the composed saved line", m.status)
+	}
+
+	// A second bookmark elsewhere; the zh pack composes its own line.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN}) // spine 2
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // empty note is valid
+	bms, _ = m.st.Bookmarks(ctx, m.book.row.ID)
+	if len(bms) != 2 || bms[0].SpineIndex != 2 || bms[0].Note != "" {
+		t.Fatalf("two bookmarks, newest first: %+v", bms)
+	}
+
+	// Ctrl+G lists them; Enter jumps to the selected one's block.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	if !m.book.bmListOpen {
+		t.Fatal("Ctrl+G must open the bookmark list")
+	}
+	view := m.View()
+	for _, want := range []string{"关键段", "1.1 小节"} { // note + chapter title
+		if !strings.Contains(view, want) {
+			t.Errorf("bookmark list missing %q:\n%s", want, view)
+		}
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown}) // to the older one (spine 1)
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.book.bmListOpen {
+		t.Fatal("Enter must close the list")
+	}
+	if ch, _ := m.book.flow.anchor(); ch != 1 {
+		t.Fatalf("bookmark jump = spine %d, want 1", ch)
+	}
+
+	// Delete from the list: the row goes, the store follows, an empty
+	// list shows the empty state and stays escapable.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlG})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	bms, _ = m.st.Bookmarks(ctx, m.book.row.ID)
+	if len(bms) != 1 {
+		t.Fatalf("after delete = %d bookmarks, want 1", len(bms))
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // delete the last one
+	bms, _ = m.st.Bookmarks(ctx, m.book.row.ID)
+	if len(bms) != 0 {
+		t.Fatalf("after second delete = %d bookmarks, want 0", len(bms))
+	}
+	if !strings.Contains(m.View(), "no bookmarks yet") {
+		t.Fatalf("empty list state missing:\n%s", m.View())
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.book == nil || m.book.bmListOpen {
+		t.Fatal("Esc must close the list back to the reader")
+	}
+}
+
+// Esc in the note dialog cancels: nothing written.
+func TestBookBookmarkNoteCancel(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("草稿")})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.book.bmNoteOpen {
+		t.Fatal("Esc must close the note dialog")
+	}
+	bms, _ := m.st.Bookmarks(t.Context(), m.book.row.ID)
+	if len(bms) != 0 {
+		t.Fatalf("cancelled dialog wrote %d bookmarks", len(bms))
+	}
+}
