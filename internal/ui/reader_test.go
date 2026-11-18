@@ -16,6 +16,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/smy-101/readscope/internal/epub"
 	"github.com/smy-101/readscope/internal/epub/fixture"
@@ -363,19 +364,19 @@ func TestBookReaderWidthAdjust(t *testing.T) {
 	ch, block := m.book.flow.anchor()
 
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'-'}})
-	if w := m.bookTextWidth(); w != 74 { // 100 - 24 = 76, minus the step 2
-		t.Fatalf("after '-': width = %d, want 74", w)
+	if w := m.bookTextWidth(); w != 73 { // 100 - 25 (sidebar+border) = 75, minus the step 2
+		t.Fatalf("after '-': width = %d, want 73", w)
 	}
-	if m.book.flow.width != 74 {
-		t.Fatalf("flow re-wrapped at %d, want 74", m.book.flow.width)
+	if m.book.flow.width != 73 {
+		t.Fatalf("flow re-wrapped at %d, want 73", m.book.flow.width)
 	}
 	if c2, b2 := m.book.flow.anchor(); c2 != ch || b2 != block {
 		t.Fatalf("width change lost the anchor: (%d,%d) → (%d,%d)", ch, block, c2, b2)
 	}
-	if m.cfg.TextWidth != 74 {
+	if m.cfg.TextWidth != 73 {
 		t.Fatalf("text_width not persisted: %d", m.cfg.TextWidth)
 	}
-	if !strings.Contains(m.status, "width 74") {
+	if !strings.Contains(m.status, "width 73") {
 		t.Fatalf("status = %q, want the width line", m.status)
 	}
 
@@ -383,11 +384,11 @@ func TestBookReaderWidthAdjust(t *testing.T) {
 	// down; the zh pack composes its own line.
 	mzh, _ := openReaderModel(t, "zh-CN")
 	mzh = key(t, mzh, tea.KeyMsg{Type: tea.KeyCtrlUnderscore})
-	if w := mzh.bookTextWidth(); w != 76-2 {
-		t.Fatalf("ctrl+_ width = %d, want 74", w)
+	if w := mzh.bookTextWidth(); w != 75-2 {
+		t.Fatalf("ctrl+_ width = %d, want 73", w)
 	}
-	if !strings.Contains(mzh.status, "宽度 74") {
-		t.Fatalf("zh status = %q, want 宽度 74", mzh.status)
+	if !strings.Contains(mzh.status, "宽度 73") {
+		t.Fatalf("zh status = %q, want 宽度 73", mzh.status)
 	}
 
 	// The floor: hammering '-' stops at 20.
@@ -401,8 +402,8 @@ func TestBookReaderWidthAdjust(t *testing.T) {
 	for i := 0; i < 80; i++ {
 		m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'+'}})
 	}
-	if w := m.bookTextWidth(); w != 76 {
-		t.Fatalf("cap = %d, want the pane width 76", w)
+	if w := m.bookTextWidth(); w != 75 {
+		t.Fatalf("cap = %d, want the pane width 75", w)
 	}
 }
 
@@ -569,13 +570,14 @@ func TestBookReaderHelp(t *testing.T) {
 	}
 }
 
-// A book file moved away mid-session: chapters past the cache render
-// as the read-failure placeholder, nothing panics, and Esc still
-// retreats whole (the ticket's 全身而退).
+// A book file damaged mid-session (truncated on disk — an unlinked
+// but open handle still reads on Unix, truncation does not): chapters
+// past the cache render as the read-failure placeholder, nothing
+// panics, and Esc still retreats whole (the ticket's 全身而退).
 func TestBookReaderSurvivesVanishedFile(t *testing.T) {
 	m, _ := openReaderModel(t, "en")
-	if err := os.Remove(m.book.row.Path); err != nil {
-		t.Fatalf("remove: %v", err)
+	if err := os.Truncate(m.book.row.Path, 0); err != nil {
+		t.Fatalf("truncate: %v", err)
 	}
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN}) // into an uncached chapter
 	if !strings.Contains(m.View(), "chapter read failed") {
@@ -585,5 +587,50 @@ func TestBookReaderSurvivesVanishedFile(t *testing.T) {
 	m = pump(t, m, cmd)
 	if m.book != nil {
 		t.Fatal("Esc must still exit the reader")
+	}
+}
+
+// The review pair the standards axis asked for: the zh pack's
+// composed bookmark-saved line (format verbs aboard — the m5 lesson).
+func TestBookBookmarkSavedComposedZh(t *testing.T) {
+	m, _ := openReaderModel(t, "zh-CN")
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(m.status, "书签已加（第 1/5 章）") {
+		t.Fatalf("zh composed saved line = %q", m.status)
+	}
+}
+
+// The mid-session read failure reaches the status bar too (书文件被
+// 移走/损坏 → 明确状态栏错误), not only the in-flow placeholder.
+func TestBookReaderVanishedFileStatusLine(t *testing.T) {
+	m, _ := openReaderModel(t, "zh-CN")
+	if err := os.Truncate(m.book.row.Path, 0); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN}) // into an uncached chapter
+	if !strings.Contains(m.status, "章节读取失败") {
+		t.Fatalf("status = %q, want the read-failure line", m.status)
+	}
+}
+
+// The whole-screen width guard: every line the reader assembles —
+// TOC sidebar rows, the status line, both modals — fits the terminal.
+func TestBookReaderViewLinesFitTerminal(t *testing.T) {
+	for _, sz := range [][2]int{{100, 30}, {60, 12}, {38, 8}} {
+		m, _ := openReaderModel(t, "en")
+		m = size(m, sz[0], sz[1])
+		m.book.flow.jump(1, 4)
+		for _, view := range []string{
+			m.View(),
+			func() string { m.book.bmListOpen = true; return m.View() }(),
+			func() string { m.book.bmListOpen = false; m.book.bmNoteOpen = true; return m.View() }(),
+		} {
+			for i, ln := range strings.Split(view, "\n") {
+				if w := lipgloss.Width(ln); w > sz[0] {
+					t.Fatalf("%dx%d line %d is %d cols wide: %q", sz[0], sz[1], i, w, ln)
+				}
+			}
+		}
 	}
 }

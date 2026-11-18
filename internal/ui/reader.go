@@ -35,13 +35,22 @@ import (
 // the chapter → the chapter's first heading → the entry's base name.
 // Degradation contract: a read failure or a textless chapter (SVG
 // page) answers with a placeholder paragraph — never zero blocks,
-// never an error (the engine's stitcher contract; the reader's status
-// bar carries the failure text separately).
+// never an error (the engine's stitcher contract); the degraded/
+// lastErr pair is the status-bar half, consumed by the key pump's
+// maybeBookChErrStatus.
 type epubFeeder struct {
 	bk     *epub.Book
 	cat    *i18n.Catalog
 	titles map[int]string // spine idx → TOC title, first match wins
 	cache  map[int]string // resolved display titles (title() reads chapters)
+
+	// Degradation accounting: every placeholder the feeder served
+	// (unreadable or textless chapter) bumps degraded and records
+	// lastErr — the reader's key pump turns a fresh bump into the
+	// status bar's 明确错误 line (maybeBookChErrStatus), while the
+	// flow itself carries the placeholder paragraph.
+	degraded int
+	lastErr  error
 }
 
 func newEpubFeeder(bk *epub.Book, cat *i18n.Catalog) *epubFeeder {
@@ -74,8 +83,12 @@ func (f *epubFeeder) Chapter(idx int) (*render.Document, string) {
 	doc, err := f.chapterDoc(idx)
 	switch {
 	case err != nil:
+		f.degraded++
+		f.lastErr = err
 		return f.placeholderDoc(f.cat.Get("reader.ch_err", err)), fileTitle(href)
 	case len(doc.Blocks) == 0:
+		f.degraded++
+		f.lastErr = nil
 		return f.placeholderDoc(f.cat.Get("reader.no_text")), f.titles[idx]
 	}
 	if title := f.titles[idx]; title != "" {
@@ -179,6 +192,8 @@ type bookReader struct {
 	bmNoteBuf  string
 	bmListOpen bool
 	bmSel      int
+
+	seenDegrade int // feeder.degraded as of the last status report
 }
 
 // bookOpenMsg lands when the reader's open finished: the parsed book,
@@ -364,48 +379,27 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.book = nil
 		return true, tea.Quit
 
-	case "left", "shift+tab":
+	case "left":
 		br.focusToc = true
 		return true, nil
-	case "right", "tab":
-		if msg.String() == "tab" {
-			br.focusToc = !br.focusToc // Tab toggles the focus
-		} else {
-			br.focusToc = false
-		}
+	case "right":
+		br.focusToc = false
+		return true, nil
+	case "tab":
+		br.focusToc = !br.focusToc // Tab toggles the focus
 		return true, nil
 
 	case "up":
-		if br.focusToc {
-			br.tocSel, br.tocTop = clampSel(br.tocSel-1, br.tocTop, len(br.toc), m.readerHeight())
-			return true, nil
-		}
-		br.flow.up(1)
-		m.maybePersistBookChapter()
+		m.scrollBook(-1)
 		return true, nil
 	case "down":
-		if br.focusToc {
-			br.tocSel, br.tocTop = clampSel(br.tocSel+1, br.tocTop, len(br.toc), m.readerHeight())
-			return true, nil
-		}
-		br.flow.down(1)
-		m.maybePersistBookChapter()
+		m.scrollBook(1)
 		return true, nil
 	case "pgup":
-		if br.focusToc {
-			br.tocSel, br.tocTop = clampSel(br.tocSel-m.readerHeight(), br.tocTop, len(br.toc), m.readerHeight())
-			return true, nil
-		}
-		br.flow.up(m.readerHeight())
-		m.maybePersistBookChapter()
+		m.scrollBook(-m.readerHeight())
 		return true, nil
 	case "pgdown":
-		if br.focusToc {
-			br.tocSel, br.tocTop = clampSel(br.tocSel+m.readerHeight(), br.tocTop, len(br.toc), m.readerHeight())
-			return true, nil
-		}
-		br.flow.down(m.readerHeight())
-		m.maybePersistBookChapter()
+		m.scrollBook(m.readerHeight())
 		return true, nil
 
 	case "enter": // TOC: jump; content: open the visible image
@@ -413,6 +407,7 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 			if br.tocSel < len(br.toc) {
 				br.flow.jump(br.toc[br.tocSel].spine, 0)
 				m.maybePersistBookChapter()
+				m.maybeBookChErrStatus()
 			}
 			return true, nil
 		}
@@ -427,6 +422,7 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		if ch, _ := br.flow.anchor(); ch+1 < br.flow.feed.Len() {
 			br.flow.jump(ch+1, 0)
 			m.maybePersistBookChapter()
+			m.maybeBookChErrStatus()
 		} else {
 			m.status = m.cat.Get("reader.no_more")
 		}
@@ -435,10 +431,12 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case "home": // book head
 		br.flow.jump(0, 0)
 		m.maybePersistBookChapter()
+		m.maybeBookChErrStatus()
 		return true, nil
 	case "end": // book tail (block clamps to the last)
 		br.flow.jump(br.flow.feed.Len()-1, 1<<30)
 		m.maybePersistBookChapter()
+		m.maybeBookChErrStatus()
 		return true, nil
 
 	case "ctrl+s", "ctrl+f": // book search arrives with ticket 04
@@ -470,17 +468,19 @@ func (m Model) readerHeight() int {
 	return h
 }
 
+// bookPaneWidth is the content pane's width: the terminal minus the
+// TOC sidebar box (readerTocW + its left border), never below 1.
+func (m Model) bookPaneWidth() int {
+	return max(m.width-readerTocW-1, 1)
+}
+
 // bookTextWidth is the reading column: config text_width when set
 // (capped by the pane), else the pane itself (text_width=0 随终端).
 func (m Model) bookTextWidth() int {
-	pane := m.width - readerTocW
-	if pane < 1 {
-		pane = 1
-	}
 	if m.cfg != nil && m.cfg.TextWidth > 0 {
-		return min(m.cfg.TextWidth, pane)
+		return min(m.cfg.TextWidth, m.bookPaneWidth())
 	}
-	return pane
+	return m.bookPaneWidth()
 }
 
 // bookView is the independent full screen: TOC sidebar left, content
@@ -544,11 +544,7 @@ func (m Model) bookContentView(h int) string {
 	text := render.ToANSI(lines, m.th.StyleFor)
 	w := m.bookTextWidth()
 	block := lipgloss.NewStyle().Width(w).Height(h).Render(text)
-	pane := m.width - readerTocW
-	if pane < 1 {
-		pane = 1
-	}
-	return lipgloss.Place(pane, h, lipgloss.Center, lipgloss.Top, block)
+	return lipgloss.Place(m.bookPaneWidth(), h, lipgloss.Center, lipgloss.Top, block)
 }
 
 // bookStatusLine is the reader status line's left half: 书名 ·
@@ -573,6 +569,41 @@ func (m Model) bookStatusView() string {
 		Render(left + strings.Repeat(" ", gap) + right)
 }
 
+// maybeBookChErrStatus surfaces a fresh feeder degradation in the
+// status bar (书文件被移走/损坏 → 明确状态栏错误): the placeholder
+// paragraph keeps the flow readable, this line says what went wrong.
+// A textless chapter (lastErr nil) reports the no-text line.
+func (m *Model) maybeBookChErrStatus() {
+	br := m.book
+	if br == nil || br.feeder.degraded == br.seenDegrade {
+		return
+	}
+	br.seenDegrade = br.feeder.degraded
+	if err := br.feeder.lastErr; err != nil {
+		m.status = m.cat.Get("reader.ch_err", err)
+	} else {
+		m.status = m.cat.Get("reader.no_text")
+	}
+}
+
+// scrollBook is the arrows' one path: the TOC cursor moves while the
+// TOC holds the focus, the flow scrolls otherwise (with the 章界
+// persist check and the mid-session read-failure status after).
+func (m *Model) scrollBook(delta int) {
+	br := m.book
+	if br.focusToc {
+		br.tocSel, br.tocTop = clampSel(br.tocSel+delta, br.tocTop, len(br.toc), m.readerHeight())
+		return
+	}
+	if delta < 0 {
+		br.flow.up(-delta)
+	} else {
+		br.flow.down(delta)
+	}
+	m.maybePersistBookChapter()
+	m.maybeBookChErrStatus()
+}
+
 // bookWidthStep is the +/- increment (the approved key package).
 const bookWidthStep = 2
 
@@ -591,13 +622,9 @@ func (m *Model) adjustBookWidth(delta int) {
 	if br == nil || m.cfg == nil {
 		return
 	}
-	pane := m.width - readerTocW
-	if pane < 1 {
-		pane = 1
-	}
 	w := m.bookTextWidth() + delta*bookWidthStep
 	w = max(w, bookWidthFloor)
-	w = min(w, pane)
+	w = min(w, m.bookPaneWidth())
 	m.cfg.TextWidth = w
 	if err := m.cfg.Save(); err != nil {
 		m.status = m.cat.Get("errors.config_save", err)
@@ -725,10 +752,13 @@ func (m Model) bookBmView() string {
 	if buf == "" {
 		buf = " "
 	}
+	inner := max(m.width-6, 10) // border + padding of the overlay box
 	box := m.th.HelpOverlay.Render(
-		m.th.HelpTitle.Render(m.cat.Get("reader.bm_note_title")) + "\n\n" +
-			m.th.Title.Render(buf) + "\n\n" +
-			m.th.Dim.Render(m.cat.Get("reader.bm_note_hint")))
+		m.th.HelpTitle.Render(runewidth.Truncate(
+			m.cat.Get("reader.bm_note_title"), inner, "…")) + "\n\n" +
+			m.th.Title.Render(runewidth.Truncate(buf, inner, "…")) + "\n\n" +
+			m.th.Dim.Render(runewidth.Truncate(
+				m.cat.Get("reader.bm_note_hint"), inner, "…")))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -737,26 +767,32 @@ func (m Model) bookBmView() string {
 // empty state when the book has none.
 func (m Model) bookBmListView() string {
 	br := m.book
+	budget := max(m.width-6, 10) // the overlay box's border + padding
 	var rows []string
 	if len(br.bookmarks) == 0 {
-		rows = append(rows, m.th.Dim.Render(m.cat.Get("reader.bm_empty")))
+		rows = append(rows, m.th.Dim.Render(
+			runewidth.Truncate(m.cat.Get("reader.bm_empty"), budget, "…")))
 	} else {
 		for i, b := range m.bmRows() {
 			pos := m.cat.Get("reader.bm_row", b.ch+1, br.flow.feed.Len())
-			row := "  " + m.th.HelpKey.Render(pos) + "  " +
-				m.th.HelpDesc.Render(runewidth.Truncate(b.title, 24, "…"))
+			titleW := min(24, max(budget-runewidth.StringWidth(pos)-4, 1))
+			title := runewidth.Truncate(b.title, titleW, "…")
+			row := "  " + m.th.HelpKey.Render(pos) + "  " + m.th.HelpDesc.Render(title)
 			if b.note != "" {
-				row += m.th.Dim.Render(" — " + runewidth.Truncate(b.note, 30, "…"))
+				noteW := max(budget-4-runewidth.StringWidth(pos)-runewidth.StringWidth(title), 1)
+				row += m.th.Dim.Render(" — " + runewidth.Truncate(b.note, min(30, noteW), "…"))
 			}
 			if i == br.bmSel {
 				row = m.th.ListSelected.Render(row)
 			}
 			rows = append(rows, row)
 		}
-		rows = append(rows, "", m.th.Dim.Render(m.cat.Get("reader.bm_list_hint")))
+		rows = append(rows, "", m.th.Dim.Render(
+			runewidth.Truncate(m.cat.Get("reader.bm_list_hint"), budget, "…")))
 	}
 	box := m.th.HelpOverlay.Render(
-		m.th.HelpTitle.Render(m.cat.Get("reader.bm_title")) + "\n\n" +
+		m.th.HelpTitle.Render(runewidth.Truncate(
+			m.cat.Get("reader.bm_title"), budget, "…")) + "\n\n" +
 			strings.Join(rows, "\n"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }

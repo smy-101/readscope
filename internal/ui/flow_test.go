@@ -230,17 +230,26 @@ func TestFlowLazyRendersOnlyTheWindow(t *testing.T) {
 	}
 }
 
-// The progress formula: pct = (chapter + block/blocksOfChapter) /
-// chapters, computed from the anchor at save time.
+// The progress formula: pct = (chapter + content fraction) /
+// chapters — content-weighted, the two boundary blocks (rule, title)
+// excluded so decorations never dilute the reading progress.
 func TestFlowProgressFormula(t *testing.T) {
 	f := newFakeFeeder(
 		[]string{"甲", "乙", "丙", "丁", "戊"},
 		[][]string{{"a1", "a2"}, {"b1", "b2"}, {"c1"}, {"d1"}, {"e1"}})
 	flow := newTestFlow(f, 40, 10)
 
-	flow.jump(1, 2) // chapter 1, block 2 of 4 (rule, title, b1, b2)
-	if ch, b, pct := flow.progress(); ch != 1 || b != 2 || pct != 0.3 {
-		t.Fatalf("progress = (%d,%d,%v), want (1,2,0.3)", ch, b, pct)
+	// Chapter 1's first content block (block 2 of rule/title/b1/b2):
+	// content fraction 0 → pct 1/5. The decoration blocks (0,1) carry
+	// no progress even mid-anchor.
+	flow.jump(1, 2)
+	if ch, b, pct := flow.progress(); ch != 1 || b != 2 || pct != 0.2 {
+		t.Fatalf("progress = (%d,%d,%v), want (1,2,0.2)", ch, b, pct)
+	}
+	// The second content block: half of the chapter's content read.
+	flow.jump(1, 3)
+	if _, _, pct := flow.progress(); pct != 0.3 {
+		t.Fatalf("content-weighted pct = %v, want 0.3", pct)
 	}
 	// The very first position reads as zero; a view that reaches the
 	// book's final line reads as one (读完), wherever the top sits.

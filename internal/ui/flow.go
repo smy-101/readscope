@@ -188,6 +188,16 @@ func (f *bookFlow) view() ([]render.Line, []int) {
 	return lines, owners
 }
 
+// lastTop is the highest legal top line inside chapter ch's rendered
+// state: mid-book the last line (the page stitches onward), in the
+// final chapter the end clamp (the page ends at the book's end).
+func (f *bookFlow) lastTop(ch int, c *flowChapter) int {
+	if ch == f.feed.Len()-1 {
+		return max(0, len(c.lines)-f.height)
+	}
+	return len(c.lines) - 1
+}
+
 // down advances the top by n lines, crossing chapter boundaries
 // forward. Inside the final chapter the top clamps so the page ends
 // at the book's end (no scrolling past the last line). It reports
@@ -196,11 +206,7 @@ func (f *bookFlow) down(n int) bool {
 	moved := false
 	for n > 0 {
 		c := f.chapter(f.topCh)
-		maxLine := len(c.lines) - 1
-		if f.topCh == f.feed.Len()-1 {
-			maxLine = max(0, len(c.lines)-f.height)
-		}
-		if f.topLine < maxLine {
+		if maxLine := f.lastTop(f.topCh, c); f.topLine < maxLine {
 			step := min(n, maxLine-f.topLine)
 			f.topLine += step
 			n -= step
@@ -277,22 +283,25 @@ func (f *bookFlow) jump(chapter, block int) {
 	if block > len(c.doc.Blocks)-1 {
 		block = len(c.doc.Blocks) - 1
 	}
-	top := c.starts[block]
-	if chapter == f.feed.Len()-1 {
-		top = min(top, max(0, len(c.lines)-f.height))
-	}
+	top := min(c.starts[block], f.lastTop(chapter, c))
 	f.topCh, f.topLine = chapter, top
 }
 
 // progress is the save-time triple: the anchor plus the display-only
-// pct — (chapter + block/blocks) / chapters, read as 1.0 when the
-// viewport reaches the book's final line (读完), so a finished book
-// shows 100% on the shelf.
+// pct — content-weighted: (chapter + content fraction) / chapters,
+// where the fraction ignores the two boundary blocks (rule + title)
+// so decorations never dilute the reading progress. The viewport
+// reaching the book's final line reads as 1.0 (读完), so a finished
+// book shows 100% on the shelf.
 func (f *bookFlow) progress() (chapter, block int, pct float64) {
 	chapter, block = f.anchor()
 	n := f.feed.Len()
 	c := f.chapter(chapter)
-	pct = (float64(chapter) + float64(block)/float64(len(c.doc.Blocks))) / float64(n)
+	frac := 0.0
+	if content := len(c.doc.Blocks) - 2; content > 0 {
+		frac = float64(min(max(block-2, 0), content-1)) / float64(content)
+	}
+	pct = (float64(chapter) + frac) / float64(n)
 	if chapter == n-1 && f.topLine+f.height >= len(c.lines) {
 		pct = 1
 	}
@@ -309,10 +318,7 @@ func (f *bookFlow) relayout(width int) {
 		c.lines, c.starts = render.LayoutIndexed(c.doc, f.width)
 	}
 	c := f.chapter(ch)
-	top := c.starts[min(b, len(c.doc.Blocks)-1)]
-	if ch == f.feed.Len()-1 {
-		top = min(top, max(0, len(c.lines)-f.height))
-	}
+	top := min(c.starts[min(b, len(c.doc.Blocks)-1)], f.lastTop(ch, c))
 	f.topCh, f.topLine = ch, top
 }
 
