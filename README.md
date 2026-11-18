@@ -74,8 +74,9 @@ SQLite, the unread dot / read / star mechanics all work identically, and everyth
 stays readable offline. `Ctrl+N` appends the next Algolia page to the list (no duplicate
 rows, read state kept); inside a post it pages floors and replies in memory. Reading a
 post runs three layers deep — body, floors (one per top-level comment), then a floor's
-reply tree — with deep reply chains flattened to two levels and prefixed `@parent`, so
-even a narrow terminal keeps who-replied-to-whom readable. HN refreshes are always
+reply tree — with deep reply chains flattened to two levels, indented under an
+"↳ author replied-to parent" header and authors in the accent color, so even a
+narrow terminal keeps who-replied-to-whom readable. HN refreshes are always
 plain refetches — the index has no conditional-request semantics. Link posts store the
 article link as their body (open it with `Ctrl+O`); text posts (Ask/Show) carry their own
 HTML through the same render pipeline as RSS bodies. Note the Algolia index lags the site by a few minutes and ranks

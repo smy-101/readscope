@@ -98,6 +98,7 @@ floor_count = "%d floors"
 floor_pos = "floor %d/%d"
 floor_meta = "%d replies"
 replies_to = "replies to %s"
+replied_to = "replied to %s"
 
 [status]
 ready = "ready"

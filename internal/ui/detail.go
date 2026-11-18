@@ -769,11 +769,7 @@ func (m Model) floorDoc(f *floor) *render.Document {
 // sources that have one). zhihu: author · 赞 N · N 条评论 (the triple
 // the web UI's answer list shows; zero segments drop, 站方形态).
 func (m Model) floorHeaderSpans(f *floor) []render.Span {
-	author, style := m.authorOrDeleted(f.cm.Author), render.SpanBold
-	if f.cm.Author == "" {
-		style = render.SpanDim
-	}
-	spans := []render.Span{{Text: author, Style: style}}
+	spans := []render.Span{m.authorSpan(f.cm.Author)}
 	if m.reader != nil && m.reader.pager != nil {
 		if f.cm.Score != nil {
 			spans = append(spans, dimSpan(" · "+m.cat.Get("zhihu.voteup", m.zhihuCount(int64(*f.cm.Score)))))
@@ -826,13 +822,14 @@ func (m Model) commentDoc(c core.Comment) *render.Document {
 
 // layoutReplies renders the reply layer: a dim context header naming
 // the floor, then one block group per flattened reply row — direct
-// replies flat, deeper replies wrapped in a quote (the pipeline's own
-// nesting visual) with an @parent prefix on their header. Each
-// reply's links stay local to its group, appendix and all. replyStarts
-// records where each reply begins, which is how Ctrl+N (next reply)
-// and Ctrl+O/Y (topmost visible reply) find their target. A zhihu
-// answer whose comments have not landed yet renders the one-line
-// pending state instead (loading / none).
+// replies flush, deeper replies indented two spaces with an
+// "↳ author 回复 parent" header (comment-style prototype frame A:
+// the indent is the nesting visual; the quote bar retired with it).
+// Each reply's links stay local to its group, appendix and all.
+// replyStarts records where each reply begins, which is how Ctrl+N
+// (next reply) and Ctrl+O/Y (topmost visible reply) find their
+// target. A zhihu answer whose comments have not landed yet renders
+// the one-line pending state instead (loading / none).
 func (m *Model) layoutReplies() {
 	d := m.reader
 	w := m.detailWidth()
@@ -867,7 +864,19 @@ func (m *Model) layoutReplies() {
 	d.replyStarts = make([]int, len(d.replies))
 	for i, row := range d.replies {
 		d.replyStarts[i] = len(lines)
-		lines = append(lines, render.Layout(m.replyDoc(row), w)...)
+		rowW := w
+		if row.deep() {
+			// The indent prefix comes out of the width — deep rows lay
+			// out at w-2 before indentLines adds the two spaces, so the
+			// block fits the detail column (floored at 1 for razor-thin
+			// terminals).
+			rowW = max(1, w-2)
+		}
+		rowLines := render.Layout(m.replyDoc(row), rowW)
+		if row.deep() {
+			rowLines = indentLines(rowLines, 2)
+		}
+		lines = append(lines, rowLines...)
 		lines = append(lines, render.Line{}) // gap between replies
 	}
 	d.replyLines = lines
@@ -886,35 +895,61 @@ func (m Model) commentPendingLines(f *floor) []render.Line {
 	return []render.Line{{Spans: []render.Span{{Text: text, Style: render.SpanDim}}}}
 }
 
-// replyDoc is one reply row's document: header line ("@parent author
-// · age"), then the body — inside a quote when the row is a compressed
-// deeper reply, so the second visual level is the pipeline's quote
-// bar. The row's links stay local: appendix right below the reply.
+// replyDoc is one reply row's document: header line — "author · age"
+// on the first level, "↳ author 回复 parent · age" on the compressed
+// deeper level — then the body. The author rides the accent color so
+// names read apart from content (frame A of the comment-style
+// prototype: the deeper level's nesting visual is the two-space
+// indent layoutReplies applies, not a quote bar). The row's links
+// stay local: appendix right below the reply.
 func (m Model) replyDoc(row replyRow) *render.Document {
+	author := m.authorSpan(row.cm.Author)
 	var header []render.Span
-	if row.depth >= 2 {
-		header = append(header, render.Span{Text: "@" + m.authorOrDeleted(row.parentAuthor) + " ", Style: render.SpanDim})
+	if row.deep() {
+		header = append(header,
+			dimSpan("↳ "),
+			author,
+			dimSpan(" "+m.cat.Get("detail.replied_to", m.authorOrDeleted(row.parentAuthor))))
+	} else {
+		header = append(header, author)
 	}
-	author, style := m.authorOrDeleted(row.cm.Author), render.SpanBold
-	if row.cm.Author == "" {
-		style = render.SpanDim
-	}
-	header = append(header, render.Span{Text: author, Style: style})
 	if row.cm.CreatedAt != nil {
 		header = append(header, dimSpan(" · "+m.relTime(row.cm.CreatedAt)))
 	}
 	body := m.commentDoc(row.cm)
-	blocks := []render.Block{render.Para{Spans: header}}
-	if row.depth >= 2 {
-		blocks = append(blocks, render.Quote{Blocks: body.Blocks})
-	} else {
-		blocks = append(blocks, body.Blocks...)
-	}
+	blocks := append([]render.Block{render.Para{Spans: header}}, body.Blocks...)
 	return &render.Document{Blocks: blocks, Links: body.Links}
 }
 
 func dimSpan(text string) render.Span {
 	return render.Span{Text: text, Style: render.SpanDim}
+}
+
+// indentLines prefixes every line with n spaces — the deeper reply
+// level's nesting visual. The caller lays rows out at width-n before
+// this prefix, so wrapped lines keep their column alignment.
+func indentLines(lines []render.Line, n int) []render.Line {
+	pad := strings.Repeat(" ", n)
+	for i := range lines {
+		if len(lines[i].Spans) == 0 {
+			lines[i].Spans = []render.Span{{Text: pad}}
+			continue
+		}
+		lines[i].Spans = append([]render.Span{{Text: pad}}, lines[i].Spans...)
+	}
+	return lines
+}
+
+// authorSpan is a comment author's display span: the name in the
+// accent color (SpanMarker|SpanBold) so names read apart from
+// content across every layer (comment-style prototype A), or the
+// dim [deleted] placeholder for deleted nodes (no author stored).
+func (m Model) authorSpan(author string) render.Span {
+	style := render.SpanMarker | render.SpanBold
+	if author == "" {
+		style = render.SpanDim
+	}
+	return render.Span{Text: m.authorOrDeleted(author), Style: style}
 }
 
 // authorOrDeleted is a comment author's display name: the author, or

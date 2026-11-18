@@ -202,7 +202,7 @@ func TestThreeLayerNavigationKeepsState(t *testing.T) {
 		t.Fatal("Enter on a floor with replies must open the reply layer")
 	}
 	view = m.View()
-	for _, want := range []string{"replies to [deleted]", "reply under the deleted floor", "@dave frank", "deep under a deleted parent"} {
+	for _, want := range []string{"replies to [deleted]", "reply under the deleted floor", "↳ frank replied to dave", "deep under a deleted parent"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("reply layer missing %q:\n%s", want, view)
 		}
@@ -263,7 +263,7 @@ func TestCommentHTMLThroughPipeline(t *testing.T) {
 	}
 
 	// The reply layer renders its rows through the same pipeline; the
-	// compressed second level rides the quote bar.
+	// compressed second level rides a two-space indent and the ↳ prefix.
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyHome})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // replies of floor 1
 	view = m.View()
@@ -272,9 +272,9 @@ func TestCommentHTMLThroughPipeline(t *testing.T) {
 	}
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN}) // jump to carol's row
 	view = m.View()
-	for _, want := range []string{"@bob carol", "│ deep reply from carol"} {
+	for _, want := range []string{"↳ carol replied to bob", "  deep reply from carol"} {
 		if !strings.Contains(view, want) {
-			t.Errorf("deep reply must render @parent + quote bar (%q):\n%s", want, view)
+			t.Errorf("deep reply must render the ↳ reply-to prefix + indent (%q):\n%s", want, view)
 		}
 	}
 }
@@ -540,7 +540,7 @@ func TestReadAndStarFromCommentLayers(t *testing.T) {
 }
 
 // A deep reply whose immediate parent is deleted renders the
-// placeholder in the @parent prefix (the pure side pins
+// placeholder inside the ↳ 回复 prefix (the pure side pins
 // parentAuthor=""; this pins what the reader does with it).
 func TestReplyPrefixUsesDeletedPlaceholder(t *testing.T) {
 	m := seededModel(t, nil, nil)
@@ -550,8 +550,12 @@ func TestReplyPrefixUsesDeletedPlaceholder(t *testing.T) {
 		parentAuthor: "",
 	})
 	header := doc.Blocks[0].(render.Para)
-	if got := header.Spans[0].Text; got != "@[deleted] " {
-		t.Fatalf("@parent prefix = %q, want the deleted placeholder", got)
+	var got strings.Builder
+	for _, s := range header.Spans {
+		got.WriteString(s.Text)
+	}
+	if got.String() != "↳ zoe replied to [deleted]" {
+		t.Fatalf("reply-to header = %q, want the deleted placeholder", got.String())
 	}
 }
 

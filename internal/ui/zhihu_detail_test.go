@@ -4,7 +4,7 @@ package ui
 // the real Update loop — the question layer (meta triple, cleaned
 // description, answer floor list, load-more footer), the answer layer
 // (one answer per screen, ←→ between answers), the comment layer
-// (roots as rows, children flattened with @parent), the per-layer
+// (roots as rows, children flattened with the ↳ 回复 prefix), the per-layer
 // Ctrl+N semantics (question = feeds cursor, answer = hop-then-fetch
 // like the comment layer, comments = hop rows then the offset page), the failure translations (404 / session), and
 // the offline re-open rendering the cache with zero requests. The
@@ -207,7 +207,7 @@ func TestZhihuQuestionLayerRenders(t *testing.T) {
 
 // The four-layer navigation: question → answer (single answer, ←→
 // between answers) → comments (roots as rows, the flattened child
-// with @parent, comments_of header) → Esc walks back one layer at a
+// with the ↳ 回复 prefix, comments_of header) → Esc walks back one layer at a
 // time, each layer's scroll kept independently.
 func TestZhihuFourLayerNavigation(t *testing.T) {
 	srv, _ := zhihuPlane(t)
@@ -235,7 +235,7 @@ func TestZhihuFourLayerNavigation(t *testing.T) {
 		t.Fatalf("Enter should open the comment layer, got %v", m.reader.layer)
 	}
 	view = m.View()
-	for _, want := range []string{"comments on 甲", "根一内容", "根二内容", "子回复内容", "@根一"} {
+	for _, want := range []string{"comments on 甲", "根一内容", "根二内容", "子回复内容", "replied to 根一"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("comment layer missing %q:\n%s", want, view)
 		}

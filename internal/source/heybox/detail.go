@@ -267,8 +267,8 @@ func (s *Source) fetchSubPage(ctx context.Context, hexID, rootID, lastval string
 // floorTree maps one tree page's groups onto the comments cache's
 // tree shape: each group's first node is the floor (ParentID ""),
 // the rest are its hot sub-comments parented by replyid (a sub of a
-// sub keeps its real parent — the flattened 楼中楼 shows @parent on
-// it). Groups without an addressable root are not floors and not
+// sub keeps its real parent — the flattened 楼中楼 shows the ↳ 回复
+// prefix on it). Groups without an addressable root are not floors and not
 // errors. Page-level dedup is the merge's (refresh); a page never
 // serves its own repeat.
 func floorTree(page treeResult) []core.Comment {

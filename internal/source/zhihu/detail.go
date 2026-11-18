@@ -43,7 +43,7 @@ const (
 // the child_comment completion pages serve the missing children in
 // it; nesting (child_comments inside child_comments) is walked when
 // the payload carries it, so the flattened tree keeps real parent
-// links — the 评论层's @parent prefix needs them.
+// links — the 评论层's ↳ 回复 prefix needs them.
 type commentNode struct {
 	ID                json.Number           `json:"id"`
 	Author            struct{ Name string } `json:"author"`

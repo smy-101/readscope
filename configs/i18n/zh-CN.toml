@@ -98,6 +98,7 @@ floor_count = "%d 楼"
 floor_pos = "第 %d/%d 楼"
 floor_meta = "%d 条回复"
 replies_to = "对 %s 的回复"
+replied_to = "回复 %s"
 
 [status]
 ready = "就绪"

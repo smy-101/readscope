@@ -20,7 +20,7 @@ type floor struct {
 // replyRow is one row of the flattened reply layer: depth 1 is a
 // direct reply of the floor, depth 2 is every deeper reply compressed
 // into the second visual level. parentAuthor names the immediate
-// parent for the @parent prefix; it is "" when the parent is a
+// parent for the ↳ 回复 reply-to prefix; it is "" when the parent is a
 // deleted node (no author), and the renderer substitutes the
 // [deleted] placeholder.
 type replyRow struct {
@@ -28,6 +28,12 @@ type replyRow struct {
 	depth        int // 1 | 2
 	parentAuthor string
 }
+
+// deep reports whether the row sits on the compressed second visual
+// level: its header carries the ↳ 回复 prefix and layoutReplies
+// indents it two spaces. One predicate so the two sites cannot
+// drift apart.
+func (r replyRow) deep() bool { return r.depth >= 2 }
 
 // buildFloors splits a cached tree into floors. One forward scan with
 // a comment-id → floor-index map (indexes, not pointers: appends to
@@ -57,7 +63,7 @@ func buildFloors(tree []core.Comment) []floor {
 // flattenReplies compresses one floor's reply tree into the two-level
 // row sequence of the reply layer: direct replies at depth 1, every
 // deeper reply at depth 2 carrying its immediate parent's author for
-// the @parent prefix. One forward scan with an id → depth map (the
+// the ↳ 回复 reply-to prefix. One forward scan with an id → depth map (the
 // tree order guarantees the parent was seen first); the floor comment
 // itself is depth 0 and never appears as a row.
 func flattenReplies(f *floor) []replyRow {

@@ -159,7 +159,7 @@ func TestHeyboxPostLayerRenders(t *testing.T) {
 
 // The two-layer navigation: Enter drops into the floors layer (one
 // root per screen, the pager floor-head triple 赞 N · N 条评论),
-// Enter on a floor opens the flattened 楼中楼 (@parent on the
+// Enter on a floor opens the flattened 楼中楼 (↳ 回复 prefix on the
 // second level), Esc walks back one layer at a time, and each
 // layer's Ctrl+O is the share_url.
 func TestHeyboxTwoLayerNavigation(t *testing.T) {
@@ -197,7 +197,7 @@ func TestHeyboxTwoLayerNavigation(t *testing.T) {
 	m = pump(t, m, cmd)
 
 	// Enter: into floor 101's 楼中楼 — the hot preview chain, the
-	// sub-of-sub carrying @parent.
+	// sub-of-sub carrying the ↳ 回复 prefix.
 	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m = pump(t, m, cmd)
 	if m.reader.layer != layerReplies {
@@ -207,8 +207,8 @@ func TestHeyboxTwoLayerNavigation(t *testing.T) {
 	if !strings.Contains(view, "直接回复") || !strings.Contains(view, "二层回复") {
 		t.Errorf("楼中楼 missing its rows:\n%s", view)
 	}
-	if !strings.Contains(view, "@层客甲") {
-		t.Errorf("the second-level row must carry @parent:\n%s", view)
+	if !strings.Contains(view, "replied to 层客甲") {
+		t.Errorf("the second-level row must carry the ↳ reply-to prefix:\n%s", view)
 	}
 	if got := m.detailTargetURL(); !strings.Contains(got, "link_id=aaaa00000001") {
 		t.Errorf("replies Ctrl+O target = %q, want the share_url", got)

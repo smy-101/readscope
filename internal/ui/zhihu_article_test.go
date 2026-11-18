@@ -195,7 +195,7 @@ func TestZhihuArticleBodyLayerRenders(t *testing.T) {
 
 // The two-layer navigation: Enter on the body goes STRAIGHT to the
 // comment layer (no floors layer in between) with roots as rows and
-// the flattened child carrying @parent; Esc steps back to the body
+// the flattened child carrying the ↳ 回复 prefix; Esc steps back to the body
 // (never a floors layer) with the body's scroll kept; the last Esc
 // closes the reader.
 func TestZhihuArticleTwoLayerNavigation(t *testing.T) {
@@ -211,7 +211,7 @@ func TestZhihuArticleTwoLayerNavigation(t *testing.T) {
 		t.Fatalf("Enter should open the comment layer directly, got %v", m.reader.layer)
 	}
 	view := m.View()
-	for _, want := range []string{"article comments", "文根一内容", "文根二内容", "子回复内容", "@根一"} {
+	for _, want := range []string{"article comments", "文根一内容", "文根二内容", "子回复内容", "replied to 根一"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("comment layer missing %q:\n%s", want, view)
 		}
