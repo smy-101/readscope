@@ -1,0 +1,4 @@
+billdaws: spine=1 manifest=1 href="OEBPS/./chapter1.xhtml"
+billdaws.ReadItem: 0 err: epub: item "c1" not found at "OEBPS/./chapter1.xhtml"
+spine: spine=1 href="OEBPS/chapter1.xhtml" warn=0
+spine.OpenResource bytes: 64

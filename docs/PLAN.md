@@ -45,6 +45,7 @@
 | 14 | 知乎源数据面与登录态 | 免签 API 直连（v3 信息流+v4 详情+comment_v5，只认 cookie）；手动贴 cookie 起步，chromedp 扫码留缝；关注流只收问题卡；详情三层 HN 同构 | 2026-11 实测签名（x-zse-96）已不需要、FeedScope 端点矩阵背书；非目标从"知乎登录态抓取"收窄为"浏览器常驻通道/签名器"；tracer 止损阶梯：调头序→chromedp 一次性登录→缩回免登录数据面（详见 .scratch/m4-zhihu/spec.md） |
 | 15 | 已读时机 | feed 条目打开详情即静默标已读（全源统一含收藏列表；拉取失败也标；已读重复打开零写入；无配置开关） | 打开即反馈、零新增状态机；静默避免每次 Enter 弹状态噪音；F4 下列表跳变与手动 Ctrl+R 同构，不做冻结（详见 .scratch/auto-read-on-open/issues/01） |
 | 16 | 小黑盒数据面与红线 | 匿名只读 web 接口（变体 A 签名 + 999.0.3 公参 + hex link_id）；推荐流+每圈一 feed，零登录；三红线：不写、不逆向原生签名、不绕验证码 | 2026-11-13 冒烟全绿（三层免登录可达）；登录解锁面全弃，条款风险与知乎 M4 同量级（详见 .scratch/m5-heybox/spec.md） |
+| 17 | EPUB 解析层 | 自写薄层（internal/epub，~400–700 行）：container→OPF→spine/manifest/metadata→NCX+Nav 双 TOC→按 href 取字节；partial+warnings 容错（唯二硬失败：损坏 zip、真 DRM），encryption.xml 预检（字体混淆白名单放行） | 候选双库均不满足：Spine 容错贴需求但 GPL-3.0 与 MIT 分发冲突（一票否决）；billdaws（MIT）OPF 非良构/缺 version 即拒开、`./` 脏 href 读不到章节、DRM 静默乱码（探针实证）；且两库皆 2026 单作者零社区停更仓库；自写有 goread 772 行先例，行为规格抄 Spine 语义（不抄代码）+ readium DRM 判定口径（详见 .scratch/m6-epub/spec.md、research-epub-libs.md） |
 
 ## 3. 技术栈
 
@@ -57,7 +58,7 @@
 | RSS/Atom | mmcdole/gofeed | 成熟，RSS2/Atom/JSON Feed 全覆盖 |
 | HN | hn.algolia.com API | 与 FeedScope 同源，免 key |
 | HTML 解析 | golang.org/x/net/html | 渲染管线入口 |
-| EPUB 解析 | 先评估 billdaws/epub 与 ABFCode/Spine；不满足则自写薄层 | EPUB=zip+OPF+NCX/Nav，自写约一两天 |
+| EPUB 解析 | 先评估 billdaws/epub 与 ABFCode/Spine；不满足则自写薄层 | EPUB=zip+OPF+NCX/Nav，自写约一两天；2026-11-18 评估讫：自写薄层（ADR #17） |
 | 代码高亮 | alecthomas/chroma | 管线 code block 集成 |
 | 字宽/折行 | mattn/go-runewidth | CJK 双宽字符与禁则处理 |
 | i18n | 自建 TOML 语言包 | 仿 FeedScope：一语言一文件，测试强制键树一致 |
@@ -127,7 +128,7 @@ books(id, path, title, author, language, added_at)
 progress(book_id PK, spine_index, block_offset, pct, updated_at)
 bookmarks(book_id, spine_index, block_offset, note, created_at)
 fts USING fts5(title, body, item_id UNINDEXED, book_id UNINDEXED)
-  -- 文章与书籍章节统一进全文索引
+  -- 文章与书籍章节统一进全文索引；2026-11-18 修订：M6 书内搜索为扫描式零索引，本表延后至全局搜索立项（.scratch/m6-epub/spec.md）
 ```
 
 TOML 配置（`~/.config/readscope/`）：
@@ -210,7 +211,7 @@ EPUB 阅读模式 = 独立全屏：左 TOC 侧栏 + 右正文 viewport，Esc 回
 | **M3 HN** | Algolia 列表+详情+评论树（楼层制，深层两层扁平化+↳ 回复前缀——2026-11-14 修订，原 @parent） | 无账号完整读帖跟评 | 0.5–1 周 |
 | **M4 知乎源** | 免签 API 直连：热榜/关注(cookie)/日报；问题三层详情（回答楼层/回答层/评论层）；手动贴 cookie + Ctrl+U；01 tracer 止损阶梯 | 无账号读热榜+日报；登录后读关注流/回答/评论；离线可读 | 1.5–2 周 |
 | **M5 小黑盒源** | 匿名只读 web 接口：推荐流+自选圈（CLI 搜索加圈）；帖子两层详情（文章卡同构，楼中楼扁平化）；风控退避；ADR #16 三红线 | 无账号刷推荐流+自选圈、两层详情、楼中楼；离线可读 | 1–1.5 周 |
-| **M6 EPUB 书库+阅读器** | 解析(评估 billdaws/Spine→或自写)/书架/全屏阅读/TOC/进度续读/书签/宽度调节/FTS5 搜索 | 一本中文技术书完整读完，重启精确续读，全书可搜 | 2–3 周 |
+| **M6 EPUB 书库+阅读器** | 解析（2026-11-18 订：自写薄层 ADR #17）/书架/全屏阅读/TOC/进度续读/书签/宽度调节/书内搜索（扫描式，FTS5 延后——同日修订） | 一本中文技术书完整读完，重启精确续读，全书可搜 | 2–3 周 |
 | **M7 打磨发布** | 主题切换/帮助屏/doctor 完善/goreleaser 三平台 | v0.1.0 tag，`go install` 与二进制均可装 | 1 周 |
 
 合计约 **8–10 周业余时间**。风险最大的 M1/M4/M5/M6 各自带测试底线和独立调试出口，超支不殃及全局；M4 的 01 号 tracer 票先行判定数据面，被拦则按阶梯降级不硬折；M5 数据面已冒烟验证（.scratch/m5-heybox/smoke.md），风控失效走 version 开关单点修。

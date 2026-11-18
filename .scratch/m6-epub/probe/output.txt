@@ -1,0 +1,97 @@
+
+================ probe-good-epub2.epub ================
+  --- billdaws/epub ---
+  Open ok: version="2.0" title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=3 cover=false
+  OpenTOC ok: 1 entries, first="Ch1"
+  ReadItem ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Validate: 0 violations
+  --- ABFCode/Spine ---
+  book: title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=3 toc=1 warnings=0 coverHref=""
+  OpenResource ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Cover err: no cover found
+
+================ probe-good-epub3.epub ================
+  --- billdaws/epub ---
+  Open ok: version="3.0" title="Test Book 3" authors=[Ann Author] lang="en" spine=2 manifest=3 cover=false
+  OpenTOC ok: 1 entries, first="Ch1"
+  ReadItem ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Validate: 0 violations
+  --- ABFCode/Spine ---
+  book: title="Test Book 3" authors=[Ann Author] lang="en" spine=2 manifest=3 toc=1 warnings=0 coverHref=""
+  OpenResource ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Cover err: no cover found
+
+================ probe-epub2-no-ncx.epub ================
+  --- billdaws/epub ---
+  Open ok: version="2.0" title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=2 cover=false
+  OpenTOC err: epub: no table of contents found in manifest (*epub.MissingTOCError)
+  ReadItem ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Validate: 1 violations
+  --- ABFCode/Spine ---
+  book: title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=2 toc=2 warnings=1 coverHref=""
+    warning[toc] generated toc from headings (path="")
+  OpenResource ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Cover err: no cover found
+
+================ probe-drm-encryption.epub ================
+  --- billdaws/epub ---
+  Open ok: version="2.0" title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=3 cover=false
+  OpenTOC ok: 1 entries, first="Ch1"
+  ReadItem ok: 168 bytes, head="AQIDBP/+//7//v8AAAECAwQFBgcICQ==LdECb2Z1c2NhdGVkIGRhdGEgdGhhdCBpcyBub3"
+  Validate: 0 violations
+  --- ABFCode/Spine ---
+  book: title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=3 toc=1 warnings=0 coverHref=""
+  OpenResource ok: 168 bytes, head="AQIDBP/+//7//v8AAAECAwQFBgcICQ==LdECb2Z1c2NhdGVkIGRhdGEgdGhhdCBpcyBub3"
+  Cover err: no cover found
+
+================ probe-opf-no-version.epub ================
+  --- billdaws/epub ---
+  Open err: epub: unsupported OPF version "" in "OEBPS/content.opf" (*epub.UnsupportedVersionError)
+  --- ABFCode/Spine ---
+  book: title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=3 toc=1 warnings=1 coverHref=""
+    warning[opf] missing package version (path="OEBPS/content.opf")
+  OpenResource ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Cover err: no cover found
+
+================ probe-opf-garbage.epub ================
+  --- billdaws/epub ---
+  Open err: epub: decode OPF "OEBPS/content.opf": XML syntax error on line 1: expected element name after < (*fmt.wrapError)
+  --- ABFCode/Spine ---
+  book: title="Ch1" authors=[] lang="" spine=2 manifest=2 toc=2 warnings=5 coverHref=""
+    warning[opf] malformed opf: XML syntax error on line 1: expected element name after < (path="OEBPS/content.opf")
+    warning[manifest] missing manifest; inferred from archive (path="")
+    warning[spine] missing spine; inferred from manifest (path="")
+    warning[toc] generated toc from headings (path="")
+    warning[opf] missing package version (path="OEBPS/content.opf")
+  OpenResource ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Cover err: no cover found
+
+================ probe-opf-wrong-ns.epub ================
+  --- billdaws/epub ---
+  Open err: epub: decode OPF "OEBPS/content.opf": expected element <package> in name space http://www.idpf.org/2007/opf but have no name space (*fmt.wrapError)
+  --- ABFCode/Spine ---
+  book: title="Test Book" authors=[Ann Author] lang="en" spine=2 manifest=3 toc=1 warnings=0 coverHref=""
+  OpenResource ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Cover err: no cover found
+
+================ probe-truncated.epub ================
+  --- billdaws/epub ---
+  Open err: epub: open: zip: not a valid zip file (*fmt.wrapError)
+  --- ABFCode/Spine ---
+  ParseFile err: invalid zip: zip: not a valid zip file
+
+================ probe-opf-latin1.epub ================
+  --- billdaws/epub ---
+  Open ok: version="2.0" title="Café Test" authors=[Ann Author] lang="en" spine=2 manifest=3 cover=false
+  OpenTOC ok: 1 entries, first="Ch1"
+  ReadItem ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Validate: 0 violations
+  --- ABFCode/Spine ---
+  book: title="Ch1" authors=[] lang="" spine=2 manifest=2 toc=2 warnings=5 coverHref=""
+    warning[opf] malformed opf: xml: encoding "iso-8859-1" declared but Decoder.CharsetReader is nil (path="OEBPS/content.opf")
+    warning[manifest] missing manifest; inferred from archive (path="")
+    warning[spine] missing spine; inferred from manifest (path="")
+    warning[toc] generated toc from headings (path="")
+    warning[opf] missing package version (path="OEBPS/content.opf")
+  OpenResource ok: 210 bytes, head="<?xml version=\"1.0\" encoding=\"UTF-8\"?> <!DOCTYPE html> <html xmlns=\"ht"
+  Cover err: no cover found

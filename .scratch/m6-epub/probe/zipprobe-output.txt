@@ -1,0 +1,11 @@
+stdlib zip.OpenReader err: <nil>
+  entry META-INF/: open ok (encrypted flag not set or readable)
+  entry META-INF/container.xml: open ok (encrypted flag not set or readable)
+  entry OEBPS/: open ok (encrypted flag not set or readable)
+  entry OEBPS/toc.ncx: open ok (encrypted flag not set or readable)
+  entry OEBPS/chapter2.xhtml: open ok (encrypted flag not set or readable)
+  entry OEBPS/chapter1.xhtml: open ok (encrypted flag not set or readable)
+  entry OEBPS/content.opf: open ok (encrypted flag not set or readable)
+billdaws.Open: false epub: decode container.xml: flate: corrupt input before offset 3
+spine.ParseFile: book != nil: true err: <nil>
+  spine: 2 warnings: 8
