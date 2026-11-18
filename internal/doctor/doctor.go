@@ -17,6 +17,7 @@ import (
 
 	"github.com/smy-101/readscope/internal/core"
 	"github.com/smy-101/readscope/internal/i18n"
+	"github.com/smy-101/readscope/internal/library"
 	"github.com/smy-101/readscope/internal/refresh"
 	"github.com/smy-101/readscope/internal/source/heybox"
 	"github.com/smy-101/readscope/internal/source/rss"
@@ -65,6 +66,7 @@ func run(w io.Writer, cfg *core.Config, version string, probe Probe) bool {
 		named(cat, "doctor.theme_load", checkThemes),
 		zhihuCookieCheck(cat),
 		heyboxCheck(cat),
+		libraryCheck(cat, cfg),
 	}
 	okCount := 0
 	for _, c := range checks {
@@ -282,6 +284,43 @@ func heyboxCheck(cat *i18n.Catalog) check {
 		total += c.Total
 	}
 	return check{label: label, note: cat.Get("doctor.heybox_state", len(circles), total, relTime(cat, last))}
+}
+
+// libraryCheck reports the 书库 census (M6 ticket 02): doctor rides
+// the same library.Scan seam the bookshelf screen does, so its
+// numbers are the disk's live verdict and the books table gets the
+// same freshening a shelf visit would give it. An empty or missing
+// library directory is the fresh-install note, never a failure; a
+// scan that cannot walk the directory fails naming the cause.
+// Broken and warned books pass — the shelf shows them with their
+// ⚠ and the census counts them.
+func libraryCheck(cat *i18n.Catalog, cfg *core.Config) check {
+	label := cat.Get("doctor.library")
+	dir, err := library.Dir(cfg)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	path, err := store.DefaultPath()
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		return check{label: label, err: err}
+	}
+	res, err := library.Scan(context.Background(), st, dir)
+	if err != nil {
+		return check{label: label, err: err}
+	}
+	if res.Scanned == 0 {
+		return check{label: label, note: cat.Get("doctor.library_empty", cfg.BookDir)}
+	}
+	return check{label: label, note: cat.Get("doctor.library_state",
+		res.Scanned-len(res.Failed), len(res.Failed), res.Warned)}
 }
 
 // relTime renders a coarse relative age through the same time.*
