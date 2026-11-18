@@ -2,14 +2,17 @@ package epub_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/smy-101/readscope/internal/epub"
 	"github.com/smy-101/readscope/internal/epub/fixture"
 )
 
-// open is the helper every test goes through: the whole package is
-// tested at its public seam — Open, ReadItem, exported Book fields.
+// open is the helper every test that expects Open to succeed goes
+// through: the whole package is tested at its public seam — Open,
+// ReadItem, exported Book fields. Tests asserting typed hard failures
+// call epub.Open directly.
 func open(t *testing.T, files []fixture.File) *epub.Book {
 	t.Helper()
 	book, err := epub.Open(fixture.Write(t, files))
@@ -26,7 +29,7 @@ func TestOpenCanonicalEPUB2(t *testing.T) {
 	if got, want := book.Title, "合成书 · EPUB2"; got != want {
 		t.Errorf("Title = %q, want %q", got, want)
 	}
-	if got, want := book.Authors, []string{"作者甲", "作者乙"}; !equalStrings(got, want) {
+	if got, want := book.Authors, []string{"作者甲", "作者乙"}; !slices.Equal(got, want) {
 		t.Errorf("Authors = %v, want %v", got, want)
 	}
 	if got, want := book.Language, "zh-CN"; got != want {
@@ -145,7 +148,7 @@ func TestOpenLatin1OPFMetadata(t *testing.T) {
 	if got, want := book.Title, "Caf\u00e9 Test"; got != want {
 		t.Errorf("Title = %q, want %q", got, want)
 	}
-	if got, want := book.Authors, []string{"Fixture \u00e9"}; !equalStrings(got, want) {
+	if got, want := book.Authors, []string{"Fixture \u00e9"}; !slices.Equal(got, want) {
 		t.Errorf("Authors = %q, want %q", got, want)
 	}
 	if got, want := len(book.Warnings), 1; got != want || book.Warnings[0].Code != epub.CodeMissingTOC {
@@ -168,7 +171,7 @@ func TestDirtyBooksOpenWithTypedWarnings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			book := open(t, tt.files())
-			if got := warningCodes(book); !equalCodes(got, tt.wantCodes) {
+			if got := warningCodes(book); !slices.Equal(got, tt.wantCodes) {
 				t.Errorf("warning codes = %v, want %v (messages: %v)", got, tt.wantCodes, book.Warnings)
 			}
 		})
@@ -235,18 +238,6 @@ func warningCodes(b *epub.Book) []epub.WarningCode {
 	return codes
 }
 
-func equalCodes(a, b []epub.WarningCode) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func TestBrokenChapterEntryErrorsOnReadOnly(t *testing.T) {
 	book := open(t, fixture.BrokenXHTML())
 
@@ -281,6 +272,60 @@ func TestDRMPrecheck(t *testing.T) {
 			t.Errorf("ReadItem(ch1): %v", err)
 		}
 	})
+	t.Run("no encryption.xml passes straight", func(t *testing.T) {
+		book := open(t, fixture.ValidEPUB2())
+		if len(book.Warnings) != 0 {
+			t.Errorf("Warnings = %+v, want none", book.Warnings)
+		}
+	})
+	t.Run("garbage encryption.xml refuses conservatively", func(t *testing.T) {
+		_, err := epub.Open(fixture.Write(t, fixture.DRMGarbageXML()))
+		if !errors.Is(err, epub.ErrDRMUnsupported) {
+			t.Fatalf("Open(garbage encryption.xml) err = %v, want ErrDRMUnsupported", err)
+		}
+	})
+}
+
+func TestOPFToleratesMissingVersionAndNamespace(t *testing.T) {
+	book := open(t, fixture.OPFNoVersionNoNs())
+
+	// Approved semantics: missing version / missing namespaces parse
+	// tolerance-style (probe-verified Spine behavior), not zip fallback.
+	if got, want := book.Title, "无版本书"; got != want {
+		t.Errorf("Title = %q, want %q", got, want)
+	}
+	if len(book.Spine) != 1 || book.Spine[0].Href != "OEBPS/text/ch1.xhtml" {
+		t.Errorf("Spine = %+v, want one ch1", book.Spine)
+	}
+	if len(book.TOC) == 0 || book.TOC[0].Title != "第一章 起点" {
+		t.Errorf("TOC = %+v, want NCX-derived", book.TOC)
+	}
+	if len(book.Warnings) != 0 {
+		t.Errorf("Warnings = %+v, want none", book.Warnings)
+	}
+}
+
+func TestNoOPFAnywhereInfersFromZip(t *testing.T) {
+	book := open(t, fixture.NoOPF())
+
+	if got := warningCodes(book); !slices.Equal(got, []epub.WarningCode{epub.CodeMissingContainer, epub.CodeMissingOPF}) {
+		t.Errorf("warning codes = %v, want [missing-container missing-opf] (NCX found via inference)", got)
+	}
+	if len(book.Spine) != 3 {
+		t.Fatalf("Spine = %+v, want 3 inferred chapters", book.Spine)
+	}
+	if book.Title != "" {
+		t.Errorf("Title = %q, want empty (no metadata source)", book.Title)
+	}
+	if len(book.TOC) == 0 || book.TOC[0].Title != "第一章 起点" {
+		t.Errorf("TOC = %+v, want NCX-derived", book.TOC)
+	}
+}
+
+func TestUntypedNavBeatsNCX(t *testing.T) {
+	book := open(t, fixture.UntypedNav())
+	want := []epub.TOCItem{{Title: "无型目录项", Href: "OEBPS/text/ch1.xhtml"}}
+	assertTOC(t, book.TOC, want)
 }
 
 func TestCorruptZipIsTypedHardFailure(t *testing.T) {
@@ -302,16 +347,4 @@ func TestZipPasswordEntryPinnedBehavior(t *testing.T) {
 	if _, err := book.ReadItem("OEBPS/text/ch1.xhtml"); err != nil {
 		t.Errorf("ReadItem(ch1): %v", err)
 	}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

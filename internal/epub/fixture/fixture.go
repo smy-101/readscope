@@ -25,11 +25,10 @@ type File struct {
 }
 
 type rawEntry struct {
-	flags       uint16 // zip general-purpose flag bits written verbatim
-	method      uint16
-	data        string
-	uncompSize  uint64
-	description string
+	flags      uint16 // zip general-purpose flag bits written verbatim
+	method     uint16
+	data       string
+	uncompSize uint64
 }
 
 // Write packs files into an .epub at a fresh temp path and returns that
@@ -454,6 +453,58 @@ func WriteBytes(t *testing.T, data string) string {
 		t.Fatalf("fixture: write bytes: %v", err)
 	}
 	return path
+}
+
+// DRMGarbageXML ships an unparseable encryption.xml: conservative
+// refusal — readscope cannot tell what is encrypted, so it reports DRM.
+func DRMGarbageXML() []File {
+	return append(ValidEPUB2(), File{Name: "META-INF/encryption.xml", Data: "<encryption> not xml at all"})
+}
+
+// OPFNoVersionNoNs drops the version attribute and every namespace:
+// tolerated parsing (approved semantics) — metadata, spine and TOC all
+// intact, zero warnings.
+func OPFNoVersionNoNs() []File {
+	opf := `<?xml version="1.0" encoding="UTF-8"?>
+<package>
+  <metadata>
+    <dc:title>无版本书</dc:title>
+    <dc:creator>fixture</dc:creator>
+    <dc:language>zh-CN</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="ch1"/></spine>
+</package>`
+	files := without(ValidEPUB2(), "OEBPS/content.opf", "OEBPS/text/ch2.xhtml", "OEBPS/text/ch3.xhtml", "OEBPS/images/cover.jpg")
+	return append(files, File{Name: "OEBPS/content.opf", Data: opf})
+}
+
+// NoOPF ships chapters and a toc.ncx but no container.xml and no OPF:
+// everything infers from the zip, and the NCX still supplies the TOC.
+func NoOPF() []File {
+	return without(ValidEPUB2(), "META-INF/container.xml", "OEBPS/content.opf")
+}
+
+// UntypedNav drops epub:type from the toc nav (authors do): the
+// untyped nav still beats the NCX (approved selection rule), while the
+// typed landmarks nav is never chosen.
+func UntypedNav() []File {
+	nav := `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body>
+  <nav epub:type="landmarks" hidden="">
+    <ol><li><a epub:type="bodymatter" href="text/ch1.xhtml">正文起点</a></li></ol>
+  </nav>
+  <nav>
+    <ol><li><a href="text/ch1.xhtml">无型目录项</a></li></ol>
+  </nav>
+</body>
+</html>`
+	files := without(ValidEPUB3(), "OEBPS/nav.xhtml")
+	return append(files, File{Name: "OEBPS/nav.xhtml", Data: nav})
 }
 
 // chapterXHTML wraps body into a minimal XHTML 1.1 chapter document.

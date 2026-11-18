@@ -194,10 +194,7 @@ func (b *Book) parse() {
 		return
 	}
 
-	b.opfDir = path.Dir(opfPath)
-	if b.opfDir == "." || b.opfDir == "/" {
-		b.opfDir = ""
-	}
+	b.opfDir = zipDir(opfPath)
 	b.fillFromOPF(pkg)
 	b.loadTOC(pkg.Spine.Toc)
 }
@@ -307,6 +304,15 @@ func (b *Book) inferSpineFromManifest() {
 
 func isDocumentType(mediaType string) bool {
 	return mediaType == "application/xhtml+xml" || mediaType == "text/html"
+}
+
+// zipDir returns p's directory inside the zip, "" when p sits at the
+// archive root.
+func zipDir(p string) string {
+	if d := path.Dir(p); d != "." && d != "/" {
+		return d
+	}
+	return ""
 }
 
 // resolveHref turns a manifest/TOC href into a zip path: fragment
@@ -486,8 +492,10 @@ func (b *Book) loadTOC(spineTocID string) {
 // false without warning: loadTOC's fallback warning covers it once.
 func (b *Book) loadNCXTOC(spineTocID string) bool {
 	ncxPath := ""
-	if item, ok := b.ManifestByID(spineTocID); ok && spineTocID != "" {
-		ncxPath = item.Href
+	if spineTocID != "" {
+		if item, ok := b.ManifestByID(spineTocID); ok {
+			ncxPath = item.Href
+		}
 	}
 	if ncxPath == "" {
 		for _, item := range b.Manifest {
@@ -516,10 +524,7 @@ func (b *Book) loadNCXTOC(spineTocID string) bool {
 	if err := xmlDecodeBytes(data, &doc); err != nil {
 		return false
 	}
-	ncxDir := path.Dir(ncxPath)
-	if ncxDir == "." || ncxDir == "/" {
-		ncxDir = ""
-	}
+	ncxDir := zipDir(ncxPath)
 	b.TOC = navPointsToTOC(doc.NavMap.NavPoints, ncxDir)
 	return len(b.TOC) > 0
 }
@@ -660,10 +665,7 @@ func (b *Book) loadNavTOC() bool {
 	if ol == nil {
 		return false
 	}
-	navDir := path.Dir(navPath)
-	if navDir == "." || navDir == "/" {
-		navDir = ""
-	}
+	navDir := zipDir(navPath)
 	toc := olToTOC(ol, navDir)
 	if len(toc) == 0 {
 		return false
