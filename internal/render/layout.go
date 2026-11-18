@@ -14,13 +14,26 @@ import (
 // Layout renders the document to lines. width <= 0 lays out unwrapped
 // (single logical line per block line).
 func Layout(doc *Document, width int) []Line {
-	var lines []Line
+	lines, _ := LayoutIndexed(doc, width)
+	return lines
+}
+
+// LayoutIndexed lays out exactly like Layout and additionally reports
+// each block's first line index: len(starts) == len(doc.Blocks)+1,
+// starts[len(Blocks)] == the last block's end (the block separator
+// precedes a block, so starts[b] is precisely block b's first line).
+// The link appendix, when present, sits after the last block and is
+// not covered. The reader's flow engine anchors (spine, block)
+// positions against these indices.
+func LayoutIndexed(doc *Document, width int) (lines []Line, starts []int) {
 	for i, b := range doc.Blocks {
 		if i > 0 {
 			lines = append(lines, Line{})
 		}
+		starts = append(starts, len(lines))
 		lines = append(lines, layoutBlock(b, width, 0)...)
 	}
+	starts = append(starts, len(lines))
 	if len(doc.Links) > 0 {
 		lines = append(lines, Line{})
 		for n, url := range doc.Links {
@@ -31,7 +44,7 @@ func Layout(doc *Document, width int) []Line {
 			lines = append(lines, wrapSpans(spans, width)...)
 		}
 	}
-	return lines
+	return lines, starts
 }
 
 // layoutBlock lays out one block at the given indent (columns).
