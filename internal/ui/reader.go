@@ -825,3 +825,35 @@ func (m *Model) openBookImage() {
 	}
 	m.status = m.cat.Get("reader.img_opened")
 }
+
+// readerHelpBindings is the reader's own key table (F1 while a book
+// is open) — the shell's list is meaningless behind the full screen.
+var readerHelpBindings = []binding{
+	{"← → / Tab", "toc_focus"},
+	{"↑ ↓ PgUp PgDn", "scroll"},
+	{"Enter(目录)", "toc_jump"},
+	{"Enter(正文) / Ctrl+O", "open_image"},
+	{"Ctrl+N", "next_chapter"},
+	{"Ctrl+B", "add_bookmark"},
+	{"Ctrl+G", "bookmark_list"},
+	{"+ / -", "text_width"},
+	{"Home / End", "book_ends"},
+	{"Ctrl+T", "theme"},
+	{"Ctrl+Q", "quit"},
+	{"Esc", "back_shelf"},
+}
+
+// readerHelpView renders the reader's F1 table (helpView's branch
+// while a book is open).
+func (m Model) readerHelpView() string {
+	rows := make([]string, 0, len(readerHelpBindings))
+	for _, b := range readerHelpBindings {
+		rows = append(rows, "  "+m.th.HelpKey.Render(pad(b.key, 22))+
+			m.th.HelpDesc.Render(m.cat.Get("help.keys."+b.desc)))
+	}
+	box := m.th.HelpOverlay.Render(
+		m.th.HelpTitle.Render(m.cat.Get("help.title")) + "\n\n" +
+			strings.Join(rows, "\n") + "\n\n" +
+			m.th.Dim.Render(m.cat.Get("help.close")))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}

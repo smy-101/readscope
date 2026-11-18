@@ -570,9 +570,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// The book reader owns its keys while open (the full screen's
-		// key pump, reader.go); shell-wide keys it does not consume
-		// fall through below.
-		if m.book != nil {
+		// key pump, reader.go) — except under the help overlay, which
+		// always wins (the detail reader's rule). Shell-wide keys the
+		// pump does not consume fall through below.
+		if m.book != nil && !m.help {
 			if handled, cmd := m.bookKeys(msg); handled {
 				return m, cmd
 			}
@@ -801,6 +802,9 @@ func (m Model) View() string {
 		return m.cat.Get("app.title")
 	}
 	if m.help {
+		if m.book != nil {
+			return m.readerHelpView() // the reader's own key table
+		}
 		return m.helpView()
 	}
 	if m.confirming {

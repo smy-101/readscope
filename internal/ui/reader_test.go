@@ -548,3 +548,42 @@ func TestBookReaderOpenImage(t *testing.T) {
 		t.Fatalf("status = %q, want the no-image line", m.status)
 	}
 }
+
+// F1 inside the reader shows the reader's own key table (the shell
+// list is meaningless behind the full screen).
+func TestBookReaderHelp(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	view := m.View()
+	for _, want := range []string{"Ctrl+B", "Ctrl+G", "Ctrl+N", "Esc"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("reader help missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "Ctrl+A") {
+		t.Error("the shell's mark-all key has no meaning in the reader")
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.help {
+		t.Fatal("Esc must close the help overlay")
+	}
+}
+
+// A book file moved away mid-session: chapters past the cache render
+// as the read-failure placeholder, nothing panics, and Esc still
+// retreats whole (the ticket's 全身而退).
+func TestBookReaderSurvivesVanishedFile(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	if err := os.Remove(m.book.row.Path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN}) // into an uncached chapter
+	if !strings.Contains(m.View(), "chapter read failed") {
+		t.Fatalf("the vanished file must surface as the read-failure placeholder:\n%s", m.View())
+	}
+	m, cmd := keyCmd(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = pump(t, m, cmd)
+	if m.book != nil {
+		t.Fatal("Esc must still exit the reader")
+	}
+}
