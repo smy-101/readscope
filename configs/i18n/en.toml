@@ -246,3 +246,7 @@ import_skip = "%s: already subscribed"
 import_no_title = "%s: no title in OPML, named after its address"
 import_summary = "%d added, %d skipped"
 export_summary = "%d feeds exported to %s"
+
+[reader]
+no_text = "[no renderable text]"
+ch_err = "chapter read failed: %v"

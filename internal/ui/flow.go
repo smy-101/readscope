@@ -107,7 +107,9 @@ func wrapBoundary(title string, content *render.Document) *render.Document {
 		render.Heading{Level: 1, Spans: []render.Span{{Text: title, Style: render.SpanBold}}})
 	rest := content.Blocks
 	if len(rest) > 0 {
-		if h, ok := rest[0].(render.Heading); ok && headingPlainText(h) == title {
+		// The pipeline squeezes CJK-interior spaces out of heading text;
+		// the title keeps its source spelling — compare squeezed.
+		if h, ok := rest[0].(render.Heading); ok && headingPlainText(h) == render.SqueezeCJK(title) {
 			rest = rest[1:]
 		}
 	}

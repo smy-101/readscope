@@ -516,3 +516,77 @@ func chapterXHTML(title, body string) string {
 <body><h1>` + title + `</h1>` + body + `</body>
 </html>`
 }
+
+// ReaderFlow is the reader's working book (M6 ticket 03): five
+// chapters with literal geometry —
+//
+//	ch1  h1 第一章 起航 + 2 paras    (TOC title matches the h1 → dropped)
+//	ch2  h1 1.1 长段 + long CJK para + standalone image
+//	                                 (TOC says 1.1 小节 → both headings kept)
+//	ch3  svg-only body               (textless → placeholder path)
+//	ch4  corrupt zip entry           (read failure → error placeholder)
+//	ch5  h1 附录 + 1 para            (TOC title matches → dropped)
+//
+// The nav TOC covers ch1 (nested ch2) and ch5 only — ch3/ch4 pin the
+// no-TOC-entry title fallbacks. The image lives under media/ and is
+// referenced as ../media/fig.png from text/ (the ReadItemIn seam).
+func ReaderFlow() []File {
+	long := "这是一个用来在阅读器测试里验证中文折行与禁则行为的很长的段落文本，" +
+		"它跨越多行以覆盖换宽重排的锚点保持断言，句号结尾。"
+	return []File{
+		{Name: "mimetype", Data: "application/epub+zip"},
+		{Name: "META-INF/container.xml", Data: `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`},
+		{Name: "OEBPS/content.opf", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>流样本书</dc:title>
+    <dc:creator>fixture</dc:creator>
+    <dc:language>zh-CN</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch3" href="text/插图页.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch4" href="text/坏章.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch5" href="text/ch5.xhtml" media-type="application/xhtml+xml"/>
+    <item id="fig" href="media/fig.png" media-type="image/png"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+    <itemref idref="ch3"/>
+    <itemref idref="ch4"/>
+    <itemref idref="ch5"/>
+  </spine>
+</package>`},
+		{Name: "OEBPS/nav.xhtml", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body><nav epub:type="toc"><ol>
+  <li><a href="text/ch1.xhtml">第一章 起航</a>
+    <ol><li><a href="text/ch2.xhtml">1.1 小节</a></li></ol>
+  </li>
+  <li><a href="text/ch5.xhtml">附录</a></li>
+</ol></nav></body>
+</html>`},
+		{Name: "OEBPS/text/ch1.xhtml", Data: chapterXHTML("第一章 起航",
+			"<p>第一段正文。</p><p>第二段正文。</p>")},
+		{Name: "OEBPS/text/ch2.xhtml", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>1.1 长段</title></head>
+<body><h1>1.1 长段</h1><p>` + long + `</p><img src="../media/fig.png" alt="示意图"/></body>
+</html>`},
+		{Name: "OEBPS/text/插图页.xhtml", Data: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<body><svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg></body>
+</html>`},
+		Corrupt("OEBPS/text/坏章.xhtml"),
+		{Name: "OEBPS/text/ch5.xhtml", Data: chapterXHTML("附录", "<p>结语。</p>")},
+		{Name: "OEBPS/media/fig.png", Data: "\x89PNG fake png bytes"},
+	}
+}

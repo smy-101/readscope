@@ -487,3 +487,22 @@ var isInlineTag = map[string]bool{
 	"sup": true, "time": true, "tt": true, "u": true, "var": true,
 	"wbr": true,
 }
+
+// SqueezeCJK removes single spaces whose neighbors on both sides are
+// CJK runes — the same rule mergeSpans applies to pipeline output,
+// exposed so callers can compare display titles (whose sources keep
+// source-formatting spaces) against pipeline-squeezed heading text.
+func SqueezeCJK(s string) string {
+	rs := []rune(s)
+	if len(rs) < 3 {
+		return s
+	}
+	var b []rune
+	for i, r := range rs {
+		if r == ' ' && i > 0 && i+1 < len(rs) && isCJK(rs[i-1]) && isCJK(rs[i+1]) {
+			continue
+		}
+		b = append(b, r)
+	}
+	return string(b)
+}

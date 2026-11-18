@@ -246,3 +246,7 @@ import_skip = "%s：已订阅，跳过"
 import_no_title = "%s：OPML 缺标题，以地址命名"
 import_summary = "新增 %d 个，跳过 %d 个"
 export_summary = "已导出 %d 个订阅到 %s"
+
+[reader]
+no_text = "[无可渲染文本]"
+ch_err = "章节读取失败：%v"
