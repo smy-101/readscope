@@ -405,6 +405,16 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case "ctrl+s", "ctrl+f": // book search arrives with ticket 04
 		m.status = m.cat.Get("reader.search_pending")
 		return true, nil
+
+	case "+":
+		m.adjustBookWidth(1)
+		return true, nil
+	case "-":
+		m.adjustBookWidth(-1)
+		return true, nil
+	case "ctrl+_": // the terminal byte for ctrl+- (0x1F)
+		m.adjustBookWidth(-1)
+		return true, nil
 	}
 	return false, nil
 }
@@ -515,4 +525,40 @@ func (m Model) bookStatusView() string {
 	}
 	return m.th.StatusBar.Width(m.width).MaxHeight(1).
 		Render(left + strings.Repeat(" ", gap) + right)
+}
+
+// bookWidthStep is the +/- increment (the approved key package).
+const bookWidthStep = 2
+
+// bookWidthFloor is the narrowest reading column (the approved
+// package's floor).
+const bookWidthFloor = 20
+
+// adjustBookWidth steps the reading column and re-wraps in place: the
+// anchor block stays on top (锚点不丢), text_width persists (leaving the
+// follow-terminal mode behind on the first press), the status line
+// reports the new width. IME note: +/- are the ticket's one printable
+// exception; ctrl+_ (what a terminal sends for ctrl+-) is the alias —
+// ctrl+= has no control byte and cannot be a binding.
+func (m *Model) adjustBookWidth(delta int) {
+	br := m.book
+	if br == nil || m.cfg == nil {
+		return
+	}
+	pane := m.width - readerTocW
+	if pane < 1 {
+		pane = 1
+	}
+	w := m.bookTextWidth() + delta*bookWidthStep
+	w = max(w, bookWidthFloor)
+	w = min(w, pane)
+	m.cfg.TextWidth = w
+	if err := m.cfg.Save(); err != nil {
+		m.status = m.cat.Get("errors.config_save", err)
+		return
+	}
+	if w != br.flow.width {
+		br.flow.relayout(w)
+	}
+	m.status = m.cat.Get("reader.width", w)
 }

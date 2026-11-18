@@ -31,6 +31,7 @@ import (
 // by hand.
 func bookshelfModel(t *testing.T, lang string) (Model, string) {
 	t.Helper()
+	t.Setenv("READSCOPE_CONFIG", t.TempDir()) // reader width keys persist config
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(t.TempDir(), "shelf.db"))
 	if err != nil {

@@ -350,3 +350,57 @@ func TestBookReaderTabAndSearchReserved(t *testing.T) {
 		}
 	}
 }
+
+// The width keys: +/- (and the ctrl+=/ctrl+- aliases, IME-safe) step
+// the reading column by 2, floor 20, re-wrap immediately with the
+// anchor block kept on top (锚点不丢), and persist text_width — leaving
+// the follow-terminal mode behind on first press.
+func TestBookReaderWidthAdjust(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	// Park mid-book so the anchor is non-trivial, then read it.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	ch, block := m.book.flow.anchor()
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'-'}})
+	if w := m.bookTextWidth(); w != 74 { // 100 - 24 = 76, minus the step 2
+		t.Fatalf("after '-': width = %d, want 74", w)
+	}
+	if m.book.flow.width != 74 {
+		t.Fatalf("flow re-wrapped at %d, want 74", m.book.flow.width)
+	}
+	if c2, b2 := m.book.flow.anchor(); c2 != ch || b2 != block {
+		t.Fatalf("width change lost the anchor: (%d,%d) → (%d,%d)", ch, block, c2, b2)
+	}
+	if m.cfg.TextWidth != 74 {
+		t.Fatalf("text_width not persisted: %d", m.cfg.TextWidth)
+	}
+	if !strings.Contains(m.status, "width 74") {
+		t.Fatalf("status = %q, want the width line", m.status)
+	}
+
+	// The ctrl+_ alias (what terminals send for ctrl+-, 0x1F) steps
+	// down; the zh pack composes its own line.
+	mzh, _ := openReaderModel(t, "zh-CN")
+	mzh = key(t, mzh, tea.KeyMsg{Type: tea.KeyCtrlUnderscore})
+	if w := mzh.bookTextWidth(); w != 76-2 {
+		t.Fatalf("ctrl+_ width = %d, want 74", w)
+	}
+	if !strings.Contains(mzh.status, "宽度 74") {
+		t.Fatalf("zh status = %q, want 宽度 74", mzh.status)
+	}
+
+	// The floor: hammering '-' stops at 20.
+	for i := 0; i < 60; i++ {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'-'}})
+	}
+	if w := m.bookTextWidth(); w != 20 {
+		t.Fatalf("floor = %d, want 20", w)
+	}
+	// '+' grows back, capped by the pane.
+	for i := 0; i < 80; i++ {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'+'}})
+	}
+	if w := m.bookTextWidth(); w != 76 {
+		t.Fatalf("cap = %d, want the pane width 76", w)
+	}
+}
