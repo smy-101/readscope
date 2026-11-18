@@ -222,6 +222,7 @@ func TestZhihuFourLayerNavigation(t *testing.T) {
 	if !strings.Contains(view, "答一内容") || !strings.Contains(view, "甲") {
 		t.Fatalf("answer layer should render 甲's full answer:\n%s", view)
 	}
+	assertLinesFit(t, m.reader.floorLines, m.detailWidth())
 
 	// Scroll the answer layer, then enter the comments — coming back
 	// must restore the answer's scroll (各层滚动状态独立保留).
@@ -240,6 +241,7 @@ func TestZhihuFourLayerNavigation(t *testing.T) {
 			t.Errorf("comment layer missing %q:\n%s", want, view)
 		}
 	}
+	assertLinesFit(t, m.reader.replyLines, m.detailWidth())
 
 	// Esc: back to the answer layer, scroll restored.
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})

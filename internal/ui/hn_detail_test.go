@@ -154,6 +154,7 @@ func TestThreeLayerNavigationKeepsState(t *testing.T) {
 	if !strings.Contains(view, "https://example.com/article") || !strings.Contains(view, "3 floors") {
 		t.Fatalf("body layer missing link line / floor footer:\n%s", view)
 	}
+	assertLinesFit(t, m.reader.lines, m.detailWidth())
 	m = size(m, 100, 12) // short terminal: a floor's body outscrolls one screen
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnd})
 	bodyTop := m.reader.top
@@ -170,6 +171,7 @@ func TestThreeLayerNavigationKeepsState(t *testing.T) {
 	if !strings.Contains(view, "floor 1/3") {
 		t.Fatalf("status bar should report the floor position:\n%s", view)
 	}
+	assertLinesFit(t, m.reader.floorLines, m.detailWidth())
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown}) // scroll inside the floor
 	floorTop := m.reader.floorTop
 	if floorTop == 0 {
@@ -207,6 +209,7 @@ func TestThreeLayerNavigationKeepsState(t *testing.T) {
 			t.Errorf("reply layer missing %q:\n%s", want, view)
 		}
 	}
+	assertLinesFit(t, m.reader.replyLines, m.detailWidth())
 
 	// Esc → floor layer (same floor), Esc → body, Esc → list.
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})

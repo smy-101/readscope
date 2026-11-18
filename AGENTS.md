@@ -3,6 +3,10 @@
 终端里的统一阅读器:RSS/HN 信息流 + 本地 EPUB 书库。Go + Bubble Tea 单二进制。
 总体方案见 `docs/PLAN.md`(含已定决策 ADR 一览与里程碑)。
 
+## Coding standards
+
+写行组装、i18n 文案、近重复/注释声明前先读 `CODING_STANDARDS.md`(评审 Standards 轴执法依据)。
+
 ## Agent skills
 
 ### Issue tracker

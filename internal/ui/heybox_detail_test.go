@@ -185,6 +185,7 @@ func TestHeyboxTwoLayerNavigation(t *testing.T) {
 	if got := m.detailTargetURL(); !strings.Contains(got, "link_id=aaaa00000001") {
 		t.Errorf("floors Ctrl+O target = %q, want the share_url", got)
 	}
+	assertLinesFit(t, m.reader.floorLines, m.detailWidth())
 
 	// → pinned at the loaded tail while a page remains: the heybox
 	// hint names floors, not answers.
@@ -213,6 +214,7 @@ func TestHeyboxTwoLayerNavigation(t *testing.T) {
 	if got := m.detailTargetURL(); !strings.Contains(got, "link_id=aaaa00000001") {
 		t.Errorf("replies Ctrl+O target = %q, want the share_url", got)
 	}
+	assertLinesFit(t, m.reader.replyLines, m.detailWidth())
 
 	// Esc: one layer at a time — replies → floors → body → list.
 	for _, want := range []detailLayer{layerFloors, layerBody} {
