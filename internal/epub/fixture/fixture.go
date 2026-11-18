@@ -403,6 +403,59 @@ func Latin1OPF() []File {
 	}
 }
 
+// BrokenXHTML ships ch2 as a zip entry whose bytes are not valid
+// deflate data: the book opens, reading that chapter errors, everything
+// else works.
+func BrokenXHTML() []File {
+	files := without(ValidEPUB2(), "OEBPS/text/ch2.xhtml")
+	return append(files, Corrupt("OEBPS/text/ch2.xhtml"))
+}
+
+// DRMEncrypted adds an encryption.xml declaring AES (real DRM, not font
+// obfuscation): Open must refuse with ErrDRMUnsupported.
+func DRMEncrypted() []File {
+	xml := `<?xml version="1.0"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes256-cbc"/>
+    <enc:CipherData><enc:CipherValue>bm90LXJlYWxseS1jaXBoZXJ0ZXh0</enc:CipherValue></enc:CipherData>
+  </enc:EncryptedData>
+</encryption>`
+	return append(ValidEPUB2(), File{Name: "META-INF/encryption.xml", Data: xml})
+}
+
+// DRMFontObfuscation declares the IDPF font-obfuscation algorithm:
+// legal EPUB, the book must open and read normally.
+func DRMFontObfuscation() []File {
+	xml := `<?xml version="1.0"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="http://www.idpf.org/2008/obfuscation"/>
+    <enc:CipherData><enc:CipherValue>Zm9udC1vYmZ1c2NhdGlvbg==</enc:CipherValue></enc:CipherData>
+  </enc:EncryptedData>
+</encryption>`
+	return append(ValidEPUB2(), File{Name: "META-INF/encryption.xml", Data: xml})
+}
+
+// ZipPasswordEntry ships ch2 with the zip encryption flag set and
+// pseudo-ciphertext: Open succeeds (flag is ignored by archive/zip at
+// header level), reading that entry fails — behavior pinned.
+func ZipPasswordEntry() []File {
+	files := without(ValidEPUB2(), "OEBPS/text/ch2.xhtml")
+	return append(files, Encrypted("OEBPS/text/ch2.xhtml"))
+}
+
+// WriteBytes puts raw bytes on disk at a fresh temp path — for files
+// that are not zips at all.
+func WriteBytes(t *testing.T, data string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "notazip.epub")
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("fixture: write bytes: %v", err)
+	}
+	return path
+}
+
 // chapterXHTML wraps body into a minimal XHTML 1.1 chapter document.
 func chapterXHTML(title, body string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>

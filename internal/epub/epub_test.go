@@ -1,6 +1,7 @@
 package epub_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/smy-101/readscope/internal/epub"
@@ -244,6 +245,63 @@ func equalCodes(a, b []epub.WarningCode) bool {
 		}
 	}
 	return true
+}
+
+func TestBrokenChapterEntryErrorsOnReadOnly(t *testing.T) {
+	book := open(t, fixture.BrokenXHTML())
+
+	// The book is alive: spine, TOC and the healthy chapters all work.
+	if len(book.Spine) != 3 || len(book.TOC) != 2 {
+		t.Fatalf("Spine/TOC = %d/%d, want 3/2 — the book must survive a broken entry", len(book.Spine), len(book.TOC))
+	}
+	if _, err := book.ReadItem("OEBPS/text/ch1.xhtml"); err != nil {
+		t.Errorf("ReadItem(ch1): %v", err)
+	}
+	if _, err := book.ReadItem("OEBPS/text/ch2.xhtml"); err == nil {
+		t.Error("ReadItem(corrupt ch2) = nil error, want read failure")
+	}
+	if _, err := book.ReadItem("OEBPS/text/ch3.xhtml"); err != nil {
+		t.Errorf("ReadItem(ch3): %v", err)
+	}
+}
+
+func TestDRMPrecheck(t *testing.T) {
+	t.Run("real DRM refuses with typed error", func(t *testing.T) {
+		_, err := epub.Open(fixture.Write(t, fixture.DRMEncrypted()))
+		if !errors.Is(err, epub.ErrDRMUnsupported) {
+			t.Fatalf("Open(DRM) err = %v, want ErrDRMUnsupported", err)
+		}
+	})
+	t.Run("font obfuscation passes through", func(t *testing.T) {
+		book := open(t, fixture.DRMFontObfuscation())
+		if len(book.Warnings) != 0 {
+			t.Errorf("Warnings = %+v, want none", book.Warnings)
+		}
+		if _, err := book.ReadItem("OEBPS/text/ch1.xhtml"); err != nil {
+			t.Errorf("ReadItem(ch1): %v", err)
+		}
+	})
+}
+
+func TestCorruptZipIsTypedHardFailure(t *testing.T) {
+	_, err := epub.Open(fixture.WriteBytes(t, "definitely not a zip file, just text"))
+	if !errors.Is(err, epub.ErrInvalidZip) {
+		t.Fatalf("Open(non-zip) err = %v, want ErrInvalidZip", err)
+	}
+}
+
+func TestZipPasswordEntryPinnedBehavior(t *testing.T) {
+	book := open(t, fixture.ZipPasswordEntry())
+
+	// Pinned: the flagged entry reads as garbage and errors; the rest of
+	// the book is unaffected (archive/zip ignores the flag at header
+	// level, so Open cannot know better).
+	if _, err := book.ReadItem("OEBPS/text/ch2.xhtml"); err == nil {
+		t.Error("ReadItem(encrypted ch2) = nil error, want read failure")
+	}
+	if _, err := book.ReadItem("OEBPS/text/ch1.xhtml"); err != nil {
+		t.Errorf("ReadItem(ch1): %v", err)
+	}
 }
 
 func equalStrings(a, b []string) bool {
