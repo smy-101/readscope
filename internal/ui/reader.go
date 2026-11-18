@@ -319,8 +319,9 @@ func (br *bookReader) tocHighlightIdx() int {
 // --- keys ----------------------------------------------------------------
 
 // bookKeys is the reader's key pump. Consumed keys stop here; the
-// shell-wide set (F1 help, Ctrl+T theme, Ctrl+Q … where not overridden)
-// falls through to the shared switch in Update.
+// shell-wide set (F1 help, Ctrl+T theme) falls through to the shared
+// switch in Update. Tab never cycles sources behind the full screen
+// — it toggles the TOC focus with ←/→.
 func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	br := m.book
 	switch msg.String() {
@@ -331,21 +332,78 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		br.bk.Close()
 		m.book = nil
 		return true, tea.Quit
+
+	case "left", "shift+tab":
+		br.focusToc = true
+		return true, nil
+	case "right", "tab":
+		if msg.String() == "tab" {
+			br.focusToc = !br.focusToc // Tab toggles the focus
+		} else {
+			br.focusToc = false
+		}
+		return true, nil
+
 	case "up":
+		if br.focusToc {
+			br.tocSel, br.tocTop = clampSel(br.tocSel-1, br.tocTop, len(br.toc), m.readerHeight())
+			return true, nil
+		}
 		br.flow.up(1)
 		m.maybePersistBookChapter()
 		return true, nil
 	case "down":
+		if br.focusToc {
+			br.tocSel, br.tocTop = clampSel(br.tocSel+1, br.tocTop, len(br.toc), m.readerHeight())
+			return true, nil
+		}
 		br.flow.down(1)
 		m.maybePersistBookChapter()
 		return true, nil
 	case "pgup":
+		if br.focusToc {
+			br.tocSel, br.tocTop = clampSel(br.tocSel-m.readerHeight(), br.tocTop, len(br.toc), m.readerHeight())
+			return true, nil
+		}
 		br.flow.up(m.readerHeight())
 		m.maybePersistBookChapter()
 		return true, nil
 	case "pgdown":
+		if br.focusToc {
+			br.tocSel, br.tocTop = clampSel(br.tocSel+m.readerHeight(), br.tocTop, len(br.toc), m.readerHeight())
+			return true, nil
+		}
 		br.flow.down(m.readerHeight())
 		m.maybePersistBookChapter()
+		return true, nil
+
+	case "enter": // TOC: jump to the chapter head
+		if br.focusToc && br.tocSel < len(br.toc) {
+			br.flow.jump(br.toc[br.tocSel].spine, 0)
+			m.maybePersistBookChapter()
+		}
+		return true, nil
+
+	case "ctrl+n": // next chapter head
+		if ch, _ := br.flow.anchor(); ch+1 < br.flow.feed.Len() {
+			br.flow.jump(ch+1, 0)
+			m.maybePersistBookChapter()
+		} else {
+			m.status = m.cat.Get("reader.no_more")
+		}
+		return true, nil
+
+	case "home": // book head
+		br.flow.jump(0, 0)
+		m.maybePersistBookChapter()
+		return true, nil
+	case "end": // book tail (block clamps to the last)
+		br.flow.jump(br.flow.feed.Len()-1, 1<<30)
+		m.maybePersistBookChapter()
+		return true, nil
+
+	case "ctrl+s", "ctrl+f": // book search arrives with ticket 04
+		m.status = m.cat.Get("reader.search_pending")
 		return true, nil
 	}
 	return false, nil
@@ -389,7 +447,9 @@ func (m Model) bookView() string {
 
 // bookTocView renders the TOC sidebar: depth-indented entries with
 // the current chapter's row marked ▸ (nearest preceding — a chapter
-// the TOC skips reads under the previous entry's light).
+// the TOC skips reads under the previous entry's light), the cursor
+// row highlighted while the TOC holds the focus, windowed like the
+// shell's lists.
 func (m Model) bookTocView(h int) string {
 	br := m.book
 	var b strings.Builder
@@ -397,15 +457,22 @@ func (m Model) bookTocView(h int) string {
 		b.WriteString(m.th.Dim.Render(m.cat.Get("reader.no_toc")))
 	} else {
 		hl := br.tocHighlightIdx()
-		for i, r := range br.toc {
+		br.tocSel, br.tocTop = clampSel(br.tocSel, br.tocTop, len(br.toc), h)
+		end := min(br.tocTop+h, len(br.toc))
+		for i := br.tocTop; i < end; i++ {
+			r := br.toc[i]
 			marker := "  "
 			if i == hl {
 				marker = "▸ "
 			}
 			label := strings.Repeat(" ", 2*r.depth) + marker + r.title
-			b.WriteString(m.th.SidebarItem.Render(
-				runewidth.FillRight(runewidth.Truncate(label, readerTocW-2, "…"), readerTocW-2)))
-			if i < len(br.toc)-1 {
+			label = runewidth.FillRight(runewidth.Truncate(label, readerTocW-2, "…"), readerTocW-2)
+			if br.focusToc && i == br.tocSel {
+				b.WriteString(m.th.SidebarSelected.Render(label))
+			} else {
+				b.WriteString(m.th.SidebarItem.Render(label))
+			}
+			if i < end-1 {
 				b.WriteString("\n")
 			}
 		}

@@ -260,3 +260,93 @@ func TestBookReaderLinesFit(t *testing.T) {
 	lines, _ = m.book.flow.view()
 	assertLinesFit(t, lines, m.bookTextWidth())
 }
+
+// The reader's key pump: ←/→/Tab focus the TOC, the focused TOC's
+// arrows walk its cursor and Enter jumps to the chapter head, Ctrl+N
+// hops chapter heads with an end hint, Home/End hit the book's ends.
+func TestBookReaderTocNavigationAndJumps(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+
+	// ← focuses the TOC; ↓ walks to 1.1 小节 (spine 1); Enter jumps.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyLeft})
+	if !m.book.focusToc {
+		t.Fatal("← must focus the TOC")
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.book.tocSel != 1 {
+		t.Fatalf("tocSel = %d, want 1 (1.1 小节)", m.book.tocSel)
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if ch, _ := m.book.flow.anchor(); ch != 1 {
+		t.Fatalf("TOC Enter must jump to spine 1, got %d", ch)
+	}
+	if !strings.Contains(m.View(), "1.1 长段") {
+		t.Fatalf("the view must show chapter 2 after the jump:\n%s", m.View())
+	}
+	// The jump crossed a chapter boundary: persisted immediately.
+	if p, ok, _ := m.st.GetProgress(t.Context(), m.book.row.ID); !ok || p.SpineIndex != 1 {
+		t.Fatalf("jump persist = ok:%v spine:%d, want spine 1", ok, p.SpineIndex)
+	}
+
+	// → returns the focus to the content; ↓ scrolls the flow.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.book.focusToc {
+		t.Fatal("→ must return the focus to the content")
+	}
+	before := m.book.flow.topLine
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.book.flow.topLine == before {
+		t.Fatal("↓ in content must scroll")
+	}
+
+	// Ctrl+N hops chapter heads; at the last chapter it says so.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN}) // 1 → 2
+	if ch, _ := m.book.flow.anchor(); ch != 2 {
+		t.Fatalf("Ctrl+N = spine %d, want 2", ch)
+	}
+	for i := 0; i < 5; i++ {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	}
+	if !strings.Contains(m.status, "last chapter") {
+		t.Fatalf("Ctrl+N at the end = %q, want the end hint", m.status)
+	}
+
+	// Home = book head; End = book tail (the tail view reaches the
+	// final line: pct reads 100).
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyHome})
+	if ch, _ := m.book.flow.anchor(); ch != 0 || m.book.flow.topLine != 0 {
+		t.Fatalf("Home = (%d,%d), want (0,0)", ch, m.book.flow.topLine)
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnd})
+	if got, want := m.bookStatusLine(), "流样本书 · ch. 5/5 · 100%"; got != want {
+		t.Fatalf("End status = %q, want %q", got, want)
+	}
+}
+
+// Tab in the reader toggles the TOC focus (it never cycles sources
+// behind the full screen); the search keys are swallowed with the
+// reserved line — both packs (CODING_STANDARDS composed pairs).
+func TestBookReaderTabAndSearchReserved(t *testing.T) {
+	for _, tc := range []struct{ lang, want string }{
+		{"en", "book search arrives with the next ticket"},
+		{"zh-CN", "书内搜索随下一票开通"},
+	} {
+		m, _ := openReaderModel(t, tc.lang)
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.active != 0 || !m.book.focusToc {
+			t.Fatalf("%s: Tab must toggle TOC focus, not cycle sources (active=%d)", tc.lang, m.active)
+		}
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.book.focusToc {
+			t.Fatalf("%s: Tab must toggle back to the content", tc.lang)
+		}
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+		if !strings.Contains(m.status, tc.want) {
+			t.Fatalf("%s: Ctrl+S status = %q, want %q", tc.lang, m.status, tc.want)
+		}
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlF})
+		if !strings.Contains(m.status, tc.want) {
+			t.Fatalf("%s: Ctrl+F status = %q, want %q", tc.lang, m.status, tc.want)
+		}
+	}
+}
