@@ -757,3 +757,126 @@ func TestBookSearchCancelByReopen(t *testing.T) {
 		t.Fatal("the cancelled scan must stay cancelled")
 	}
 }
+
+// The results list: rows of chapter + excerpt, Enter jumps to the
+// hit's block (the 续读位 follows the chapter-boundary throttle),
+// and Esc is layered — from a hit Esc reopens the list with the
+// selection preserved (续选), from the list Esc ends the session,
+// and only then does Esc leave the book.
+func TestBookSearchResultsAndLayeredEsc(t *testing.T) {
+	m, _ := openReaderModel(t, "zh-CN")
+	m, cmd := runSearchKeys(t, m, "正文")
+	m = pump(t, m, cmd)
+	br := m.book
+	if !br.srch.done || len(br.srch.hits) != 2 {
+		t.Fatalf("scan: done=%v hits=%d", br.srch.done, len(br.srch.hits))
+	}
+
+	// The list is open and shows both rows: chapter title + excerpt.
+	view := m.View()
+	for _, want := range []string{"第一章 起航", "第一段正文", "第二段正文"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("results list must show %q:\n%s", want, view)
+		}
+	}
+
+	// Down, Enter: jump to hit 2 (block 3); the list closes, the
+	// session survives, the flow sits on the hit's block.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.book.srchListOpen {
+		t.Fatal("Enter must close the list (the session stays)")
+	}
+	if ch, blk := m.book.flow.anchor(); ch != 0 || blk != 3 {
+		t.Fatalf("anchor = (%d,%d), want the second hit's block (0,3)", ch, blk)
+	}
+	if m.book.srch == nil {
+		t.Fatal("the session must survive the jump (Esc reopens)")
+	}
+
+	// Esc from the hit: reopen at the preserved selection.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.book.srchListOpen || m.book.srchSel != 1 {
+		t.Fatalf("Esc must reopen the list at the selection: open=%v sel=%d",
+			m.book.srchListOpen, m.book.srchSel)
+	}
+	// Esc from the list: end the session.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.book.srch != nil || m.book.srchListOpen {
+		t.Fatal("Esc from the list must end the session")
+	}
+	// Esc again: back to the shelf (the usual contract).
+	m, cmd = keyCmd(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = pump(t, m, cmd)
+	if m.book != nil {
+		t.Fatal("Esc after the session ended must leave the book")
+	}
+}
+
+// The empty-results shape: the list says so in both packs, Enter is
+// inert, Esc ends the session without leaving the book.
+func TestBookSearchEmptyResults(t *testing.T) {
+	for _, tc := range []struct{ lang, want string }{
+		{"en", "no matches"},
+		{"zh-CN", "无匹配"},
+	} {
+		m, _ := openReaderModel(t, tc.lang)
+		m, cmd := runSearchKeys(t, m, "zzz")
+		m = pump(t, m, cmd)
+		if !strings.Contains(m.View(), tc.want) {
+			t.Fatalf("%s: empty state = %q", tc.lang, m.View())
+		}
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.book == nil || !m.book.srchListOpen {
+			t.Fatalf("%s: Enter on empty results must be inert (list stays open)", tc.lang)
+		}
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+		if m.book == nil || m.book.srch != nil {
+			t.Fatalf("%s: Esc must end the session, not the book", tc.lang)
+		}
+	}
+}
+
+// Early jump while the scan still runs: Enter on a partial list
+// jumps immediately, the scan keeps stepping underneath, later hits
+// are in place when the list reopens.
+func TestBookSearchEarlyJumpScanContinues(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	m, cmd := runSearchKeys(t, m, "正文")
+	res, _ := m.Update(cmd()) // step 1 of 2: chapter 0 scanned
+	m = res.(Model)
+	if m.book.srch.done || len(m.book.srch.hits) == 0 {
+		t.Fatal("fixture must leave hits visible before the scan ends")
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // jump on the partial list
+	if m.book.srchListOpen || m.book.srch == nil {
+		t.Fatal("early jump must close the list and keep the session")
+	}
+	m = pump(t, m, bookScanCmd()) // the pending steps finish
+	if !m.book.srch.done || len(m.book.srch.hits) != 2 {
+		t.Fatalf("scan must finish in the background: done=%v hits=%d",
+			m.book.srch.done, len(m.book.srch.hits))
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.book.srchListOpen {
+		t.Fatal("reopened list must carry the finished scan's hits")
+	}
+}
+
+// The results rows fit the overlay box's budget at three terminal
+// sizes (the reader's modal width guard, bm-list style).
+func TestBookSearchRowsFitBudget(t *testing.T) {
+	for _, sz := range [][2]int{{20, 10}, {60, 24}, {140, 50}} {
+		m, _ := openReaderModel(t, "zh-CN")
+		m = size(m, sz[0], sz[1])
+		m, cmd := runSearchKeys(t, m, "正文")
+		m = pump(t, m, cmd)
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		for i, ln := range lines {
+			if w := lipgloss.Width(ln); w > sz[0] {
+				t.Fatalf("size %v: line %d width %d > %d:\n%s", sz, i, w, sz[0], view)
+			}
+		}
+	}
+}

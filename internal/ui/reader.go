@@ -201,6 +201,9 @@ type bookReader struct {
 	srchBuf  string
 	srch     *bookSearch
 
+	srchListOpen bool // the results overlay
+	srchSel      int  // the results cursor (survives jump-and-reopen: 续选)
+
 	seenDegrade int // feeder.degraded as of the last status report
 }
 
@@ -368,6 +371,9 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if br.srchOpen { // the search dialog is modal
 		return m.bookSearchKeys(msg)
 	}
+	if br.srchListOpen { // the results list is modal
+		return m.bookResultsKeys(msg)
+	}
 	if br.bmNoteOpen { // the note dialog is modal
 		return m.bookNoteKeys(msg)
 	}
@@ -382,7 +388,11 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		br.bmListOpen = true
 		br.bmSel = 0
 		return true, nil
-	case "esc": // any focus: back to the shelf (progress persisted)
+	case "esc": // layered: a live session reopens its results first
+		if br.srch != nil {
+			br.srchListOpen = true // 续选: back to the list at the cursor
+			return true, nil
+		}
 		return true, m.closeBook()
 	case "ctrl+q": // quit from inside the reader: persist, then quit
 		m.saveBookProgress()
@@ -451,8 +461,7 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 
 	case "ctrl+s", "ctrl+f": // book search (the alias rides the same seam)
-		br.srch = nil // a fresh search cancels any running scan
-		br.srchOpen, br.srchBuf = true, ""
+		m.startSearchInput(br) // a fresh search cancels any running scan
 		return true, nil
 
 	case "+":
@@ -510,6 +519,9 @@ func (m Model) bookView() string {
 		m.bookContentView(h),
 	)
 	view := lipgloss.JoinVertical(lipgloss.Left, body, m.bookStatusView())
+	if m.book.srchListOpen { // the results overlay the reader
+		return m.bookResultsView()
+	}
 	if m.book.bmListOpen { // the list overlays the reader
 		return m.bookBmListView()
 	}
@@ -875,6 +887,7 @@ func (m *Model) bookSearchKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		br.srch = newBookSearch(br.srchBuf)
 		br.srchBuf = ""
+		br.srchListOpen, br.srchSel = true, 0
 		return true, bookScanCmd()
 	case "esc":
 		br.srchOpen, br.srchBuf = false, ""
@@ -890,6 +903,107 @@ func (m *Model) bookSearchKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	}
 	return true, nil // modal: everything else waits
+}
+
+// startSearchInput begins a fresh search: any running scan dies, the
+// results close, the input dialog opens empty (the list's Ctrl+S and
+// the reader's are one behavior — the shared seam the two pumps
+// reach for).
+func (m *Model) startSearchInput(br *bookReader) {
+	br.srch = nil
+	br.srchListOpen = false
+	br.srchOpen, br.srchBuf = true, ""
+}
+
+// bookResultsKeys is the results list's modal pump: arrows walk,
+// Enter jumps to the hit's block (the list closes, the session
+// stays — Esc from the hit reopens at the cursor), Esc closes the
+// list AND ends the session, Ctrl+S/F refine from right here.
+func (m *Model) bookResultsKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	br := m.book
+	switch msg.String() {
+	case "esc":
+		br.srchListOpen = false
+		br.srch = nil // the session ends with the list
+		return true, nil
+	case "ctrl+s", "ctrl+f":
+		m.startSearchInput(br)
+		return true, nil
+	case "up":
+		if br.srchSel > 0 {
+			br.srchSel--
+		}
+		return true, nil
+	case "down":
+		if br.srchSel < len(br.srch.hits)-1 {
+			br.srchSel++
+		}
+		return true, nil
+	case "enter":
+		if len(br.srch.hits) == 0 {
+			return true, nil
+		}
+		h := br.srch.hits[br.srchSel]
+		br.flow.jump(h.chapter, h.block)
+		m.maybePersistBookChapter()
+		m.maybeBookChErrStatus()
+		br.srchListOpen = false // the session survives: Esc reopens (续选)
+		return true, nil
+	}
+	return true, nil // modal: everything else waits
+}
+
+// bookResultsView renders the results over the reader: one row per
+// hit (chapter position + title + the excerpt), the scan's state in
+// the footer while it runs (the overlay covers the status line),
+// the empty state when done with nothing found.
+func (m Model) bookResultsView() string {
+	br := m.book
+	budget := max(m.width-6, 10) // the overlay box's border + padding
+	var rows []string
+	switch {
+	case len(br.srch.hits) == 0 && br.srch.done:
+		rows = append(rows, m.th.Dim.Render(
+			runewidth.Truncate(m.cat.Get("reader.search_none"), budget, "…")))
+	default:
+		n := br.flow.feed.Len()
+		for i, h := range br.srch.hits {
+			pos := m.cat.Get("reader.bm_row", h.chapter+1, n)
+			row := m.searchRow(pos, br.feeder.title(h.chapter), h.excerpt, budget)
+			if i == br.srchSel {
+				row = m.th.ListSelected.Render(row)
+			}
+			rows = append(rows, row)
+		}
+	}
+	footer := m.cat.Get("reader.search_hint")
+	if !br.srch.done { // the scan's live state rides the footer
+		footer = m.searchStateLine() + " · " + footer
+	}
+	box := m.th.HelpOverlay.Render(
+		m.th.HelpTitle.Render(runewidth.Truncate(
+			m.cat.Get("reader.search_results_title", br.srch.needle), budget, "…")) + "\n\n" +
+			strings.Join(rows, "\n") + "\n\n" +
+			m.th.Dim.Render(runewidth.Truncate(footer, budget, "…")))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// searchRow assembles one result row within budget, degrading
+// gracefully: title caps at 16, the excerpt takes the rest; when the
+// budget cannot even carry position + markers the row falls back to
+// the excerpt alone (a hit's quote is the meat; the chapter number
+// is the garnish).
+func (m Model) searchRow(pos, title, excerpt string, budget int) string {
+	headW := 2 + runewidth.StringWidth(pos) + 2
+	if budget-headW < 6 {
+		return "  " + m.th.Dim.Render(
+			runewidth.Truncate(excerpt, max(budget-2, 1), "…"))
+	}
+	title = runewidth.Truncate(title, min(16, budget-headW-4), "…")
+	exW := budget - headW - runewidth.StringWidth(title) - 3
+	return "  " + m.th.HelpKey.Render(pos) + "  " +
+		m.th.HelpDesc.Render(title) +
+		m.th.Dim.Render(" — "+runewidth.Truncate(excerpt, max(exW, 1), "…"))
 }
 
 // bookSearchView renders the input dialog (the note dialog's shape).
