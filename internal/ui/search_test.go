@@ -216,3 +216,32 @@ func TestSearchExcerpt(t *testing.T) {
 		t.Fatalf("tail-clamped excerpt = %q", s.hits[0].excerpt)
 	}
 }
+
+// The projection is the screen, degradation markers included: a hit
+// on an image marker's alt, on the SVG no-text placeholder and on
+// the corrupt-chapter placeholder must find exactly the blocks the
+// reader displays them at (搜到的=看到的, pinned through the
+// production feeder on the ReaderFlow fixture).
+func TestBookSearchProjectionMatchesScreenMarkers(t *testing.T) {
+	flow := newBookFlow(readerFeeder(t), 40, 8)
+	for _, tc := range []struct {
+		needle string
+		want   [2]int
+	}{
+		{"示意图", [2]int{1, 4}},    // ch2's image marker [图片: 示意图]
+		{"无可渲染文本", [2]int{2, 2}}, // ch3's svg no-text placeholder
+		{"读取失败", [2]int{3, 2}},   // ch4's corrupt-entry placeholder
+	} {
+		s := runSearch(flow, tc.needle)
+		if len(s.hits) != 1 {
+			t.Fatalf("needle %q: hits = %v, want exactly the marker's block",
+				tc.needle, s.hits)
+		}
+		if got := [2]int{s.hits[0].chapter, s.hits[0].block}; got != tc.want {
+			t.Fatalf("needle %q: hit = %v, want %v", tc.needle, got, tc.want)
+		}
+		if !strings.Contains(s.hits[0].excerpt, tc.needle) {
+			t.Fatalf("needle %q: excerpt %q must quote the marker", tc.needle, s.hits[0].excerpt)
+		}
+	}
+}
