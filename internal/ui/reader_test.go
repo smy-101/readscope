@@ -553,22 +553,28 @@ func TestBookReaderOpenImage(t *testing.T) {
 }
 
 // F1 inside the reader shows the reader's own key table (the shell
-// list is meaningless behind the full screen).
+// list is meaningless behind the full screen) — the search binding
+// included, both packs (composed pairs).
 func TestBookReaderHelp(t *testing.T) {
-	m, _ := openReaderModel(t, "en")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyF1})
-	view := m.View()
-	for _, want := range []string{"Ctrl+B", "Ctrl+G", "Ctrl+N", "Esc"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("reader help missing %q:\n%s", want, view)
+	for _, tc := range []struct{ lang, key, desc string }{
+		{"en", "Ctrl+S / Ctrl+F", "search in book"},
+		{"zh-CN", "Ctrl+S / Ctrl+F", "书内搜索"},
+	} {
+		m, _ := openReaderModel(t, tc.lang)
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyF1})
+		view := m.View()
+		for _, want := range []string{"Ctrl+B", "Ctrl+G", "Ctrl+N", tc.key, tc.desc, "Esc"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("%s: reader help missing %q:\n%s", tc.lang, want, view)
+			}
 		}
-	}
-	if strings.Contains(view, "Ctrl+A") {
-		t.Error("the shell's mark-all key has no meaning in the reader")
-	}
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.help {
-		t.Fatal("Esc must close the help overlay")
+		if strings.Contains(view, "Ctrl+A") {
+			t.Error("the shell's mark-all key has no meaning in the reader")
+		}
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+		if m.help {
+			t.Fatal("Esc must close the help overlay")
+		}
 	}
 }
 
@@ -772,9 +778,10 @@ func TestBookSearchResultsAndLayeredEsc(t *testing.T) {
 		t.Fatalf("scan: done=%v hits=%d", br.srch.done, len(br.srch.hits))
 	}
 
-	// The list is open and shows both rows: chapter title + excerpt.
+	// The list is open and shows both rows: chapter title + excerpt,
+	// and the composed title with the needle.
 	view := m.View()
-	for _, want := range []string{"第一章 起航", "第一段正文", "第二段正文"} {
+	for _, want := range []string{"搜索「正文」", "第一章 起航", "第一段正文", "第二段正文"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("results list must show %q:\n%s", want, view)
 		}
@@ -845,6 +852,9 @@ func TestBookSearchEarlyJumpScanContinues(t *testing.T) {
 	m, cmd := runSearchKeys(t, m, "正文")
 	res, _ := m.Update(cmd()) // step 1 of 2: chapter 0 scanned
 	m = res.(Model)
+	if !strings.Contains(m.View(), "Search: 正文") {
+		t.Fatal("en composed results title missing")
+	}
 	if m.book.srch.done || len(m.book.srch.hits) == 0 {
 		t.Fatal("fixture must leave hits visible before the scan ends")
 	}

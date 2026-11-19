@@ -1098,6 +1098,7 @@ var readerHelpBindings = []binding{
 	{"Ctrl+N", "next_chapter"},
 	{"Ctrl+B", "add_bookmark"},
 	{"Ctrl+G", "bookmark_list"},
+	{"Ctrl+S / Ctrl+F", "book_search"},
 	{"+ / -", "text_width"},
 	{"Home / End", "book_ends"},
 	{"Ctrl+T", "theme"},
