@@ -326,12 +326,13 @@ func TestBookReaderTocNavigationAndJumps(t *testing.T) {
 }
 
 // Tab in the reader toggles the TOC focus (it never cycles sources
-// behind the full screen); the search keys are swallowed with the
-// reserved line — both packs (CODING_STANDARDS composed pairs).
-func TestBookReaderTabAndSearchReserved(t *testing.T) {
+// behind the full screen); Ctrl+S and Ctrl+F open the book search
+// input dialog (the alias rides the same seam) — the dialog's title
+// shows in both packs (CODING_STANDARDS composed pairs).
+func TestBookReaderTabAndSearchDialog(t *testing.T) {
 	for _, tc := range []struct{ lang, want string }{
-		{"en", "book search arrives with the next ticket"},
-		{"zh-CN", "书内搜索随下一票开通"},
+		{"en", "Book search"},
+		{"zh-CN", "书内搜索"},
 	} {
 		m, _ := openReaderModel(t, tc.lang)
 		m = key(t, m, tea.KeyMsg{Type: tea.KeyTab})
@@ -343,12 +344,13 @@ func TestBookReaderTabAndSearchReserved(t *testing.T) {
 			t.Fatalf("%s: Tab must toggle back to the content", tc.lang)
 		}
 		m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
-		if !strings.Contains(m.status, tc.want) {
-			t.Fatalf("%s: Ctrl+S status = %q, want %q", tc.lang, m.status, tc.want)
+		if !m.book.srchOpen || !strings.Contains(m.View(), tc.want) {
+			t.Fatalf("%s: Ctrl+S must open the search dialog (open=%v):\n%s", tc.lang, m.book.srchOpen, m.View())
 		}
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 		m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlF})
-		if !strings.Contains(m.status, tc.want) {
-			t.Fatalf("%s: Ctrl+F status = %q, want %q", tc.lang, m.status, tc.want)
+		if !m.book.srchOpen || !strings.Contains(m.View(), tc.want) {
+			t.Fatalf("%s: Ctrl+F must open the same dialog (open=%v)", tc.lang, m.book.srchOpen)
 		}
 	}
 }
@@ -632,5 +634,126 @@ func TestBookReaderViewLinesFitTerminal(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// --- book search (M6 ticket 04) -----------------------------------------
+
+// runSearchKeys opens the input dialog, types the query and presses
+// Enter — the three keystrokes a search is made of. Returns the model
+// and the first step command (the caller pumps or intercepts).
+func runSearchKeys(t *testing.T, m Model, query string) (Model, tea.Cmd) {
+	t.Helper()
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if !m.book.srchOpen {
+		t.Fatal("Ctrl+S must open the search dialog")
+	}
+	for _, r := range query {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	return keyCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+// The search lifecycle: Ctrl+S opens the input dialog, Enter starts
+// the scan, the step messages drive it to done without touching the
+// UI, and the composed state line lands in both the status seam and
+// the reader's own status right half (both packs — composed pairs).
+func TestBookSearchScanLifecycle(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	m, cmd := runSearchKeys(t, m, "正文")
+	if m.book.srch == nil {
+		t.Fatal("Enter must start the scan session")
+	}
+	m = pump(t, m, cmd)
+	if !m.book.srch.done {
+		t.Fatal("scan must finish across step messages")
+	}
+	// The fixture's 正文 lives in chapter 1's two paragraphs (blocks
+	// 2 and 3 of the flow doc) and nowhere else.
+	var want [][2]int
+	for i := 0; i < 2; i++ {
+		want = append(want, [2]int{0, 2 + i})
+	}
+	got := make([][2]int, 0, len(m.book.srch.hits))
+	for _, h := range m.book.srch.hits {
+		got = append(got, [2]int{h.chapter, h.block})
+	}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("hits = %v, want the two 正文 paragraphs", got)
+	}
+	if !strings.Contains(m.status, "2") || !strings.Contains(m.status, "hits") {
+		t.Fatalf("status = %q, want the composed done line with the count", m.status)
+	}
+	if !strings.Contains(m.bookStatusView(), "2") {
+		t.Fatalf("reader status line must carry the done state:\n%s", m.bookStatusView())
+	}
+
+	// zh pack: the same composed lines.
+	mzh, _ := openReaderModel(t, "zh-CN")
+	mzh, cmd = runSearchKeys(t, mzh, "正文")
+	mzh = pump(t, mzh, cmd)
+	if !strings.Contains(mzh.status, "搜索完成 · 2 条") {
+		t.Fatalf("zh status = %q, want 搜索完成 · 2 条", mzh.status)
+	}
+	if !strings.Contains(mzh.bookStatusView(), "搜索完成 · 2 条") {
+		t.Fatalf("zh reader status line = %q", mzh.bookStatusView())
+	}
+}
+
+// While the scan runs (list closed or not), the reader's status
+// right half reports progress in place of the static hint — both
+// packs.
+func TestBookSearchProgressStatus(t *testing.T) {
+	for _, tc := range []struct{ lang, want string }{
+		{"en", "4/5"},
+		{"zh-CN", "搜索中 4/5 章"},
+	} {
+		m, _ := openReaderModel(t, tc.lang)
+		m, cmd := runSearchKeys(t, m, "zzz")
+		res, _ := m.Update(cmd()) // one step: 4 of 5 chapters
+		m = res.(Model)
+		if m.book.srch.done {
+			t.Fatal("5-chapter fixture must outlive one 4-chapter step")
+		}
+		if !strings.Contains(m.bookStatusView(), tc.want) {
+			t.Fatalf("%s: status right half = %q, want %q", tc.lang, m.bookStatusView(), tc.want)
+		}
+	}
+}
+
+// An empty query is a no-op: the dialog closes, no session starts.
+func TestBookSearchEmptyQuery(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.book.srchOpen || m.book.srch != nil {
+		t.Fatalf("empty query must close the dialog without a session: open=%v srch=%v",
+			m.book.srchOpen, m.book.srch != nil)
+	}
+}
+
+// Reopening the input mid-scan cancels the running session (the
+// stale step message that follows must find nothing to step).
+func TestBookSearchCancelByReopen(t *testing.T) {
+	m, _ := openReaderModel(t, "en")
+	m, cmd := runSearchKeys(t, m, "正文")
+	res, _ := m.Update(cmd()) // first step only — the scan is running
+	m = res.(Model)
+	if m.book.srch.done {
+		t.Fatal("scan should be mid-flight here")
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlF}) // the alias cancels too
+	if m.book.srch != nil {
+		t.Fatal("Ctrl+F mid-scan must cancel the session")
+	}
+	if !m.book.srchOpen {
+		t.Fatal("Ctrl+F mid-scan must open a fresh dialog")
+	}
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})      // drop the dialog
+	res, cmd = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // unrelated key: no step cmd may survive
+	_ = res
+	_ = cmd
+	if m.book.srch != nil {
+		t.Fatal("the cancelled scan must stay cancelled")
 	}
 }

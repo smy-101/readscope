@@ -430,6 +430,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bookOpenMsg:
 		return m, m.bookLanded(msg)
 
+	case bookScanMsg:
+		return m, m.bookScanStep()
+
 	case refreshDoneMsg:
 		m.refreshing = false
 		m.status = m.refreshStatus(msg)

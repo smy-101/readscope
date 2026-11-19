@@ -193,6 +193,14 @@ type bookReader struct {
 	bmListOpen bool
 	bmSel      int
 
+	// Search state (M6 ticket 04): the Ctrl+S input dialog, and the
+	// scan session it starts (nil = no session). The session outlives
+	// the dialog — Esc from a hit reopens the results (续选) until the
+	// list itself is dismissed.
+	srchOpen bool
+	srchBuf  string
+	srch     *bookSearch
+
 	seenDegrade int // feeder.degraded as of the last status report
 }
 
@@ -357,6 +365,9 @@ func (br *bookReader) tocHighlightIdx() int {
 // — it toggles the TOC focus with ←/→.
 func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	br := m.book
+	if br.srchOpen { // the search dialog is modal
+		return m.bookSearchKeys(msg)
+	}
 	if br.bmNoteOpen { // the note dialog is modal
 		return m.bookNoteKeys(msg)
 	}
@@ -439,8 +450,9 @@ func (m *Model) bookKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.maybeBookChErrStatus()
 		return true, nil
 
-	case "ctrl+s", "ctrl+f": // book search arrives with ticket 04
-		m.status = m.cat.Get("reader.search_pending")
+	case "ctrl+s", "ctrl+f": // book search (the alias rides the same seam)
+		br.srch = nil // a fresh search cancels any running scan
+		br.srchOpen, br.srchBuf = true, ""
 		return true, nil
 
 	case "+":
@@ -486,6 +498,9 @@ func (m Model) bookTextWidth() int {
 // bookView is the independent full screen: TOC sidebar left, content
 // viewport right, the reader's own status line below.
 func (m Model) bookView() string {
+	if m.book.srchOpen { // the search dialog is its own screen
+		return m.bookSearchView()
+	}
 	if m.book.bmNoteOpen { // the note dialog is its own screen
 		return m.bookBmView()
 	}
@@ -558,10 +573,18 @@ func (m Model) bookStatusLine() string {
 
 // bookStatusView is the reader's status line: the position triple
 // left, the exit hint right.
+// bookStatusView is the reader's status line: the position triple
+// left, the exit hint right. The gap budget subtracts the bar's own
+// Padding(0,1) — two columns — or the line overflows Width, wraps at
+// a space in the right half, and MaxHeight(1) eats the tail.
 func (m Model) bookStatusView() string {
 	left := m.th.StatusNormal.Render(m.bookStatusLine())
-	right := m.th.StatusHint.Render(m.cat.Get("reader.hint"))
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	hint := m.cat.Get("reader.hint")
+	if m.book.srch != nil {
+		hint = m.searchStateLine() // the live scan state replaces the static hint
+	}
+	right := m.th.StatusHint.Render(hint)
+	gap := m.width - 2 - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
@@ -794,6 +817,95 @@ func (m Model) bookBmListView() string {
 		m.th.HelpTitle.Render(runewidth.Truncate(
 			m.cat.Get("reader.bm_title"), budget, "…")) + "\n\n" +
 			strings.Join(rows, "\n"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// --- book search (Ctrl+S / Ctrl+F) --------------------------------------
+
+// bookScanMsg is the stepper's heartbeat: a no-op message whose
+// handling runs one bounded scan step on the UI goroutine (the scan
+// reads the flow cache — UI state — so it must not run on a
+// goroutine; see search.go).
+type bookScanMsg struct{}
+
+// bookScanCmd posts the next step.
+func bookScanCmd() tea.Cmd {
+	return func() tea.Msg { return bookScanMsg{} }
+}
+
+// bookScanStep is the heartbeat's handler: one budgeted step of the
+// active scan, the composed state line into the status seam, and
+// the next beat — or quiescence when the scan is done or gone.
+func (m *Model) bookScanStep() tea.Cmd {
+	br := m.book
+	if br == nil || br.srch == nil || br.srch.done {
+		return nil
+	}
+	br.srch.step(br.flow)
+	m.status = m.searchStateLine()
+	if br.srch.done {
+		return nil
+	}
+	return bookScanCmd()
+}
+
+// searchStateLine is the session's composed state — progress while
+// scanning, the hit count when done. The reader's status right half
+// shows it in place of the static hint while a session lives; the
+// status seam carries it (visible after the reader closes).
+func (m Model) searchStateLine() string {
+	s := m.book.srch
+	if !s.done {
+		return m.cat.Get("reader.search_progress", s.next, m.book.flow.feed.Len())
+	}
+	return m.cat.Get("reader.search_done", len(s.hits))
+}
+
+// bookSearchKeys is the input dialog's modal pump: runes accumulate,
+// Enter starts the scan at the current session-or-nil (an empty
+// query just closes), Esc cancels, backspace edits.
+func (m *Model) bookSearchKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	br := m.book
+	switch msg.String() {
+	case "enter":
+		br.srchOpen = false
+		if br.srchBuf == "" {
+			br.srchBuf = ""
+			return true, nil
+		}
+		br.srch = newBookSearch(br.srchBuf)
+		br.srchBuf = ""
+		return true, bookScanCmd()
+	case "esc":
+		br.srchOpen, br.srchBuf = false, ""
+		return true, nil
+	case "backspace":
+		if rs := []rune(br.srchBuf); len(rs) > 0 {
+			br.srchBuf = string(rs[:len(rs)-1])
+		}
+		return true, nil
+	}
+	if msg.Type == tea.KeyRunes && !msg.Paste {
+		br.srchBuf += string(msg.Runes)
+		return true, nil
+	}
+	return true, nil // modal: everything else waits
+}
+
+// bookSearchView renders the input dialog (the note dialog's shape).
+func (m Model) bookSearchView() string {
+	br := m.book
+	buf := br.srchBuf
+	if buf == "" {
+		buf = " "
+	}
+	inner := max(m.width-6, 10) // border + padding of the overlay box
+	box := m.th.HelpOverlay.Render(
+		m.th.HelpTitle.Render(runewidth.Truncate(
+			m.cat.Get("reader.search_title"), inner, "…")) + "\n\n" +
+			m.th.Title.Render(runewidth.Truncate(buf, inner, "…")) + "\n\n" +
+			m.th.Dim.Render(runewidth.Truncate(
+				m.cat.Get("reader.search_input_hint"), inner, "…")))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
