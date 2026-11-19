@@ -528,6 +528,13 @@ func (m Model) bookView() string {
 	return view
 }
 
+// overlayBudget is the overlay box's inner width: the terminal
+// minus the HelpOverlay box's border + padding (the four overlay
+// screens' shared consumption width).
+func (m Model) overlayBudget() int {
+	return max(m.width-6, 10)
+}
+
 // bookTocView renders the TOC sidebar: depth-indented entries with
 // the current chapter's row marked ▸ (nearest preceding — a chapter
 // the TOC skips reads under the previous entry's light), the cursor
@@ -787,7 +794,7 @@ func (m Model) bookBmView() string {
 	if buf == "" {
 		buf = " "
 	}
-	inner := max(m.width-6, 10) // border + padding of the overlay box
+	inner := m.overlayBudget()
 	box := m.th.HelpOverlay.Render(
 		m.th.HelpTitle.Render(runewidth.Truncate(
 			m.cat.Get("reader.bm_note_title"), inner, "…")) + "\n\n" +
@@ -802,7 +809,7 @@ func (m Model) bookBmView() string {
 // empty state when the book has none.
 func (m Model) bookBmListView() string {
 	br := m.book
-	budget := max(m.width-6, 10) // the overlay box's border + padding
+	budget := m.overlayBudget()
 	var rows []string
 	if len(br.bookmarks) == 0 {
 		rows = append(rows, m.th.Dim.Render(
@@ -959,7 +966,7 @@ func (m *Model) bookResultsKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 // the empty state when done with nothing found.
 func (m Model) bookResultsView() string {
 	br := m.book
-	budget := max(m.width-6, 10) // the overlay box's border + padding
+	budget := m.overlayBudget()
 	var rows []string
 	switch {
 	case len(br.srch.hits) == 0 && br.srch.done:
@@ -1013,7 +1020,7 @@ func (m Model) bookSearchView() string {
 	if buf == "" {
 		buf = " "
 	}
-	inner := max(m.width-6, 10) // border + padding of the overlay box
+	inner := m.overlayBudget()
 	box := m.th.HelpOverlay.Render(
 		m.th.HelpTitle.Render(runewidth.Truncate(
 			m.cat.Get("reader.search_title"), inner, "…")) + "\n\n" +

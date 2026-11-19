@@ -709,10 +709,14 @@ func TestBookSearchScanLifecycle(t *testing.T) {
 // While the scan runs (list closed or not), the reader's status
 // right half reports progress in place of the static hint — both
 // packs.
+// While the scan runs, the results overlay's footer composes the
+// live state with the hint — both packs (CODING_STANDARDS composed
+// pairs; the reader status right half carries the same state when
+// the list is closed).
 func TestBookSearchProgressStatus(t *testing.T) {
 	for _, tc := range []struct{ lang, want string }{
-		{"en", "4/5"},
-		{"zh-CN", "搜索中 4/5 章"},
+		{"en", "searching 4/5 · Enter jump · Esc close"},
+		{"zh-CN", "搜索中 4/5 章 · Enter 跳转 · Esc 关闭"},
 	} {
 		m, _ := openReaderModel(t, tc.lang)
 		m, cmd := runSearchKeys(t, m, "zzz")
@@ -721,8 +725,11 @@ func TestBookSearchProgressStatus(t *testing.T) {
 		if m.book.srch.done {
 			t.Fatal("5-chapter fixture must outlive one 4-chapter step")
 		}
-		if !strings.Contains(m.bookStatusView(), tc.want) {
-			t.Fatalf("%s: status right half = %q, want %q", tc.lang, m.bookStatusView(), tc.want)
+		if !strings.Contains(m.View(), tc.want) {
+			t.Fatalf("%s: overlay footer = %q, want %q", tc.lang, m.View(), tc.want)
+		}
+		if !strings.Contains(m.bookStatusView(), "4/5") {
+			t.Fatalf("%s: status right half must carry the progress too", tc.lang)
 		}
 	}
 }
@@ -755,10 +762,10 @@ func TestBookSearchCancelByReopen(t *testing.T) {
 	if !m.book.srchOpen {
 		t.Fatal("Ctrl+F mid-scan must open a fresh dialog")
 	}
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})      // drop the dialog
-	res, cmd = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // unrelated key: no step cmd may survive
-	_ = res
-	_ = cmd
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc}) // drop the dialog
+	// The stale step message from the cancelled scan lands and must
+	// find nothing to step (the pump proves no cmd may resurrect it).
+	m = pump(t, m, bookScanCmd())
 	if m.book.srch != nil {
 		t.Fatal("the cancelled scan must stay cancelled")
 	}

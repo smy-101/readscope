@@ -85,8 +85,7 @@ func (s *bookSearch) scanChapter(flow *bookFlow, ch int) {
 		texts = blockTexts(c.doc.Blocks, c.lines, c.starts)
 	} else {
 		content, title := flow.feed.Chapter(ch)
-		doc := ensureContentDoc(content)
-		doc = wrapBoundary(title, doc)
+		doc := wrapBoundary(title, ensureContentDoc(content))
 		lines, starts := render.LayoutIndexed(doc, flow.width)
 		texts = blockTexts(doc.Blocks, lines, starts)
 	}
@@ -101,9 +100,9 @@ func (s *bookSearch) scanChapter(flow *bookFlow, ch int) {
 	}
 }
 
-// excerptAssemble is the excerpt radius: runes of context on each
+// excerptRadius is the excerpt radius: runes of context on each
 // side of the hit (the ticket's 命中前后 N 字, N=16).
-const excerptAssemble = 16
+const excerptRadius = 16
 
 // excerpt assembles the hit's context: radius runes each side of
 // the occurrence, cut from the unfolded text — the projection is
@@ -115,19 +114,24 @@ func excerpt(text string, at, n int) string {
 	rs := []rune(text)
 	rAt := len([]rune(text[:at]))
 	rEnd := rAt + len([]rune(text[at:at+n]))
-	lo := max(rAt-excerptAssemble, 0)
-	hi := min(rEnd+excerptAssemble, len(rs))
+	lo := max(rAt-excerptRadius, 0)
+	hi := min(rEnd+excerptRadius, len(rs))
 	return string(rs[lo:hi])
 }
 
 // blockTexts projects a laid-out chapter into per-block text: block
 // b's lines concatenated — exactly the characters on screen for that
-// block, wrapping read across line breaks. starts covers content
-// blocks only, so the link appendix (after the sentinel) never
-// enters a projection.
+// block, wrapping read across line breaks. The boundary rule's bar
+// line is skipped (the approved projection: a hit must land on
+// content someone searched for, not decoration); starts covers
+// content blocks only, so the link appendix (after the sentinel)
+// never enters a projection either.
 func blockTexts(blocks []render.Block, lines []render.Line, starts []int) []string {
 	texts := make([]string, len(blocks))
 	for b := range blocks {
+		if _, isRule := blocks[b].(render.Rule); isRule {
+			continue // decoration is not searchable
+		}
 		var sb strings.Builder
 		for _, ln := range lines[starts[b]:starts[b+1]] {
 			sb.WriteString(ln.Plain())

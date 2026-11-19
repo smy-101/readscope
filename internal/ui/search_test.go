@@ -144,6 +144,16 @@ func TestBookSearchColdWarmAgree(t *testing.T) {
 	hitsAre(t, s, [][2]int{{1, 1}})
 }
 
+// The boundary rule is decoration and never searchable: its bar line
+// is on screen, but a hit must land on content (the approved
+// projection) — pins the blockTexts skip against a real flow doc
+// (every chapter's block 0 is the rule).
+func TestBookSearchRuleNotSearchable(t *testing.T) {
+	f := newFakeFeeder([]string{"甲"}, [][]string{{"text"}})
+	s := runSearch(newTestFlow(f, 40, 10), "─")
+	hitsAre(t, s, nil)
+}
+
 // An empty needle is a no-op search (done immediately, zero hits) —
 // the UI never starts one, the engine stays total.
 func TestBookSearchEmptyNeedle(t *testing.T) {
@@ -190,7 +200,7 @@ func TestSearchExcerpt(t *testing.T) {
 	if len(s.hits) != 1 {
 		t.Fatalf("hits = %d, want 1", len(s.hits))
 	}
-	want := strings.Repeat("前", excerptAssemble) + "靶心" + strings.Repeat("后", excerptAssemble)
+	want := strings.Repeat("前", excerptRadius) + "靶心" + strings.Repeat("后", excerptRadius)
 	if s.hits[0].excerpt != want {
 		t.Fatalf("excerpt = %q, want radius-clamped window", s.hits[0].excerpt)
 	}
@@ -207,12 +217,12 @@ func TestSearchExcerpt(t *testing.T) {
 	// context (no padding, no ellipsis — edge hits read naturally).
 	f = newFakeFeeder([]string{"甲"}, [][]string{{"靶头" + prefix}})
 	s = runSearch(newTestFlow(f, 200, 10), "靶头")
-	if s.hits[0].excerpt != "靶头"+strings.Repeat("前", excerptAssemble) {
+	if s.hits[0].excerpt != "靶头"+strings.Repeat("前", excerptRadius) {
 		t.Fatalf("head-clamped excerpt = %q", s.hits[0].excerpt)
 	}
 	f = newFakeFeeder([]string{"甲"}, [][]string{{prefix + "靶尾"}})
 	s = runSearch(newTestFlow(f, 200, 10), "靶尾")
-	if s.hits[0].excerpt != strings.Repeat("前", excerptAssemble)+"靶尾" {
+	if s.hits[0].excerpt != strings.Repeat("前", excerptRadius)+"靶尾" {
 		t.Fatalf("tail-clamped excerpt = %q", s.hits[0].excerpt)
 	}
 }
