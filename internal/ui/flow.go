@@ -80,12 +80,7 @@ func (f *bookFlow) chapter(idx int) *flowChapter {
 		return c
 	}
 	content, title := f.feed.Chapter(idx)
-	if len(content.Blocks) == 0 {
-		content = &render.Document{
-			Blocks: []render.Block{render.Para{Spans: []render.Span{{Text: " ", Style: render.SpanDim}}}},
-			Links:  content.Links,
-		}
-	}
+	content = ensureContentDoc(content)
 	doc := wrapBoundary(title, content)
 	lines, starts := render.LayoutIndexed(doc, f.width)
 	c := &flowChapter{doc: doc, lines: lines, starts: starts}
@@ -93,6 +88,20 @@ func (f *bookFlow) chapter(idx int) *flowChapter {
 	f.touch(idx)
 	f.evict()
 	return c
+}
+
+// ensureContentDoc is the feeder-breach net both render paths share:
+// a zero-block chapter would loop the stitcher and starve the scan,
+// so it becomes a single dim blank paragraph (the engine's guard,
+// extracted when the search's cold path needed the same contract).
+func ensureContentDoc(content *render.Document) *render.Document {
+	if len(content.Blocks) == 0 {
+		return &render.Document{
+			Blocks: []render.Block{render.Para{Spans: []render.Span{{Text: " ", Style: render.SpanDim}}}},
+			Links:  content.Links,
+		}
+	}
+	return content
 }
 
 // wrapBoundary assembles a chapter's flow document: the boundary rule
