@@ -91,10 +91,33 @@ func (s *bookSearch) scanChapter(flow *bookFlow, ch int) {
 		texts = blockTexts(doc.Blocks, lines, starts)
 	}
 	for b, text := range texts {
-		for range matchAll(asciiFold(text), s.folded) {
-			s.hits = append(s.hits, searchHit{chapter: ch, block: b})
+		folded := asciiFold(text)
+		for _, at := range matchAll(folded, s.folded) {
+			s.hits = append(s.hits, searchHit{
+				chapter: ch, block: b,
+				excerpt: excerpt(text, at, len(s.needle)),
+			})
 		}
 	}
+}
+
+// excerptAssemble is the excerpt radius: runes of context on each
+// side of the hit (the ticket's 命中前后 N 字, N=16).
+const excerptAssemble = 16
+
+// excerpt assembles the hit's context: radius runes each side of
+// the occurrence, cut from the unfolded text — the projection is
+// what the screen shows, so the excerpt quotes the screen's casing.
+// at is a byte offset in the folded text; A–Z folding preserves
+// byte layout, so the offset translates to the unfolded text
+// directly. Clamped at the block's edges: no padding, no markers.
+func excerpt(text string, at, n int) string {
+	rs := []rune(text)
+	rAt := len([]rune(text[:at]))
+	rEnd := rAt + len([]rune(text[at:at+n]))
+	lo := max(rAt-excerptAssemble, 0)
+	hi := min(rEnd+excerptAssemble, len(rs))
+	return string(rs[lo:hi])
 }
 
 // blockTexts projects a laid-out chapter into per-block text: block

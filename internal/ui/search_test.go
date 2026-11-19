@@ -10,6 +10,7 @@ package ui
 // production feeder and the UI pump are pinned in their own slices.
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -174,5 +175,44 @@ func TestBookSearchStepBudget(t *testing.T) {
 	s.step(flow) // stepping a done scan is a no-op
 	if !s.done || s.next != 7 {
 		t.Fatalf("step 3 after done: next = %d, done = %v", s.next, s.done)
+	}
+}
+
+// The excerpt: radius runes each side of the occurrence, cut from
+// the UNfolded text (a case-insensitive hit must quote the screen's
+// original casing), clamped at the block's edges.
+func TestSearchExcerpt(t *testing.T) {
+	prefix, suffix := strings.Repeat("前", 30), strings.Repeat("后", 30)
+
+	// CJK middle: exactly radius runes of context each side.
+	f := newFakeFeeder([]string{"甲"}, [][]string{{prefix + "靶心" + suffix}})
+	s := runSearch(newTestFlow(f, 200, 10), "靶心")
+	if len(s.hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(s.hits))
+	}
+	want := strings.Repeat("前", excerptAssemble) + "靶心" + strings.Repeat("后", excerptAssemble)
+	if s.hits[0].excerpt != want {
+		t.Fatalf("excerpt = %q, want radius-clamped window", s.hits[0].excerpt)
+	}
+
+	// Folded hit, unfolded quote: the needle was ALPHA, the screen
+	// shows Alpha — the excerpt must quote the screen.
+	f = newFakeFeeder([]string{"甲"}, [][]string{{"aaaa Alpha bbbb"}})
+	s = runSearch(newTestFlow(f, 200, 10), "ALPHA")
+	if !strings.Contains(s.hits[0].excerpt, "Alpha") {
+		t.Fatalf("excerpt must quote unfolded casing: %q", s.hits[0].excerpt)
+	}
+
+	// Clamps: a hit at the block's head and tail carry no phantom
+	// context (no padding, no ellipsis — edge hits read naturally).
+	f = newFakeFeeder([]string{"甲"}, [][]string{{"靶头" + prefix}})
+	s = runSearch(newTestFlow(f, 200, 10), "靶头")
+	if s.hits[0].excerpt != "靶头"+strings.Repeat("前", excerptAssemble) {
+		t.Fatalf("head-clamped excerpt = %q", s.hits[0].excerpt)
+	}
+	f = newFakeFeeder([]string{"甲"}, [][]string{{prefix + "靶尾"}})
+	s = runSearch(newTestFlow(f, 200, 10), "靶尾")
+	if s.hits[0].excerpt != strings.Repeat("前", excerptAssemble)+"靶尾" {
+		t.Fatalf("tail-clamped excerpt = %q", s.hits[0].excerpt)
 	}
 }
